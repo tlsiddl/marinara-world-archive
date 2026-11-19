@@ -265,3 +265,31 @@ test('scheduleRoom does nothing for rooms that are not linked or not switched on
   service._test.scheduleRoom('room');
   assert.equal(service._test.jobs.size, 0);
 });
+
+test('readReply keeps the whole items of a reply cut off at the length limit', () => {
+  const full = '{"items":[{"type":"rule","name":"가","evidence":[{"n":"1.1"}]}]}';
+  assert.deepEqual(X.readReply(full, real.parseJsonObject), { items: [{ type: 'rule', name: '가', evidence: [{ n: '1.1' }] }], cut: false });
+  const cut = '```json\n{"items":[{"type":"person","name":"수위","fields":{"age":{"v":"사십 대","n":["1.2"]}},"evidence":[{"n":"1.2","q":"}{"}]},{"type":"rule","name":"문은 세 번","memo":"두 번은 안 \\"열\\"림"},{"type":"place","name":"등대","fields":{"use":{"v":"등';
+  const got = X.readReply(cut, real.parseJsonObject);
+  assert.equal(got.cut, true);
+  assert.deepEqual(got.items.map((i) => i.name), ['수위', '문은 세 번']);
+  assert.equal(X.readReply('이건 JSON이 아님', real.parseJsonObject), null);
+});
+
+test('runRoom asks for room to answer (8192 tokens) and uses a cut-off reply instead of losing the batch', async (t) => {
+  const messages = [msg(0, '안녕'), msg(1, '사서 마르타는 열쇠를 목에 건다.'), msg(2, '그래?'), msg(3, '응.'), msg(4, '내일 봐.'), msg(5, '잘 자.')];
+  const { s, w } = setup(t, messages, ['{"items":[{"type":"person","name":"마르타","evidence":[{"n":"2.1"}]},{"type":"person","name":"마르']);
+  let asked = null;
+  const eng = { ...require('../world-archive/lib/vendor/engine.cjs') };
+  service._test.useEngine({
+    model: async () => ({}),
+    chatMessages: async () => ({ messages, cast: [] }),
+    askModel: async (m, prompt, opts) => { asked = opts; return { content: '{"items":[{"type":"person","name":"마르타","evidence":[{"n":"2.1"}]},{"type":"person","name":"마르' }; },
+    parseJsonObject: eng.parseJsonObject,
+    listConnections: async () => [],
+  });
+  const job = await service.runRoom('room', { all: true });
+  assert.equal(job.state, 'done');
+  assert.equal(asked.maxTokens, 8192);
+  assert.deepEqual(s.listEntities(w.worldId).map((e) => e.name), ['마르타']);
+});

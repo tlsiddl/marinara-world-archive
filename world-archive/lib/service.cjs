@@ -47,6 +47,7 @@ function useEngine(e) {
 
 const AUTO_DELAY_MS = 4000; // after a reply: wait a little, so a quick reroll is not read first
 const AUTO_MAX_BATCHES = 4; // per reply; the rest is read after the next replies (or with 「지금 읽기」)
+const READ_MAX_TOKENS = 8192; // a full batch with per-field evidence can pass 4096 (seen on the real server, v0.3.4)
 const jobs = new Map(); // roomId -> job
 const timers = new Map();
 
@@ -92,11 +93,14 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
       job.stage = `${i + 1}/${todo.length}번째 묶음을 읽는 중`;
       let parsed = null;
       for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-        const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast));
+        const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast), { maxTokens: READ_MAX_TOKENS });
         job.calls++;
         // Whatever token counts the provider reports (names differ between providers), summed for measuring.
         for (const [k, v] of Object.entries(reply.usage || {})) if (typeof v === 'number') job.tokens[k] = (job.tokens[k] || 0) + v;
-        parsed = api.parseJsonObject(reply.content);
+        // A reply cut off at the length limit never closes {"items":[…]}: keep the items that did arrive whole.
+        const got = X.readReply(reply.content, api.parseJsonObject);
+        if (got?.cut) log(`chat ${roomId}: reply cut off in batch ${i + 1}; kept ${got.items.length} whole item(s)`);
+        parsed = got;
       }
       if (!parsed) throw Error('모델 답을 읽지 못했습니다. 잠시 뒤 다시 해 보거나, 다른 연결을 골라 주세요.');
       const { items, dropped, droppedFields } = X.checkItems(parsed, part, cast);

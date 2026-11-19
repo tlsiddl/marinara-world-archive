@@ -153,6 +153,49 @@ ${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) =
   ];
 }
 
+// ---------------------------------------------------------------- the model's reply
+
+/**
+ * {items:[…]} from the reply, or null when there is nothing to use. parse is the engine's JSON reader. When the reply
+ * was cut off (the outer object never closes, so parse finds only some inner object), the items that arrived whole
+ * are taken one by one from inside "items":[ … and the result says cut: true.
+ */
+function readReply(text, parse) {
+  const whole = parse(text);
+  if (whole && Array.isArray(whole.items)) return { items: whole.items, cut: false };
+  const s = String(text || '');
+  const at = s.search(/"items"\s*:\s*\[/);
+  if (at < 0) return null;
+  const items = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let start = -1;
+  for (let i = s.indexOf('[', at) + 1; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try {
+          items.push(JSON.parse(s.slice(start, i + 1)));
+        } catch {}
+        start = -1;
+      }
+    } else if (ch === ']' && depth === 0) break;
+  }
+  return items.length ? { items, cut: true } : null;
+}
+
 // ---------------------------------------------------------------- one field against its own evidence
 
 const letters = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
@@ -262,4 +305,4 @@ function checkItems(parsed, part, cast) {
   return { items, dropped, droppedFields };
 }
 
-module.exports = { unread, batches, buildPrompt, checkItems, checkFields, overlap, squash, HOLD_BACK };
+module.exports = { unread, batches, buildPrompt, checkItems, checkFields, overlap, readReply, squash, HOLD_BACK };
