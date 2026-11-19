@@ -43,14 +43,19 @@ function entityLine(e) {
   return sanitize(lines.join('\n'));
 }
 
-/** Only confirmed settings go into the prompt. Pinned ones first, then by kind, then by name. */
-function orderEntities(entities) {
+/**
+ * Only confirmed settings go into the prompt. Pinned ones first, then the ones in the current scene (scene: a Set of
+ * entity ids named in the latest messages), then by kind, then by name.
+ */
+function orderEntities(entities, scene = null) {
+  const inScene = (e) => Number(!!scene?.has(e.entityId));
   return entities
     .filter((e) => e.status === 'confirmed')
     .slice()
     .sort(
       (a, b) =>
         Number(b.pinned) - Number(a.pinned) ||
+        inScene(b) - inScene(a) ||
         TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) ||
         a.name.localeCompare(b.name, 'ko'),
     );
@@ -61,8 +66,8 @@ function orderEntities(entities) {
  * included / omitted are entity IDs. An item that does not fit is left out whole; smaller ones after it can
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000) {
-  const empty = { text: '', chars: 0, budget, included: [], omitted: [] };
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null } = {}) {
+  const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
   let desc = sanitize(world.description || '');
@@ -76,7 +81,16 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000) {
     if (desc) used += 1 + desc.length;
   }
 
-  const ordered = orderEntities(entities || []);
+  // 'scene' mode: only what the scene needs — pinned settings, settings named in the latest messages, and rules
+  // (they hold everywhere). Without scene information yet (a fresh start), everything is a candidate.
+  let pool = entities || [];
+  let skipped = 0;
+  if (world.injectMode === 'scene' && scene) {
+    const keep = pool.filter((e) => e.pinned || e.type === 'rule' || scene.has(e.entityId));
+    skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
+    pool = keep;
+  }
+  const ordered = orderEntities(pool, scene);
   const byType = new Map();
   const included = [];
   const omitted = [];
@@ -101,7 +115,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000) {
     if (lines) parts.push(`[${TYPE_LABEL[type]}]\n${lines.join('\n')}`);
   }
   const text = parts.join('\n\n');
-  return { text, chars: text.length, budget, included, omitted };
+  return { text, chars: text.length, budget, included, omitted, skipped };
 }
 
 module.exports = { assembleWorld, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER };

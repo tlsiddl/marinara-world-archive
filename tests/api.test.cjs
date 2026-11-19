@@ -114,3 +114,182 @@ test('a branch reads the same world as its source room', (t) => {
   assert.equal(s.roomWorldId('src'), null, 'a deleted chat loses its link');
   assert.equal(s.listWorlds().length, 1, 'the world itself stays');
 });
+
+// ---------------------------------------------------------------- the current scene and the module API
+const say = (i, content) => ({ id: `m${i}`, speaker: 'x', role: 'assistant', content });
+
+/** A world linked to `room` with three settings, and a stand-in engine whose chat is `chat.messages`. */
+function sceneSetup(t, { mode = 'scene', auto } = {}) {
+  const f = setup(t);
+  const s = new Archive(fs.mkdtempSync(path.join(os.tmpdir(), 'wa-api-')));
+  t.after(() => fs.rmSync(s.dir, { recursive: true, force: true }));
+  service._test.useStore(s);
+  service._test.scenes.clear();
+  const chat = { messages: [], calls: 0, fail: null };
+  service._test.useEngine({
+    chatMessages: async (id) => {
+      chat.calls++;
+      if (chat.fail) return chat.fail();
+      return { messages: chat.messages, cast: [] };
+    },
+  });
+  const w = s.createWorld({ name: '별빛 학원', injectMode: mode, ...(auto ? { auto } : {}) });
+  const ids = {
+    rule: s.createEntity(w.worldId, { type: 'rule', name: '통금', description: '밤 10시' }).entityId,
+    pin: s.createEntity(w.worldId, { type: 'person', name: '교장', pinned: true }).entityId,
+    summer: s.createEntity(w.worldId, { type: 'person', name: '한여름', aliases: ['반장'] }).entityId,
+    roof: s.createEntity(w.worldId, { type: 'place', name: '옥상 정원' }).entityId,
+  };
+  s.linkRoom('room', w.worldId);
+  return { ...f, s, w, ids, chat };
+}
+
+test('updateScene: names from the last 12 messages (and the message being sent) make the scene', async (t) => {
+  const { s, w, ids, chat } = sceneSetup(t);
+  chat.messages = [say(0, '옥상 정원에 올라갔다.'), ...Array.from({ length: 12 }, (_, i) => say(i + 1, `반장이 말했다 ${i}`))];
+  const scene = await service._test.updateScene('room');
+  assert.deepEqual([...scene], [ids.summer], 'an alias counts; the 13th message from the end does not');
+  let p = service.preview('room');
+  assert.equal(p.sceneKnown, true);
+  assert.equal(p.mode, 'scene');
+  assert.deepEqual(p.included.slice().sort(), [ids.rule, ids.pin, ids.summer].sort());
+  assert.equal(p.skipped, 1);
+  assert.doesNotMatch(service.render({ chatId: 'room' }), /옥상/);
+
+  await service._test.updateScene('room', '옥상으로 가자');
+  assert.equal(service.preview('room').skipped, 1, 'a part of a name is not a match');
+  await service._test.updateScene('room', '「옥상정원」으로 가자');
+  p = service.preview('room');
+  assert.equal(p.skipped, 0, 'the pending message counts, matched without spaces or quotes');
+
+  assert.equal(await service._test.updateScene('nowhere'), null, 'unlinked room: nothing');
+  s.updateWorld(w.worldId, { injectMode: 'all', revision: 1 });
+  assert.equal(service.preview('room').included.length, 4, 'mode all: everything, in-scene first');
+});
+
+test('a scene worked out for another world is ignored after relinking', async (t) => {
+  const { s, ids, chat } = sceneSetup(t);
+  chat.messages = [say(0, '한여름')];
+  await service._test.updateScene('room');
+  assert.equal(service.preview('room').skipped, 1);
+  const other = s.createWorld({ name: '다른 세계', injectMode: 'scene' });
+  s.createEntity(other.worldId, { type: 'place', name: '항구' });
+  s.linkRoom('room', other.worldId);
+  const p = service.preview('room');
+  assert.equal(p.sceneKnown, false);
+  assert.deepEqual([p.included.length, p.skipped], [1, 0], 'no scene for this world yet: everything is a candidate');
+  void ids;
+});
+
+test('sceneBeforeReply: only for the two generate URLs of linked rooms, never throws, never waits long', async (t) => {
+  const { hooks, chat, ids } = sceneSetup(t);
+  const pre = hooks.find((h) => h.name === 'preHandler').fn;
+  chat.messages = [say(0, '교장과 한여름')];
+  const req = (method, url, body) => ({ method, raw: { url }, body });
+
+  await pre(req('GET', '/api/generate', { chatId: 'room' }));
+  await pre(req('POST', '/api/chats', { chatId: 'room' }));
+  await pre(req('POST', '/api/generate', { chatId: 'other_room' }));
+  await pre(req('POST', '/api/generate', { chatId: '../room' }));
+  await pre(req('POST', '/api/generate', {}));
+  await pre(req('POST', '/api/generate'));
+  assert.equal(chat.calls, 0, 'nothing read for other requests or rooms');
+
+  await pre(req('POST', '/api/generate?stream=1', { chatId: 'room', userMessage: '옥상 정원으로' }));
+  assert.equal(chat.calls, 1);
+  assert.deepEqual([...service._test.scenes.get('room').ids].sort(), [ids.pin, ids.summer, ids.roof].sort());
+  await pre(req('POST', '/api/generate/dryRun', { chatId: 'room' }));
+  assert.equal(chat.calls, 2);
+  assert.equal(service._test.scenes.get('room').ids.has(ids.roof), false, 'the scene follows the latest messages');
+
+  chat.fail = () => { throw new Error('engine down'); };
+  await pre(req('POST', '/api/generate', { chatId: 'room' }));
+  assert.equal(service._test.scenes.get('room').ids.has(ids.summer), true, 'a failure keeps the last scene');
+
+  chat.fail = () => new Promise(() => {});
+  const started = Date.now();
+  await pre(req('POST', '/api/generate', { chatId: 'room' }));
+  const took = Date.now() - started;
+  assert.ok(took >= 1000 && took < 3000, `waited ${took} ms`);
+});
+
+test('GET preview refreshes the scene and reports what was left out for it', async (t) => {
+  const { call, chat } = sceneSetup(t);
+  chat.messages = [say(0, '반장')];
+  const p = (await call('GET', `${A}/rooms/room/preview`)).data;
+  assert.deepEqual([p.sceneKnown, p.included.length, p.skipped], [true, 3, 1]);
+  const none = (await call('GET', `${A}/rooms/empty_room/preview`)).data;
+  assert.deepEqual([none.worldId, none.skipped], [null, 0]);
+});
+
+test('module API over HTTP: entities and lookup by name or other name', async (t) => {
+  const { call, w, ids } = sceneSetup(t);
+  const list = (await call('GET', `${A}/rooms/room/entities`)).data;
+  assert.equal(list.worldId, w.worldId);
+  assert.equal(list.entities.length, 4);
+  assert.deepEqual(Object.keys(list.entities[0]).sort(), ['aliases', 'description', 'entityId', 'fields', 'name', 'pinned', 'sources', 'type', 'updatedAt']);
+  for (const name of ['한여름', '반장', ' 한 여름 ', '「한여름」']) {
+    const r = (await call('GET', `${A}/rooms/room/lookup?name=${encodeURIComponent(name)}`)).data;
+    assert.equal(r.entity?.entityId, ids.summer, name);
+  }
+  assert.equal((await call('GET', `${A}/rooms/room/lookup?name=${encodeURIComponent('옥상정원')}`)).data.entity.entityId, ids.roof);
+  assert.equal((await call('GET', `${A}/rooms/room/lookup?name=${encodeURIComponent('여름')}`)).data.entity, null, 'a part of a name is not a match');
+  assert.equal((await call('GET', `${A}/rooms/room/lookup`)).data.entity, null);
+  assert.deepEqual((await call('GET', `${A}/rooms/lonely/entities`)).data, { worldId: null, entities: [] });
+  assert.deepEqual((await call('GET', `${A}/rooms/lonely/lookup?name=x`)).data, { worldId: null, entity: null });
+  assert.equal((await call('GET', `${A}/rooms/bad%2Fid/entities`)).status, 400);
+  assert.equal((await call('GET', `${A}/rooms/bad%2Fid/lookup?name=x`)).status, 400);
+});
+
+test('suggest: writes only when automatic updates are on, never over hand-written fields, recorded with by', async (t) => {
+  const { call, s, w, ids } = sceneSetup(t);
+  const items = [
+    { type: 'person', name: '한여름', fields: { age: '17세', gender: '남' }, evidence: '열일곱 살 반장' },
+    { type: 'place', name: '도서관', fields: { use: '책' }, evidence: 'ㄱ'.repeat(500) },
+  ];
+  const off = (await call('POST', `${A}/rooms/room/suggest`, { items, by: 'memory-module' })).data;
+  assert.deepEqual(off, { written: false, reason: 'automatic updates off', changes: [] });
+  assert.equal(s.listEntities(w.worldId).length, 4, 'nothing written');
+  assert.equal(s.listHistory(w.worldId).length, 0);
+
+  const cur = s.listEntities(w.worldId).find((e) => e.entityId === ids.summer);
+  s.updateEntity(w.worldId, ids.summer, { fields: { gender: '여' }, revision: cur.revision });
+  s.updateWorld(w.worldId, { auto: { enabled: true }, revision: 1 });
+  const on = (await call('POST', `${A}/rooms/room/suggest`, { items, by: 'memory-module' })).data;
+  assert.equal(on.written, true);
+  assert.deepEqual(on.changes.map((c) => c.action).sort(), ['create', 'field']);
+  const summer = s.listEntities(w.worldId).find((e) => e.entityId === ids.summer);
+  assert.deepEqual([summer.fields.gender, summer.fields.age], ['여', '17세'], 'the hand-written field stays');
+  const hist = s.listHistory(w.worldId);
+  assert.ok(hist.every((c) => c.by === 'memory-module' && c.roomId === 'room'));
+  assert.ok(hist.every((c) => c.evidence.length <= 300));
+  assert.equal(s.undoChange(w.worldId, hist.find((c) => c.action === 'field').id).undone, true, 'undoable like the reader\'s');
+
+  const anon = (await call('POST', `${A}/rooms/room/suggest`, { items: [{ type: 'rule', name: '소등', evidence: '' }] })).data;
+  assert.equal(anon.written, true);
+  assert.equal(s.listHistory(w.worldId)[0].by, 'module', 'no name given: module');
+  await call('POST', `${A}/rooms/room/suggest`, { items: [{ type: 'rule', name: '점호' }], by: 'Not An Id!' });
+  assert.equal(s.listHistory(w.worldId)[0].by, 'module');
+  assert.deepEqual((await call('POST', `${A}/rooms/room/suggest`, { items: 'nope' })).data, { written: true, changes: [] });
+  assert.deepEqual((await call('POST', `${A}/rooms/lonely/suggest`, { items })).data, { written: false, reason: 'no world', changes: [] });
+  assert.equal((await call('POST', `${A}/rooms/bad%2Fid/suggest`, { items })).status, 400);
+});
+
+test('the same three functions are offered in-process on globalThis.__marinaraWorldArchive.api', async (t) => {
+  const before = globalThis.__marinaraWorldArchive;
+  globalThis.__marinaraWorldArchive = { version: 'test' };
+  t.after(() => {
+    if (before === undefined) delete globalThis.__marinaraWorldArchive;
+    else globalThis.__marinaraWorldArchive = before;
+  });
+  const { s, w, ids } = sceneSetup(t, { auto: { enabled: true } });
+  const api = globalThis.__marinaraWorldArchive.api;
+  assert.equal(api.version, 1);
+  assert.deepEqual(Object.keys(api).sort(), ['lookup', 'roomEntities', 'suggest', 'version']);
+  assert.equal(api.roomEntities('room').entities.length, 4);
+  assert.equal(api.lookup('room', '반장').entity.entityId, ids.summer);
+  assert.equal(api.lookup('../x', '반장').entity, null, 'a bad room id finds nothing');
+  const r = api.suggest('room', [{ type: 'place', name: '강당', evidence: '강당에 모였다' }], 'memory-module');
+  assert.equal(r.written, true);
+  assert.equal(s.listHistory(w.worldId)[0].by, 'memory-module');
+});
