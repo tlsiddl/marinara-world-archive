@@ -1,0 +1,14 @@
+{
+  "kind": "marinara.personal-extension",
+  "version": 1,
+  "config": {
+    "name": "세계관 설정집",
+    "version": "0.1.0-dev",
+    "description": "Marinara World Archive 1단계 개발 미리보기. 독립 서버 모듈을 연결한 뒤 세계관 생성·선택·수정·삭제를 관리해.",
+    "runtime": "client",
+    "enabled": false,
+    "capabilities": ["full_page_access"],
+    "jsPath": "extension.js",
+    "cssPath": "extension.css"
+  }
+}
