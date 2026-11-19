@@ -76,7 +76,7 @@ function knownList(entities, text) {
 
 /** One line per kind, for choosing the kind (custom last: only when nothing else fits). */
 const KIND_GUIDE = [
-  '- person(인물): 이름이 있거나 고정된 직함이 있는 사람·존재',
+  '- person(인물): 이름이 있거나 고정된 직함이 있는 사람·존재(이름 있는 반려동물·부엉이 같은 동물도 여기)',
   '- place(장소): 이름이 있거나 특정한 한 곳(건물·방·마을·지역)',
   '- group(집단): 가문·학교·기숙사·조직·무리·행렬처럼 여럿이 묶인 것',
   '- rule(규칙): 이 세계에서 지켜야 하는 것 — 법·제도·관례·금기·학교 규칙',
@@ -99,7 +99,8 @@ function buildPrompt(world, entities, part, cast) {
 적을 것: 처음 나오거나 새로 밝혀진 인물(NPC)·장소·집단·규칙·일정·기타 설정, 그리고 이미 있는 항목에 대해 새로 밝혀진 사실.
 적지 않을 것:
 - 한 번 일어난 사건, 대화 내용, 감정의 흐름 (그건 기억 모듈이 맡는다).
-- 아래 "카드가 있는 인물"(주인공과 사용자 캐릭터).
+- 아래 "카드가 있는 인물"(주인공과 사용자 캐릭터). 그 인물의 소지품·체질·습관·일화도 적지 않는다(「○○의 지팡이」, 「○○는 피부가 약하다」). 그 인물이 사는 방 같은 장소는 적어도 된다.
+- 한 번 있었던 일(동행, 쇼핑, 누군가에게 시킨 일, 일화)은 어떤 종류로도 적지 않는다. schedule(일정)은 되풀이되는 것만 적는다.
 - 글에 나오지 않은 추측. 원문에 쓰여 있거나 분명히 보이는 것만 적는다.
 - 이미 있는 항목과 똑같은 내용.
 - 이름 없이 지나가는 사람(「지나가던 학생」). 이름이 없는 인물은 고정된 직함·역할이 있고(수위, 사감, 여관 주인, 생선 장수) 다시 나올 사람만, 그 직함·역할을 이름으로 적는다. 외모로 부르지 않는다(「붉은 머리 남자」가 아니라 「대장장이」). 직함·역할도 없으면 만들지 않는다.
@@ -122,6 +123,8 @@ ${fieldGuide()}
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
   좋은 예: "오른팔이 부러져 붕대를 감고 다님", "기사단에서 쫓겨나 항구 창고에서 지냄"
 - 각 칸의 뜻에 맞는 값만 넣는다(위계 칸에는 위계·역할만, 위치 칸에는 위치만).
+
+같은 사람 잇기: [이미 있는 항목]의 인물을 성만, 이름만, 직함(반장, 사감, 교수)으로 부르면 새로 만들지 말고 match에 그 인물 이름을 적고, 그 호칭은 aliases에 넣는다. 같은 사람인지 애매하면 이번에는 만들지 않는다(다음 대화에서 다시 본다).
 
 규칙·일정·기타는 이름을 설명형으로 지어도 된다(예: "밤에는 문을 세 번 두드린다"). 이미 있는 규칙·일정·기타와 같은 내용이면 새로 만들지 말고 match에 그 이름을 그대로 적는다.
 
@@ -219,6 +222,9 @@ function checkItems(parsed, part, cast) {
   const text = squash(part.batch.map((m) => m.content).join('\n'));
   const index = S.indexBatch(part.batch);
   const castSet = new Set(cast.map(squash));
+  // For settings that are not people, places or groups: a name about a card character ("이리나의 지팡이") is the
+  // character's own detail, not the world's. The full name and the first word of it (the given name) are looked for.
+  const castParts = [...new Set(cast.flatMap((c) => [squash(c), squash(String(c).trim().split(/\s+/)[0])]).filter((p) => p.length >= 2))];
   const items = [];
   const dropped = [];
   const droppedFields = [];
@@ -229,6 +235,8 @@ function checkItems(parsed, part, cast) {
     const names = [name, ...aliases].map(squash).filter(Boolean);
     if (!TYPES.includes(it.type)) { dropped.push({ name, why: 'type' }); continue; }
     if (names.some((n) => castSet.has(n))) { dropped.push({ name, why: 'card' }); continue; }
+    if (!NAMED_KINDS.has(it.type) && castParts.some((p) => squash(name).includes(p))) { dropped.push({ name, why: 'about a card' }); continue; }
+    if (/\p{Script=Hangul}/u.test(name) && /[A-Za-z]/.test(name)) { dropped.push({ name, why: 'mixed script name' }); continue; }
     if (NAMED_KINDS.has(it.type) && !names.some((n) => n.length >= 1 && text.includes(n))) { dropped.push({ name, why: 'name not in text' }); continue; }
     const raw = Array.isArray(it.evidence) ? it.evidence : it.evidence ? [it.evidence] : [];
     const found = S.resolveEvidence(raw.map((e) => (typeof e === 'string' ? { q: e } : e)), index).slice(0, 3);

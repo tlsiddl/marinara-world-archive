@@ -105,6 +105,20 @@ test('class fields need only their sentence; a field without numbers uses the it
   assert.deepEqual(droppedFields, []);
 });
 
+test('a card character\'s own details and mixed-script names are left out; a place named after them stays', () => {
+  const [part] = X.batches([msg(1, '이리나의 지팡이는 버드나무다. 이리나의 침실은 동쪽 탑에 있다. Ronald가 웃었다. 론은 손을 흔들었다.')], 0);
+  const { items, dropped } = X.checkItems({
+    items: [
+      { type: 'custom', name: '이리나의 지팡이', evidence: [{ n: '1.1' }] },
+      { type: 'place', name: '이리나의 침실', evidence: [{ n: '1.2' }] },
+      { type: 'person', name: '론ald', evidence: [{ n: '1.3' }] },
+      { type: 'person', name: '론', aliases: ['Ronald'], evidence: [{ n: '1.4' }] },
+    ],
+  }, part, ['이리나 베인', '해리포터']);
+  assert.deepEqual(items.map((i) => i.name), ['이리나의 침실', '론']);
+  assert.deepEqual(dropped.map((d) => [d.name, d.why]), [['이리나의 지팡이', 'about a card'], ['론ald', 'mixed script name']]);
+});
+
 test('overlap counts the value\'s two-letter pieces found in the evidence', () => {
   assert.equal(X.overlap('노인', '주인은 노인이다'), 1);
   assert.equal(X.overlap('검은 콧수염', '약지가 없다'), 0);
