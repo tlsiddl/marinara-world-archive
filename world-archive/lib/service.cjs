@@ -76,7 +76,7 @@ async function routes(r) {
     } catch (e) {
       const code = e instanceof ArchiveError ? e.status : 500;
       if (code === 500) log(`error: ${e?.stack || e}`);
-      return reply.code(code).send({ error: code === 500 ? '세계관을 저장하다 문제가 생겼어. 서버 기록을 봐 줘.' : e.message });
+      return reply.code(code).send({ error: code === 500 ? '세계관을 저장하다 문제가 생겼습니다. 서버 기록을 확인해 주세요.' : e.message });
     }
   };
   const body = (req) => req.body ?? {};
@@ -105,7 +105,7 @@ async function routes(r) {
   r.get('/rooms/:roomId', handle(async (req) => s().getRoom(req.params.roomId)));
   r.put('/rooms/:roomId', handle(async (req) => {
     const w = body(req).worldId;
-    if (w !== null && typeof w !== 'string') throw new ArchiveError(400, 'worldId(또는 연결 끊기는 null)를 보내 줘.');
+    if (w !== null && typeof w !== 'string') throw new ArchiveError(400, 'worldId(연결을 끊을 때는 null)를 보내 주세요.');
     return s().linkRoom(req.params.roomId, w);
   }));
   r.get('/rooms/:roomId/preview', handle(async (req) => {

@@ -12,12 +12,12 @@
   const STAMP = "M4 11L4.75 11A2.05 2.05 0 0 0 8.85 11L10.35 11A2.05 2.05 0 0 0 14.45 11L15.95 11A2.05 2.05 0 0 0 20.05 11L21.55 11A2.05 2.05 0 0 0 25.65 11L27.15 11A2.05 2.05 0 0 0 31.25 11L32.75 11A2.05 2.05 0 0 0 36.85 11L38.35 11A2.05 2.05 0 0 0 42.45 11L43.95 11A2.05 2.05 0 0 0 48.05 11L49.55 11A2.05 2.05 0 0 0 53.65 11L55.15 11A2.05 2.05 0 0 0 59.25 11L60 11L60 11.57A2.05 2.05 0 0 0 60 15.68L60 16.82A2.05 2.05 0 0 0 60 20.93L60 22.07A2.05 2.05 0 0 0 60 26.18L60 27.32A2.05 2.05 0 0 0 60 31.43L60 32.58A2.05 2.05 0 0 0 60 36.67L60 37.83A2.05 2.05 0 0 0 60 41.92L60 43.08A2.05 2.05 0 0 0 60 47.17L60 48.33A2.05 2.05 0 0 0 60 52.42L60 53L59.25 53A2.05 2.05 0 0 0 55.15 53L53.65 53A2.05 2.05 0 0 0 49.55 53L48.05 53A2.05 2.05 0 0 0 43.95 53L42.45 53A2.05 2.05 0 0 0 38.35 53L36.85 53A2.05 2.05 0 0 0 32.75 53L31.25 53A2.05 2.05 0 0 0 27.15 53L25.65 53A2.05 2.05 0 0 0 21.55 53L20.05 53A2.05 2.05 0 0 0 15.95 53L14.45 53A2.05 2.05 0 0 0 10.35 53L8.85 53A2.05 2.05 0 0 0 4.75 53L4 53L4 52.42A2.05 2.05 0 0 0 4 48.33L4 47.17A2.05 2.05 0 0 0 4 43.08L4 41.92A2.05 2.05 0 0 0 4 37.83L4 36.67A2.05 2.05 0 0 0 4 32.58L4 31.43A2.05 2.05 0 0 0 4 27.32L4 26.18A2.05 2.05 0 0 0 4 22.07L4 20.93A2.05 2.05 0 0 0 4 16.82L4 15.68A2.05 2.05 0 0 0 4 11.57Z";
 
   const KINDS = [
-    { type: 'person', label: '인물', en: 'PEOPLE', icon: 'person', hint: '이 세계에 사는 사람들. 외형·성격 같은 기본 정보와, 사건으로 바뀐 「지금 상태」를 따로 적어 둬.' },
-    { type: 'place', label: '장소', en: 'PLACES', icon: 'place', hint: '건물, 방, 숲, 도시. 고정된 구조와 출입구·연결을 적어 둬. 누가 잠깐 들른 건 여기가 아니라 기억 쪽이야.' },
-    { type: 'group', label: '집단', en: 'GROUPS', icon: 'group', hint: '가문, 학교, 기숙사, 동아리, 조직. 구성원과 위계를 적어 둬.' },
-    { type: 'rule', label: '규칙', en: 'RULES', icon: 'rule', hint: '세계의 법칙, 능력 체계, 학교 규칙, 점수·계급. 내용은 메모 칸에 적으면 돼.' },
-    { type: 'schedule', label: '일정', en: 'SCHEDULE', icon: 'calendar', hint: '수업 시간표, 반복 행사, 정기 활동. 언제·어디서·누가를 적어 둬.' },
-    { type: 'custom', label: '기타', en: 'MISC', icon: 'star', hint: '어디에도 안 맞는 이 세계만의 설정. 필요한 칸은 「칸 추가」로 만들어.' },
+    { type: 'person', label: '인물', en: 'PEOPLE', icon: 'person', hint: '이 세계에 사는 사람들. 외형·성격 같은 기본 정보와, 사건으로 바뀐 「지금 상태」를 따로 적어 둡니다.' },
+    { type: 'place', label: '장소', en: 'PLACES', icon: 'place', hint: '건물, 방, 숲, 도시. 고정된 구조와 출입구·연결을 적어 둡니다. 누가 잠깐 들른 일은 여기가 아니라 기억 쪽에 남습니다.' },
+    { type: 'group', label: '집단', en: 'GROUPS', icon: 'group', hint: '가문, 학교, 기숙사, 동아리, 조직. 구성원과 위계를 적어 둡니다.' },
+    { type: 'rule', label: '규칙', en: 'RULES', icon: 'rule', hint: '세계의 법칙, 능력 체계, 학교 규칙, 점수·계급. 내용은 메모 칸에 적어 주세요.' },
+    { type: 'schedule', label: '일정', en: 'SCHEDULE', icon: 'calendar', hint: '수업 시간표, 반복 행사, 정기 활동. 언제·어디서·누가를 적어 둡니다.' },
+    { type: 'custom', label: '기타', en: 'MISC', icon: 'star', hint: '어디에도 안 맞는 이 세계만의 설정. 필요한 칸은 「칸 추가」로 만들 수 있습니다.' },
   ];
   const KIND = Object.fromEntries(KINDS.map((k) => [k.type, k]));
 
@@ -266,13 +266,13 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     try {
       res = await fetch(path.startsWith('/api/') ? path : BASE + path, init);
     } catch {
-      throw Error('서버에 연결하지 못했어. 마리나라가 다시 켜지는 중이면 잠깐 뒤에 다시 해 줘.');
+      throw Error('서버에 연결하지 못했습니다. 마리나라가 다시 켜지는 중이라면 잠시 뒤에 다시 시도해 주세요.');
     }
     const text = await res.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = { error: text.slice(0, 200) }; }
-    if (res.status === 404 && path === '/status') throw Error('서버에 World Archive 모듈이 없거나 꺼져 있어. 서버 쪽 설치부터 확인해 줘.');
-    if (res.status === 401) throw Error('마리나라 로그인이 끝났어. 페이지를 새로 고쳐 다시 로그인해 줘.');
+    if (res.status === 404 && path === '/status') throw Error('서버에 World Archive 모듈이 없거나 꺼져 있습니다. 서버 쪽 설치를 먼저 확인해 주세요.');
+    if (res.status === 401) throw Error('마리나라 로그인이 끝났습니다. 페이지를 새로 고쳐 다시 로그인해 주세요.');
     if (!res.ok) throw Error(data?.error || `서버 오류 (${res.status})`);
     return data;
   }
@@ -346,7 +346,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
 
   function topHtml() {
     const opts = st.worlds.map((w) => `<option value="${esc(w.worldId)}" ${w.worldId === st.worldId ? 'selected' : ''}>${esc(w.name)}${w.worldId === st.room?.worldId ? '  · 이 방' : ''}</option>`).join('');
-    return `${st.worlds.length ? `<select id="worldSelect" aria-label="세계관 고르기">${opts}</select>` : '<span class="sub">아직 세계관이 없어</span>'}
+    return `${st.worlds.length ? `<select id="worldSelect" aria-label="세계관 고르기">${opts}</select>` : '<span class="sub">아직 세계관이 없습니다</span>'}
       <span class="grow"></span>
       <button id="themeToggle" class="round" type="button" data-act="theme" aria-label="${st.theme === 'dark' ? '밝게' : '어둡게'}">${icon(st.theme === 'dark' ? 'sun' : 'moon')}</button>
       <button id="close" class="round" type="button" data-act="close" aria-label="닫기">${icon('close')}</button>`;
@@ -378,10 +378,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   }
   function roomLine() {
     const s = roomState();
-    if (s.kind === 'none') return '채팅방을 하나 열면 여기서 연결할 수 있어.';
-    if (s.kind === 'unlinked') return '아직 어떤 세계관도 읽지 않아.';
-    if (s.kind === 'this') return '지금 이 세계관을 읽고 있어.';
-    return `지금은 「${esc(s.name)}」을(를) 읽고 있어.`;
+    if (s.kind === 'none') return '채팅방을 하나 열면 여기서 연결할 수 있습니다.';
+    if (s.kind === 'unlinked') return '아직 어떤 세계관도 읽지 않습니다.';
+    if (s.kind === 'this') return '지금 이 세계관을 읽고 있습니다.';
+    return `지금은 「${esc(s.name)}」을(를) 읽고 있습니다.`;
   }
 
   function railHtml() {
@@ -394,9 +394,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       <div class="row">${roomButtons()}</div>
       ${(s.kind === 'this' || s.kind === 'other') && p ? `
         <div class="chart">${chartSvg(p.chars / Math.max(1, p.budget))}<div class="num"><b>${p.chars.toLocaleString()}</b><small>/ ${p.budget.toLocaleString()}자</small></div></div>
-        <p>이번 답변에 설정 <b>${p.included.length}개</b>가 들어가.${p.omitted.length ? ` 글자 수 한도 때문에 <b>${p.omitted.length}개</b>가 빠졌어. 「늘 먼저 넣기」한 설정이 먼저 들어가.` : ''}</p>` : ''}
+        <p>이번 답변에 설정 <b>${p.included.length}개</b>가 들어갑니다.${p.omitted.length ? ` 글자 수 한도 때문에 <b>${p.omitted.length}개</b>가 빠졌습니다. 「늘 먼저 넣기」한 설정이 먼저 들어갑니다.` : ''}</p>` : ''}
       <hr>
-      <p>프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어가. 설정은 서버에 저장돼서 다른 기기에서도 같아.</p>`;
+      <p>프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어갑니다. 설정은 서버에 저장되어 다른 기기에서도 똑같이 보입니다.</p>`;
   }
 
   // ------------------------------------------------------------------ views
@@ -408,7 +408,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     return `
       <div class="eyebrow">WORLD ARCHIVE · V${VERSION}</div>
       <h1>${esc(w.name)}</h1>
-      <p class="intro">${w.description ? esc(w.description) : '시대·배경 설명이 아직 없어. 「세계관 정보 고치기」에서 적어 두면 설정 맨 앞에 같이 들어가.'}</p>
+      <p class="intro">${w.description ? esc(w.description) : '시대·배경 설명이 아직 없습니다. 「세계관 정보 고치기」에서 적어 두면 설정 맨 앞에 함께 들어갑니다.'}</p>
       <div class="stubs">${stubs.map(([t, label]) => `<button class="stub" type="button" data-act="go" data-view="${t}"><strong>${n(t)}</strong><small>${label}</small></button>`).join('')}</div>
       <div class="paper">
         <h2>이 방 · ${roomTitle()}</h2>
@@ -418,10 +418,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       ${roomState().kind === 'this' && p ? `
       <div class="paper">
         <div class="row" style="justify-content:space-between"><h2 style="margin:0">이번 답변에 들어갈 내용</h2><span class="pill">${p.chars.toLocaleString()} / ${p.budget.toLocaleString()}자</span></div>
-        <p class="sub" style="margin:8px 0 0">설정 ${p.included.length}개${p.omitted.length ? ` · 글자 수 한도 때문에 ${p.omitted.length}개 빠짐` : ''}. 프리셋의 {{세계}} 자리에 이대로 들어가.</p>
+        <p class="sub" style="margin:8px 0 0">설정 ${p.included.length}개${p.omitted.length ? ` · 글자 수 한도 때문에 ${p.omitted.length}개 빠짐` : ''}. 프리셋의 {{세계}} 자리에 이대로 들어갑니다.</p>
         <pre>${esc(p.text) || '(비어 있음)'}</pre>
       </div>` : ''}
-      <div class="paper mobile-only"><p class="sub" style="margin:0">프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어가.</p></div>`;
+      <div class="paper mobile-only"><p class="sub" style="margin:0">프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어갑니다.</p></div>`;
   }
 
   function cardHtml(e) {
@@ -451,8 +451,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <span style="flex:1"></span>
         <button class="primary" type="button" data-act="new" data-type="${type}">새 ${k.label}</button>
       </div>
-      ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없어.</p>`
-        : `<div class="empty"><h2>아직 ${k.label} 설정이 없어</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 줘.</p></div>`}`;
+      ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
+        : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
   }
 
   function detailHtml(e) {
@@ -479,14 +479,14 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         ${facts ? `<div class="facts">${facts}</div>` : ''}
         ${secs}${extra}${memo}
         ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것</small><p>${esc(f.state)}</p></div>` : ''}
-        ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없어. 「고치기」에서 채워 줘.</p>' : ''}
+        ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · 직접 입력</div>
         <div class="actions">
           <button class="primary" type="button" data-act="edit" data-id="${esc(e.entityId)}">고치기</button>
           <button type="button" data-act="pin" data-id="${esc(e.entityId)}">${e.pinned ? '고정 풀기' : '늘 먼저 넣기'}</button>
           <span class="grow"></span>
           ${st.ask === askKey
-            ? `<span class="ask">정말 지울까? <button class="danger" type="button" data-act="delete" data-id="${esc(e.entityId)}">지우기</button><button class="quiet" type="button" data-act="ask" data-key="">아니</button></span>`
+            ? `<span class="ask">정말 지울까요? <button class="danger" type="button" data-act="delete" data-id="${esc(e.entityId)}">지우기</button><button class="quiet" type="button" data-act="ask" data-key="">취소</button></span>`
             : `<button class="quiet" type="button" data-act="ask" data-key="${askKey}">지우기</button>`}
         </div>
       </div>`;
@@ -523,7 +523,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
           <div><label class="f" for="fd-name">이름</label><input id="fd-name" maxlength="120" value="${esc(v.name || '')}"></div>
           <div><label class="f" for="fd-type">종류</label><select id="fd-type">${KINDS.map((x) => `<option value="${x.type}" ${x.type === type ? 'selected' : ''}>${x.label}</option>`).join('')}</select></div>
         </div>
-        <label class="f" for="fd-aliases">다른 이름<em>애칭·영어 표기·직함. 쉼표로 나눠</em></label>
+        <label class="f" for="fd-aliases">다른 이름<em>애칭·영어 표기·직함. 쉼표로 나눠 주세요</em></label>
         <input id="fd-aliases" value="${esc((v.aliases || []).join(', '))}">
         ${lines.length ? `<div class="grid3">${lines.map((x) => fieldInput(x, f[x.key] || '')).join('')}</div>` : ''}
         ${texts.map((x) => fieldInput(x, f[x.key] || '')).join('')}
@@ -533,7 +533,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <button type="button" data-act="add-extra" style="margin-top:8px">칸 추가</button>
         <label class="f" for="fd-desc">${d.length ? '메모' : '내용'}</label>
         <textarea id="fd-desc" maxlength="4000">${esc(v.description || '')}</textarea>
-        <label class="check"><input type="checkbox" id="fd-pinned" ${v.pinned ? 'checked' : ''}> 늘 먼저 넣기 (글자 수가 모자랄 때 이 설정부터 넣어)</label>
+        <label class="check"><input type="checkbox" id="fd-pinned" ${v.pinned ? 'checked' : ''}> 늘 먼저 넣기 (글자 수가 모자랄 때 이 설정부터 넣습니다)</label>
         <div class="actions"><button class="primary" type="button" data-act="save">저장</button><button class="quiet" type="button" data-act="cancel">취소</button></div>
       </form>`;
   }
@@ -542,10 +542,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     return `
       <div class="eyebrow">WORLD ARCHIVE · NEW</div>
       <h1>${first ? '첫 세계관 만들기' : '새 세계관'}</h1>
-      <p class="intro">세계관 하나에 인물·장소·규칙 같은 설정을 모아 두고, 채팅방마다 어떤 세계관을 읽을지 골라. 여러 방이 같은 세계관을 같이 써도 돼.</p>
+      <p class="intro">세계관 하나에 인물·장소·규칙 같은 설정을 모아 두고, 채팅방마다 어떤 세계관을 읽을지 고릅니다. 여러 방이 같은 세계관을 함께 써도 됩니다.</p>
       <form class="paper" onsubmit="return false">
         <label class="f" for="nw-name">세계관 이름</label><input id="nw-name" maxlength="120" placeholder="예: 별빛 학원">
-        <label class="f" for="nw-desc">시대·배경<em>설정 맨 앞에 들어가</em></label><textarea id="nw-desc" maxlength="4000" placeholder="예: 1988년, 산 위의 기숙학교."></textarea>
+        <label class="f" for="nw-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="nw-desc" maxlength="4000" placeholder="예: 1988년, 산 위의 기숙학교."></textarea>
         <div class="actions"><button class="primary" type="button" data-act="create-world">만들기</button>${first ? '' : '<button class="quiet" type="button" data-act="go" data-view="overview">취소</button>'}</div>
       </form>`;
   }
@@ -557,14 +557,14 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       <h1>세계관 정보</h1>
       <form class="paper" onsubmit="return false">
         <label class="f" for="w-name">이름</label><input id="w-name" maxlength="120" value="${esc(w.name)}">
-        <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어가</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
-        <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정 안 한 설정부터 빠져</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
+        <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
+        <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정하지 않은 설정부터 빠집니다</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
         <div class="actions"><button class="primary" type="button" data-act="save-world">저장</button></div>
       </form>
       <div class="paper">
         <h2>세계관 지우기</h2>
-        <p class="sub" style="margin:0 0 12px">설정 ${st.entities.length}개도 같이 지워지고, 이 세계관을 읽던 방들은 연결이 끊겨. 서버의 world-archive/trash 폴더에 사본이 남아.</p>
-        ${st.ask === 'world' ? `<span class="ask">정말 「${esc(w.name)}」을(를) 지울까? <button class="danger" type="button" data-act="delete-world">지우기</button><button class="quiet" type="button" data-act="ask" data-key="">아니</button></span>`
+        <p class="sub" style="margin:0 0 12px">설정 ${st.entities.length}개도 함께 지워지고, 이 세계관을 읽던 방들은 연결이 끊깁니다. 서버의 world-archive/trash 폴더에 사본이 남습니다.</p>
+        ${st.ask === 'world' ? `<span class="ask">정말 「${esc(w.name)}」을(를) 지울까요? <button class="danger" type="button" data-act="delete-world">지우기</button><button class="quiet" type="button" data-act="ask" data-key="">취소</button></span>`
           : '<button class="danger" type="button" data-act="ask" data-key="world">세계관 지우기</button>'}
       </div>`;
   }
@@ -651,7 +651,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       st.view = e.type; st.detail = e.entityId; st.editing = null; st.draft = null;
       await loadEntities();
       await loadRoom();
-    }, '저장했어.'),
+    }, '저장했습니다.'),
     pin: (b) => run(async () => {
       const e = st.entities.find((x) => x.entityId === b.dataset.id);
       await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, { pinned: !e.pinned, revision: e.revision });
@@ -664,15 +664,15 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       go(e.type);
       await loadEntities();
       await loadRoom();
-    }, '지웠어.'),
+    }, '지웠습니다.'),
     link: () => run(async () => {
       await api('PUT', `/rooms/${encodeURIComponent(activeChatId())}`, { worldId: st.worldId });
       await loadRoom();
-    }, '이 방이 이제 이 세계관을 읽어.'),
+    }, '이제 이 방이 이 세계관을 읽습니다.'),
     unlink: () => run(async () => {
       await api('PUT', `/rooms/${encodeURIComponent(activeChatId())}`, { worldId: null });
       await loadRoom();
-    }, '연결을 끊었어.'),
+    }, '연결을 끊었습니다.'),
     'create-world': () => run(async () => {
       const w = await api('POST', '/worlds', { name: val('nw-name'), description: val('nw-desc') });
       st.worldId = w.worldId;
@@ -680,13 +680,13 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       go('overview');
       await loadWorlds();
       await loadEntities();
-    }, '세계관을 만들었어.'),
+    }, '세계관을 만들었습니다.'),
     'save-world': () => run(async () => {
       const w = world();
       await api('PATCH', `/worlds/${w.worldId}`, { name: val('w-name'), description: val('w-desc'), injectChars: Number(val('w-budget')), revision: w.revision });
       await loadWorlds();
       await loadRoom();
-    }, '저장했어.'),
+    }, '저장했습니다.'),
     'delete-world': () => run(async () => {
       const w = world();
       await api('DELETE', `/worlds/${w.worldId}`, { revision: w.revision });
@@ -695,7 +695,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       await loadWorlds();
       await loadEntities();
       await loadRoom();
-    }, '지웠어.'),
+    }, '지웠습니다.'),
   };
 
   root.addEventListener('click', (ev) => {

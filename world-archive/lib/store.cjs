@@ -76,24 +76,24 @@ const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 const now = () => new Date().toISOString();
 
 function cleanLine(v, max, what) {
-  if (typeof v !== 'string') throw new ArchiveError(400, `${what}을(를) 글자로 입력해 줘.`);
+  if (typeof v !== 'string') throw new ArchiveError(400, `${what}을(를) 글자로 입력해 주세요.`);
   const x = v.normalize('NFC').trim().replace(/\s+/g, ' ');
-  if (!x) throw new ArchiveError(400, `${what}이(가) 비어 있어.`);
-  if (x.length > max) throw new ArchiveError(400, `${what}은(는) ${max}자까지야.`);
+  if (!x) throw new ArchiveError(400, `${what}이(가) 비어 있습니다.`);
+  if (x.length > max) throw new ArchiveError(400, `${what}은(는) ${max}자까지입니다.`);
   return x;
 }
 
 function cleanText(v, max, what) {
   if (v === undefined || v === null) return '';
-  if (typeof v !== 'string') throw new ArchiveError(400, `${what}을(를) 글자로 입력해 줘.`);
+  if (typeof v !== 'string') throw new ArchiveError(400, `${what}을(를) 글자로 입력해 주세요.`);
   const x = v.normalize('NFC').replace(/\r\n?/g, '\n').trim();
-  if (x.length > max) throw new ArchiveError(400, `${what}은(는) ${max}자까지야.`);
+  if (x.length > max) throw new ArchiveError(400, `${what}은(는) ${max}자까지입니다.`);
   return x;
 }
 
 function cleanAliases(v, name) {
   if (v === undefined || v === null) return [];
-  if (!Array.isArray(v)) throw new ArchiveError(400, '다른 이름은 목록으로 보내 줘.');
+  if (!Array.isArray(v)) throw new ArchiveError(400, '다른 이름은 목록으로 보내 주세요.');
   const out = [];
   const seen = new Set([name.toLowerCase()]);
   for (const a of v) {
@@ -102,17 +102,17 @@ function cleanAliases(v, name) {
     seen.add(x.toLowerCase());
     out.push(x);
   }
-  if (out.length > ALIAS_MAX) throw new ArchiveError(400, `다른 이름은 ${ALIAS_MAX}개까지야.`);
+  if (out.length > ALIAS_MAX) throw new ArchiveError(400, `다른 이름은 ${ALIAS_MAX}개까지입니다.`);
   return out;
 }
 
 function cleanFields(type, v) {
   if (v === undefined || v === null) return {};
-  if (!isObject(v)) throw new ArchiveError(400, '칸 내용은 {칸: 내용} 모양으로 보내 줘.');
+  if (!isObject(v)) throw new ArchiveError(400, '칸 내용은 {칸: 내용} 모양으로 보내 주세요.');
   const out = {};
   for (const [key, value] of Object.entries(v)) {
     const def = FIELDS[type].find((f) => f.key === key);
-    if (!def) throw new ArchiveError(400, `'${key}'은(는) 이 종류에 없는 칸이야.`);
+    if (!def) throw new ArchiveError(400, `'${key}'은(는) 이 종류에 없는 칸입니다.`);
     const x = def.kind === 'line' ? (value == null ? '' : cleanText(value, LINE_MAX, def.label).replace(/\s+/g, ' ')) : cleanText(value, TEXT_MAX, def.label);
     if (x) out[key] = x;
   }
@@ -121,45 +121,45 @@ function cleanFields(type, v) {
 
 function cleanExtra(v) {
   if (v === undefined || v === null) return [];
-  if (!Array.isArray(v)) throw new ArchiveError(400, '추가 칸은 목록으로 보내 줘.');
+  if (!Array.isArray(v)) throw new ArchiveError(400, '추가 칸은 목록으로 보내 주세요.');
   const out = [];
   for (const x of v) {
-    if (!isObject(x)) throw new ArchiveError(400, '추가 칸은 {label, value} 모양이야.');
+    if (!isObject(x)) throw new ArchiveError(400, '추가 칸은 {label, value} 모양입니다.');
     const value = cleanText(x.value, TEXT_MAX, '추가 칸 내용');
     const label = typeof x.label === 'string' ? x.label.normalize('NFC').trim().replace(/\s+/g, ' ') : '';
     if (!label && !value) continue;
-    if (!label) throw new ArchiveError(400, '추가 칸에 이름을 붙여 줘.');
-    if (label.length > EXTRA_LABEL) throw new ArchiveError(400, `추가 칸 이름은 ${EXTRA_LABEL}자까지야.`);
+    if (!label) throw new ArchiveError(400, '추가 칸에 이름을 붙여 주세요.');
+    if (label.length > EXTRA_LABEL) throw new ArchiveError(400, `추가 칸 이름은 ${EXTRA_LABEL}자까지입니다.`);
     out.push({ label, value });
   }
-  if (out.length > EXTRA_MAX) throw new ArchiveError(400, `추가 칸은 ${EXTRA_MAX}개까지야.`);
+  if (out.length > EXTRA_MAX) throw new ArchiveError(400, `추가 칸은 ${EXTRA_MAX}개까지입니다.`);
   return out;
 }
 
 function cleanBudget(v) {
   if (v === undefined || v === null) return BUDGET_DEFAULT;
   if (!Number.isSafeInteger(v) || v < BUDGET_MIN || v > BUDGET_MAX) {
-    throw new ArchiveError(400, `프롬프트에 넣을 글자 수는 ${BUDGET_MIN}~${BUDGET_MAX} 사이여야 해.`);
+    throw new ArchiveError(400, `프롬프트에 넣을 글자 수는 ${BUDGET_MIN}~${BUDGET_MAX} 사이여야 합니다.`);
   }
   return v;
 }
 
 function needId(id, what = '세계관') {
-  if (typeof id !== 'string' || !ID_RE.test(id)) throw new ArchiveError(400, `${what} ID가 올바르지 않아.`);
+  if (typeof id !== 'string' || !ID_RE.test(id)) throw new ArchiveError(400, `${what} ID가 올바르지 않습니다.`);
   return id;
 }
 
 function needRoom(id) {
-  if (typeof id !== 'string' || !ROOM_RE.test(id)) throw new ArchiveError(400, '채팅방 ID가 올바르지 않아.');
+  if (typeof id !== 'string' || !ROOM_RE.test(id)) throw new ArchiveError(400, '채팅방 ID가 올바르지 않습니다.');
   return id;
 }
 
 function needRevision(r) {
-  if (!Number.isSafeInteger(r) || r < 1) throw new ArchiveError(400, 'revision이 필요해. 목록을 새로 불러와.');
+  if (!Number.isSafeInteger(r) || r < 1) throw new ArchiveError(400, 'revision이 필요합니다. 목록을 새로 불러와 주세요.');
   return r;
 }
 
-const broken = (what) => new ArchiveError(409, `${what} 파일이 손상됐거나 이 버전이 모르는 형식이야. 덮어쓰지 않았어.`);
+const broken = (what) => new ArchiveError(409, `${what} 파일이 손상됐거나 이 버전이 모르는 형식입니다. 덮어쓰지 않았습니다.`);
 
 function validWorld(w) {
   return (
@@ -216,7 +216,7 @@ class Archive {
       if (e.code === 'ENOENT') return empty();
       throw e;
     }
-    if (Buffer.byteLength(raw, 'utf8') > FILE_MAX) throw new ArchiveError(409, `${what} 파일이 너무 커. 덮어쓰지 않았어.`);
+    if (Buffer.byteLength(raw, 'utf8') > FILE_MAX) throw new ArchiveError(409, `${what} 파일이 너무 큽니다. 덮어쓰지 않았습니다.`);
     let doc;
     try {
       doc = JSON.parse(raw);
@@ -312,12 +312,12 @@ class Archive {
   getWorld(worldId) {
     needId(worldId);
     const w = this.readWorlds().worlds.find((x) => x.worldId === worldId);
-    if (!w) throw new ArchiveError(404, '세계관을 찾지 못했어.');
+    if (!w) throw new ArchiveError(404, '세계관을 찾지 못했습니다.');
     return w;
   }
 
   createWorld(body = {}) {
-    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 줘.');
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
     const name = cleanLine(body.name, NAME_MAX, '세계관 이름');
     const description = cleanText(body.description, DESC_MAX, '세계관 설명');
     const injectChars = cleanBudget(body.injectChars);
@@ -331,18 +331,18 @@ class Archive {
 
   updateWorld(worldId, body = {}) {
     needId(worldId);
-    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 줘.');
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
     const revision = needRevision(body.revision);
     const doc = this.readWorlds();
     const world = doc.worlds.find((x) => x.worldId === worldId);
-    if (!world) throw new ArchiveError(404, '세계관을 찾지 못했어.');
-    if (world.revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤어. 새로 불러와서 다시 해 줘.');
+    if (!world) throw new ArchiveError(404, '세계관을 찾지 못했습니다.');
+    if (world.revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
     const next = { ...world };
     let changed = false;
     if (body.name !== undefined) (next.name = cleanLine(body.name, NAME_MAX, '세계관 이름')), (changed = true);
     if (body.description !== undefined) (next.description = cleanText(body.description, DESC_MAX, '세계관 설명')), (changed = true);
     if (body.injectChars !== undefined) (next.injectChars = cleanBudget(body.injectChars)), (changed = true);
-    if (!changed) throw new ArchiveError(400, '고칠 내용이 없어.');
+    if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     next.revision++;
     next.updatedAt = now();
     Object.assign(world, next);
@@ -356,8 +356,8 @@ class Archive {
     needRevision(revision);
     const doc = this.readWorlds();
     const index = doc.worlds.findIndex((x) => x.worldId === worldId);
-    if (index < 0) throw new ArchiveError(404, '세계관을 찾지 못했어.');
-    if (doc.worlds[index].revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤어. 새로 불러와서 다시 해 줘.');
+    if (index < 0) throw new ArchiveError(404, '세계관을 찾지 못했습니다.');
+    if (doc.worlds[index].revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
     const entities = this.readEntities(worldId); // fails (and stops the delete) when the settings file is broken
     const rooms = this.readRooms();
     const linked = Object.keys(rooms.rooms).filter((k) => rooms.rooms[k].worldId === worldId);
@@ -396,10 +396,10 @@ class Archive {
   }
 
   entityInput(body, base) {
-    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 줘.');
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
     const out = { ...base };
     if (body.type !== undefined || !base) {
-      if (!TYPES.includes(body.type)) throw new ArchiveError(400, `종류는 ${TYPES.join(', ')} 중 하나여야 해.`);
+      if (!TYPES.includes(body.type)) throw new ArchiveError(400, `종류는 ${TYPES.join(', ')} 중 하나여야 합니다.`);
       out.type = body.type;
     }
     if (body.name !== undefined || !base) out.name = cleanLine(body.name, NAME_MAX, '이름');
@@ -414,7 +414,7 @@ class Archive {
     }
     if (body.extra !== undefined || !base) out.extra = cleanExtra(body.extra);
     if (body.pinned !== undefined || !base) {
-      if (body.pinned !== undefined && typeof body.pinned !== 'boolean') throw new ArchiveError(400, 'pinned는 true/false야.');
+      if (body.pinned !== undefined && typeof body.pinned !== 'boolean') throw new ArchiveError(400, 'pinned는 true 또는 false입니다.');
       out.pinned = body.pinned === true;
     }
     return out;
@@ -423,7 +423,7 @@ class Archive {
   createEntity(worldId, body = {}) {
     this.getWorld(worldId);
     const doc = this.readEntities(worldId);
-    if (doc.entities.length >= ENTITY_MAX) throw new ArchiveError(400, `한 세계관에는 설정을 ${ENTITY_MAX}개까지 넣을 수 있어.`);
+    if (doc.entities.length >= ENTITY_MAX) throw new ArchiveError(400, `한 세계관에는 설정을 ${ENTITY_MAX}개까지 넣을 수 있습니다.`);
     const input = this.entityInput(body, null);
     const t = now();
     const entity = {
@@ -443,14 +443,14 @@ class Archive {
   updateEntity(worldId, entityId, body = {}) {
     this.getWorld(worldId);
     needId(entityId, '설정');
-    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 줘.');
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
     const revision = needRevision(body.revision);
     const doc = this.readEntities(worldId);
     const entity = doc.entities.find((x) => x.entityId === entityId);
-    if (!entity) throw new ArchiveError(404, '설정을 찾지 못했어.');
-    if (entity.revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤어. 새로 불러와서 다시 해 줘.');
+    if (!entity) throw new ArchiveError(404, '설정을 찾지 못했습니다.');
+    if (entity.revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
     const { revision: _r, ...rest } = body;
-    if (!Object.keys(rest).length) throw new ArchiveError(400, '고칠 내용이 없어.');
+    if (!Object.keys(rest).length) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     const next = this.entityInput(rest, entity);
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
     this.writeJson(this.entityFile(worldId), doc);
@@ -463,8 +463,8 @@ class Archive {
     needRevision(revision);
     const doc = this.readEntities(worldId);
     const index = doc.entities.findIndex((x) => x.entityId === entityId);
-    if (index < 0) throw new ArchiveError(404, '설정을 찾지 못했어.');
-    if (doc.entities[index].revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤어. 새로 불러와서 다시 해 줘.');
+    if (index < 0) throw new ArchiveError(404, '설정을 찾지 못했습니다.');
+    if (doc.entities[index].revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
     doc.entities.splice(index, 1);
     this.writeJson(this.entityFile(worldId), doc);
     return { deleted: true, entityId };
