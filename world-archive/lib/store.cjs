@@ -812,9 +812,11 @@ class Archive {
 
   /**
    * Brings names in line with the room's glossary pairs ([{ from, to }], from vendor/glossary.cjs). ids: only these
-   * settings (after a reading), or all when omitted (the glossary changed). A setting whose name or other name is
-   * either side of a pair gets the glossary's Korean as its name and the original form among its other names; that is
-   * a 'rename' in the history, undoable like the rest. A name the person chose is not renamed: the setting carries
+   * settings (after a reading), or all when omitted (the glossary changed). A person, place or group whose whole name
+   * is a pair (names.cjs matchFor: its name, or its longest romanized other name, is the pair's romanized side) gets
+   * the glossary's Korean as its name and the original form among its other names; that is a 'rename' in the
+   * history, undoable like the rest. Never a rename to a part of the name it has; a one-word pair of a name of several
+   * words only adds other names ('alias'). A name the person chose is not renamed: the setting carries
    * glossaryName (shown as a suggestion) instead. When another setting already has the glossary's name, both stay as
    * they are (「같은 사람일 수 있음」 shows them). Returns the changes.
    */
@@ -830,10 +832,27 @@ class Archive {
     const log = (c) => changes.push({ id: randomUUID(), at: t, by: 'glossary', roomId: meta.roomId ?? null, messageIds: [], ...c });
     for (const e of doc.entities) {
       if (only && !only.has(e.entityId)) continue;
-      const p = N.pairFor(e, pairs);
+      const m = N.matchFor(e, pairs);
+      const p = m?.full;
       if (!p) {
         if (e.glossaryName) {
           delete e.glossaryName; // the glossary no longer names it
+          dirty = true;
+        }
+        if (!m?.short.length) continue;
+        // a one-word pair of a name of several words (a given name, a nickname): other names only, never the name
+        const taken = new Set(doc.entities.filter((o) => o !== e).map((o) => N.key(o.name)));
+        let added = 0;
+        for (const sp of m.short) {
+          for (const a of N.shortAliases(e, sp, taken, { aliasMax: ALIAS_MAX, aliasLen: ALIAS_LEN })) {
+            e.aliases.push(a);
+            log({ entityId: e.entityId, name: e.name, type: e.type, action: 'alias', after: a, evidence: `번역 단어장: ${sp.from} = ${sp.to}` });
+            added++;
+          }
+        }
+        if (added) {
+          e.revision++;
+          e.updatedAt = t;
           dirty = true;
         }
         continue;

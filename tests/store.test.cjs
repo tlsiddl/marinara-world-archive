@@ -344,6 +344,7 @@ test('auto: history records who wrote a change (reader by default, a module by n
 // ---------------------------------------------------------------- 같은 사람일 수 있음
 
 const SAME = require('../world-archive/lib/same.cjs');
+const G = require('../world-archive/lib/vendor/glossary.cjs');
 const P = (name, aliases = []) => ({ entityId: name, type: 'person', name, aliases, fields: {}, description: '', createdAt: '' });
 
 test('same person: names, other names and titles; a shared surname alone is not enough', () => {
@@ -411,6 +412,40 @@ test('same person: different family names are two people, even with a shared oth
   ];
   for (const [a, b] of yes) assert.ok(SAME.whySame(a, b), `${a.name} · ${b.name}`);
   assert.deepEqual(SAME.words('공작부인'), ['공작부인']);
+});
+
+test('same person: a family with full names is never paired through a one-word other name or the family name', (t) => {
+  const edward = P('에드워드 베인', ['Edward Vane', 'Vane', 'Duke', 'His Grace', '공작']);
+  const no = [
+    [edward, P('캐서린 베인', ['Catherine Vane', 'Vane', 'Duchess'])], // a shared one-word other name
+    [edward, P('줄리언 베인', ['Julian Vane', 'Duke', 'His Grace'])], // a shared title, a way of addressing
+    [edward, P('클라라 베인', ['Clara Vane', '베인'])], // the family name alone, a whole word of the other's name
+    [P('에드워드 베인'), P('줄리언 베인', ['베인', 'Vane'])],
+    [P('다프네의 언니'), P('다프네의 누나')], // as before
+    [P('다프네의 언니', ['언니']), P('다프네의 누나', ['언니'])],
+  ];
+  for (const [a, b] of no) assert.equal(SAME.whySame(a, b), null, `${a.name} · ${b.name}`);
+  const yes = [
+    [P('에드워드 베인'), P('에드워드 앨버트 베인')], // the given names match too
+    [P('에드워드 베인', ['Edward Vane']), P('에드워드 바인', ['Edward Vane'])], // a whole name of several words
+    [edward, P('베인', ['Vane'])], // one of them has only a one-word name
+    [P('스네이프'), P('세베루스 스네이프')],
+    [P('젬마'), P('젬마 페얼리')],
+    [P('젬마 페얼리', ['prefect']), P('슬리데린 5학년 반장', ['prefect'])], // a role is not a given and a family name
+  ];
+  for (const [a, b] of yes) assert.ok(SAME.whySame(a, b), `${a.name} · ${b.name}`);
+
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  const id = {};
+  for (const [name, aliases] of [
+    ['에드워드 베인', ['Edward Vane', 'Vane', 'Duke', 'His Grace']], ['캐서린 베인', ['Catherine Vane', 'Vane']],
+    ['줄리언 베인', ['Julian Vane', 'Vane', 'His Grace']], ['클라라 베인', ['Clara Vane', '베인', 'Vane']],
+    ['세베루스 스네이프', []], ['스네이프', ['Professor Snape']], ['젬마 페얼리', []], ['젬마', []],
+  ]) id[name] = s.createEntity(w.worldId, { type: 'person', name, aliases }).entityId;
+  const name = Object.fromEntries(Object.entries(id).map(([k, v]) => [v, k]));
+  const got = s.listDuplicates(w.worldId).map((p) => [name[p.a], name[p.b]].sort().join(' · ')).sort();
+  assert.deepEqual(got, ['세베루스 스네이프 · 스네이프', '젬마 · 젬마 페얼리']);
 });
 
 // ---------------------------------------------------------------- names from the translation glossary
@@ -487,6 +522,67 @@ test('glossary names: undo a rename; a name typed by hand stays the person\'s th
   const m = s.mergeEntities(w.worldId, { keepId: cur.entityId, dropId: other.entityId, keepRevision: cur.revision, dropRevision: other.revision });
   assert.equal(m.sources.name, 'manual');
   void c;
+});
+
+test('glossary names: only a pair that is the whole name renames; parts and related terms never do', (t) => {
+  const s = temp(t);
+  const pairs = G.parseGlossary([
+    'Irina = 이리나', 'Irina Vane = 이리나 베인', 'Gaspard = 가스파르', 'Fleet = 플릿', 'Slytherin = 슬리데린',
+    'Hufflepuff = 후플푸프', 'Sorting Hat = 기숙사 배정 모자', 'Bea = 비아', 'Potions = 마법약', 'Hogwarts = 호그와트',
+  ].join('\n'));
+  // three worlds, so that settings sharing an other name are not read into one
+  const [w, w2, w3] = ['호그와트', 'B', 'C'].map((name) => s.createWorld({ name }));
+  // createEntity marks the name the person's; applyAuto stands for a reading
+  const read = (world, type, name, aliases) => {
+    const [c] = s.applyAuto(world.worldId, [{ type, name, aliases }]);
+    assert.equal(c.action, 'create', name);
+    return c.entityId;
+  };
+  const id = {
+    gaspard: read(w, 'person', '가스파르 셀윈', ['Gaspard Selwyn', 'Gaspard']),
+    gaspard2: read(w2, 'person', '가스파르 르블랑', ['Gaspard']), // the given name the only romanized name: still not the name
+    fleet: read(w, 'person', '크리스핀 플리트', ['Crispin Fleet', 'Fleet']),
+    fleet2: read(w2, 'person', '오스왈드 플리트', ['Fleet']),
+    dungeon: read(w, 'place', '호그와트 지하 기숙사', ['Slytherin']),
+    slytherin: s.createEntity(w.worldId, { type: 'group', name: '슬리데린', aliases: ['Slytherin'] }).entityId,
+    huff: read(w, 'group', '후플푸프 기숙사', ['Hufflepuff']),
+    sorting: read(w, 'history', '호그와트 기숙사 배정', ['Sorting Hat']),
+    sorting2: read(w2, 'group', '호그와트 기숙사 배정식', ['Sorting Hat', 'Hogwarts Sorting Ceremony']),
+    potions: read(w, 'schedule', '마법약 수업(금요일 아침)', ['Potions']),
+    castle: read(w, 'place', '호그와트 성', ['Hogwarts']), // a one-word pair: an other name only
+    castle2: read(w2, 'place', '호그와트성', ['Hogwarts']), // one word, the whole romanized name, but the Korean is a part: never shortened
+    bea: read(w, 'person', '베아트리스 베인', ['Beatrice Vane', 'Bea']),
+    irina: read(w, 'person', '이리나', ['Irina Vane']), // two pairs name it: the one with the most words
+    hat: read(w3, 'person', 'Sorting Hat', []), // a romanized name that is the whole pair
+  };
+  const all = () => [w, w2, w3].flatMap((x) => s.listEntities(x.worldId));
+  const before = Object.fromEntries(Object.entries(id).map(([k, v]) => [k, all().find((e) => e.entityId === v)]));
+  const changes = [w, w2, w3].flatMap((x) => s.alignGlossary(x.worldId, pairs, { roomId: 'room' }));
+  const by = (k) => all().find((e) => e.entityId === id[k]);
+  for (const k of ['gaspard', 'gaspard2', 'fleet', 'fleet2', 'dungeon', 'slytherin', 'huff', 'sorting', 'sorting2', 'potions', 'castle', 'castle2', 'bea'])
+    assert.equal(by(k).name, before[k].name, `${before[k].name} keeps its name`);
+  assert.deepEqual(changes.filter((c) => c.action === 'rename').map((c) => [c.before, c.after]), [['이리나', '이리나 베인'], ['Sorting Hat', '기숙사 배정 모자']]);
+  // one-word pairs of names of several words: other names only (never one that is another setting's name)
+  assert.deepEqual(by('gaspard').aliases, ['Gaspard Selwyn', 'Gaspard', '가스파르']);
+  assert.deepEqual(by('gaspard2').aliases, ['Gaspard', '가스파르']);
+  assert.deepEqual(by('fleet').aliases, ['Crispin Fleet', 'Fleet', '플릿']);
+  assert.deepEqual(by('bea').aliases, ['Beatrice Vane', 'Bea', '비아']);
+  assert.deepEqual(by('dungeon').aliases, ['Slytherin'], '「슬리데린」 is another setting\'s name');
+  assert.deepEqual(by('huff').aliases, ['Hufflepuff', '후플푸프']);
+  for (const k of ['sorting', 'potions']) assert.deepEqual(by(k).aliases, before[k].aliases, `${before[k].type}: the glossary never names it`);
+  assert.deepEqual(by('sorting2').aliases, before.sorting2.aliases);
+  assert.deepEqual(by('castle').aliases, ['Hogwarts', '호그와트']);
+  assert.deepEqual(by('castle2').aliases, ['Hogwarts']);
+  assert.deepEqual(by('irina').aliases, ['Irina Vane', '이리나']);
+  assert.ok(changes.filter((c) => c.action === 'alias').every((c) => c.by === 'glossary' && /^번역 단어장: /.test(c.evidence)));
+  for (const x of [w, w2, w3]) assert.deepEqual(s.alignGlossary(x.worldId, pairs, {}), [], 'twice: nothing');
+  // the rename is undone as before, and the alias too
+  const rename = changes.find((c) => c.after === '이리나 베인');
+  assert.equal(s.undoChange(w.worldId, rename.id).undone, true);
+  assert.deepEqual([by('irina').name, by('irina').aliases, by('irina').glossaryName], ['이리나', ['Irina Vane'], '이리나 베인']);
+  const alias = changes.find((c) => c.action === 'alias' && c.after === '플릿');
+  assert.equal(s.undoChange(w.worldId, alias.id).undone, true);
+  assert.deepEqual(by('fleet').aliases, ['Crispin Fleet', 'Fleet']);
 });
 
 function snapes(s) {

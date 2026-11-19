@@ -12,6 +12,10 @@
 // 「베인 공작」 are a family, not one person.
 // Two people whose own names are both a given name and a family name, with different family names, are never one
 // person — even when they share an other name (「줄리안 에이버리」 · 「줄리안 베인」, both also "Julian").
+// Two people whose own names are both a given name and a family name are compared only through names of several
+// words: a one-word other name ("Vane", "Duke") or the shared family name alone never makes 「에드워드 베인」 and
+// 「캐서린 베인」 one person — the given names must match too, or a whole name of several words be the same.
+// A way of addressing ("His Grace", "Your Majesty") is no name at all.
 // Words are compared whole: 「공작」 is not 「공작부인」 (a rank keeps the title written onto it).
 
 /** Titles and honorifics that are a word of their own ("Professor Snape", "스네이프 교수", "마담 폼프리"). */
@@ -51,14 +55,20 @@ function words(name) {
   return out;
 }
 
-/** Every name and other name of a person, as { text, words, key }; keys shorter than two letters are left out. */
+/** Ways of addressing someone ("His Grace", "Your Majesty"): said to many people, never a name of one. */
+const ADDRESS = /^(?:his|her|your|their|my)(?:grace|majesty|highness|lordship|ladyship|excellency|honou?r|lord|lady)$/;
+
+/**
+ * Every name and other name of a person, as { text, words, key }; keys shorter than two letters and ways of
+ * addressing are left out.
+ */
 function forms(e) {
   const out = [];
   const seen = new Set();
   for (const text of [e.name, ...(e.aliases || [])]) {
     const w = words(text);
     const key = w.join('');
-    if (len(key) < 2 || seen.has(key)) continue;
+    if (len(key) < 2 || seen.has(key) || ADDRESS.test(key)) continue;
     seen.add(key);
     out.push({ text, words: w, key, alias: text !== e.name });
   }
@@ -126,9 +136,14 @@ function whySame(a, b) {
   const fa = forms(a);
   const fb = forms(b);
   if (otherFamilies(fa, fb)) return null;
+  // both own names a given name and a family name: only names of several words count (a family is not one person)
+  const na = fa.find((f) => !f.alias);
+  const nb = fb.find((f) => !f.alias);
+  const full = na && nb && personal(na) && personal(nb);
   // the people's own names first, then other names
   const order = (f) => [...f.filter((x) => !x.alias), ...f.filter((x) => x.alias)];
   for (const x of order(fa)) for (const y of order(fb)) {
+    if (full && (x.words.length < 2 || y.words.length < 2)) continue;
     const why = whyForms(x, y);
     if (why) return why;
   }

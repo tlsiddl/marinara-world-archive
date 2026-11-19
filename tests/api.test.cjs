@@ -275,12 +275,18 @@ test('suggest: writes only when automatic updates are on, never over hand-writte
   assert.equal((await call('POST', `${A}/rooms/bad%2Fid/suggest`, { items })).status, 400);
 });
 
-test('names over HTTP: settings with a romanized other name, every kind, in the glossary\'s shape', async (t) => {
+test('names over HTTP: people, places and groups with a romanized other name, in the glossary\'s shape', async (t) => {
   const { call, s, w } = sceneSetup(t);
   s.createEntity(w.worldId, { type: 'person', name: '세베루스 스네이프', aliases: ['Professor Snape', 'Severus Snape', 'Snape', '스네이프 교수'] });
   s.createEntity(w.worldId, { type: 'place', name: '호그와트', aliases: ['Hogwarts'] });
   s.createEntity(w.worldId, { type: 'group', name: '슬리데린', aliases: ['Slytherin'] });
+  // not proper nouns: never offered to the translation glossary
   s.createEntity(w.worldId, { type: 'system', name: '기숙사 점수', aliases: ['House Points'] });
+  s.createEntity(w.worldId, { type: 'system', name: '변신술', aliases: ['Wandless, non-verbal Transfiguration'] });
+  s.createEntity(w.worldId, { type: 'rule', name: '통금', aliases: ['Curfew'] });
+  s.createEntity(w.worldId, { type: 'schedule', name: '마법약 수업', aliases: ['Potions Class'] });
+  s.createEntity(w.worldId, { type: 'history', name: '마법사 전쟁', aliases: ['Wizarding War'] });
+  s.createEntity(w.worldId, { type: 'custom', name: '기숙사 배정 모자', aliases: ['Sorting Hat'] });
   s.createEntity(w.worldId, { type: 'person', name: 'Argus Filch', aliases: ['Filch'] }); // no Korean name: not a translation
   s.createEntity(w.worldId, { type: 'person', name: '마담 폼프리', aliases: ['폼프리'] }); // no romanized form
   const r = await call('GET', `${A}/rooms/room/names`);
@@ -289,7 +295,6 @@ test('names over HTTP: settings with a romanized other name, every kind, in the 
     { original: 'Severus Snape', translation: '세베루스 스네이프', kind: '인물' },
     { original: 'Hogwarts', translation: '호그와트', kind: '장소' },
     { original: 'Slytherin', translation: '슬리데린', kind: '집단' },
-    { original: 'House Points', translation: '기숙사 점수', kind: '시스템' },
   ] });
   assert.deepEqual((await call('GET', `${A}/rooms/lonely/names`)).data, { names: [] }, 'a room with no world');
   assert.equal((await call('GET', `${A}/rooms/bad%2Fid/names`)).status, 400);
