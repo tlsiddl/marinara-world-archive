@@ -437,7 +437,7 @@ test('round trip: glossary → archive names → glossary changes nothing the se
   const messages = six('Margaret Bell과 Hogwarts, 그리고 Slytherin.');
   const reply = JSON.stringify({ items: [
     { type: 'person', name: '마가렛 벨', aliases: ['Margaret Bell', 'Professor Bell'], evidence: [{ n: '1.1' }] },
-    { type: 'place', name: '호그와트 성', aliases: ['Hogwarts'], evidence: [{ n: '1.1' }] },
+    { type: 'place', name: 'Hogwarts', evidence: [{ n: '1.1' }] }, // (「호그와트 성」 would stay: never shortened)
     { type: 'group', name: '슬리데린', aliases: ['Slytherin'], evidence: [{ n: '1.1' }] },
   ] });
   const glossary = 'Margaret Bell = 마거릿 벨\nHogwarts = 호그와트';

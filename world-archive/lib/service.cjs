@@ -429,7 +429,8 @@ function suggest(roomId, items, by = 'module') {
 
 /**
  * GET …/names: the room's names in the glossary's shape, { names: [{ original, translation, kind }] } — settings with
- * a Korean name and a romanized other name, of every kind (kind is the Korean label: 인물, 장소, 집단, …). A room
+ * a Korean name and a romanized other name, proper nouns only (people, places, groups; kind is the Korean label:
+ * 인물, 장소, 집단). A room
  * with no world: { names: [] }. Names that follow the glossary come back as the glossary's own pairs.
  */
 function names(roomId) {
