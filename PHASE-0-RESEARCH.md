@@ -39,6 +39,10 @@
 | World Board `extension.js` | 마리나라 클라이언트 확장; 채팅·모델·숨김 메시지 API 호출 | **플랫폼 연동 패턴 참고** | World Archive는 영구적인 서버 측 데이터 관리가 중심. 로컬스토리지 단독 정본 방식 채택 금지 |
 | NPC/World 생성 에이전트 | 소스 위치 및 실제 저장 인터페이스 **미확인** | **필수 의존/재사용 대상 아님** | 기존 코드 확보 없이 독립 구현. 확인 가능한 경우 출력 스키마 등 참고만 하며 기존 에이전트 사용을 전제로 하지 않음 |
 
+### 추가 조사 (2026-11-19, 기획서 v1.2 반영)
+
+`refactor/modular` `e873fd1` 정적 조사에서 위 표에 없던 재사용 대상을 확인했다: 런타임 로더(`marinara-memory-runtime.cjs` — `registerHooks` 메모리 내 패치, `{{기억}}` 매크로, `app.js` attach), 주입 조립(`service.cjs` `renderMemorySource`·`assembleMemorySource`), 모델 호출·추출(`askModel`, `scenes.cjs` `buildScenePrompt`·`parseScenesReply`·`nextSlice`), 무호출 충돌 판정(`conflicts.cjs`), 설치 스크립트(`install.ps1`/`install.sh`). 배치 단계와 이식 방식은 [DEVELOPMENT-PLAN.md](DEVELOPMENT-PLAN.md) §3을 따른다. 두 로더의 동시 실행은 미검증이다.
+
 모든 재사용 판단은 현재 조사 범위의 **설계 제안**이며 컴파일·실행 검증이나 사용 권한/라이선스 승인을 뜻하지 않는다.
 
 ## 3. 제안하는 독립 구조
