@@ -279,6 +279,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     auto: null, // this room's automatic-update status
     history: [],
     connections: null,
+    pairs: [], // 같은 사람일 수 있음: [{ a, b, why }]
+    dupes: false, // the person list shows those pairs instead
   };
 
   const activeChatId = () => store.get('marinara-active-chat-id', '');
@@ -332,6 +334,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   }
   async function loadEntities() {
     st.entities = st.worldId ? (await api('GET', `/worlds/${st.worldId}/entities`)).entities || [] : [];
+    try { st.pairs = st.worldId ? (await api('GET', `/worlds/${st.worldId}/duplicates`)).pairs || [] : []; } catch { st.pairs = []; }
     if (st.detail && !st.entities.some((e) => e.entityId === st.detail)) st.detail = null;
   }
   async function loadRoom() {
@@ -530,6 +533,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <span style="flex:1"></span>
         <button class="primary" type="button" data-act="new" data-type="${type}">새 ${k.label}</button>
       </div>
+      ${type === 'person' && st.pairs.length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">같은 사람일 수 있음 ${st.pairs.length}쌍</button></p>` : ''}
       ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
         : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
   }
@@ -571,6 +575,45 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
             : `<button class="quiet" type="button" data-act="ask" data-key="${askKey}">지우기</button>`}
         </div>
       </div>`;
+  }
+
+  // ------------------------------------------------------------------ 같은 사람일 수 있음
+  const clip = (v, n) => { const x = String(v || ''); return x.length > n ? `${x.slice(0, n)}…` : x; };
+  function personSide(e) {
+    const f = e.fields || {};
+    const rows = defs(e.type).filter((x) => f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}${e.sources?.[x.key] === 'auto' ? '<span class="auto-tag">· 자동</span>' : ''}</small><p>${esc(clip(f[x.key], 160))}</p></div>`).join('');
+    const memo = e.description ? `<div class="sec"><small>메모</small><p>${esc(clip(e.description, 160))}</p></div>` : '';
+    return `<div>
+      <h2 style="margin:0 0 2px">${esc(e.name)}</h2>
+      ${e.aliases.length ? `<p class="sub" style="margin:0">다른 이름 · ${esc(e.aliases.join(', '))}</p>` : ''}
+      ${rows}${memo}${!rows && !memo ? '<p class="sub" style="margin-top:10px">아직 적힌 칸이 없습니다.</p>' : ''}
+    </div>`;
+  }
+
+  function dupesHtml() {
+    const byId = (id) => st.entities.find((e) => e.entityId === id);
+    const pairs = st.pairs.map((p) => ({ ...p, ea: byId(p.a), eb: byId(p.b) })).filter((p) => p.ea && p.eb);
+    return `
+      <button class="back" type="button" data-act="go" data-view="person">${icon('back')}인물 목록</button>
+      <div class="eyebrow">PEOPLE · SAME PERSON? · ${pairs.length}</div>
+      <h1>같은 사람일 수 있음</h1>
+      <p class="intro">이름이나 다른 이름이 겹치는 인물입니다. 같은 사람이면 「합치기」로 하나로 모을 수 있습니다. 자동으로 합치지는 않습니다. 합친 뒤에도 「기록」에서 되돌릴 수 있습니다.</p>
+      ${pairs.length ? pairs.map(({ a, b, why, ea, eb }) => {
+        const key = `merge:${a}:${b}`;
+        return `<div class="paper">
+          <p class="sub" style="margin:0 0 10px">${esc(why)}</p>
+          <div class="grid2">${personSide(ea)}${personSide(eb)}</div>
+          <div class="actions">
+            ${st.ask === key
+              ? `<span class="ask">어느 이름을 남길까요? 다른 쪽 이름은 다른 이름으로 들어가고, 빈 칸은 다른 쪽 내용으로 채웁니다. 직접 쓴 칸은 그대로 둡니다.
+                  <button class="danger" type="button" data-act="merge" data-keep="${esc(a)}" data-drop="${esc(b)}">「${esc(ea.name)}」 남기기</button>
+                  <button class="danger" type="button" data-act="merge" data-keep="${esc(b)}" data-drop="${esc(a)}">「${esc(eb.name)}」 남기기</button>
+                  <button class="quiet" type="button" data-act="ask" data-key="">취소</button></span>`
+              : `<button class="primary" type="button" data-act="ask" data-key="${key}">합치기</button>
+                 <button type="button" data-act="dismiss" data-a="${esc(a)}" data-b="${esc(b)}">다른 사람이에요</button>`}
+          </div>
+        </div>`;
+      }).join('') : '<div class="empty"><h2>같은 사람일 수 있는 인물이 없습니다</h2><p>이름이나 다른 이름이 겹치는 인물이 생기면 여기에 보입니다.</p></div>'}`;
   }
 
   function fieldInput(x, value, hideLabel) {
@@ -668,6 +711,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     field: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
     alias: (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.after)}」`,
     memo: (c) => `<b>${esc(c.name)}</b> · 메모: ${esc(c.after)}`,
+    merge: (c) => `<b>${esc(c.name)}</b> · 「${esc(c.dropName)}」와(과) 합침`,
   };
   const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${fmtDate(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 
@@ -676,7 +720,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     return `
       <div class="eyebrow">HISTORY · ${list.length}</div>
       <h1>기록</h1>
-      <p class="intro">자동 반영이 바꾼 내용입니다. 잘못 들어간 건 「되돌리기」로 하나씩 되돌릴 수 있습니다. 그 뒤에 다시 바뀌었거나 직접 고친 설정은 되돌리지 않습니다.</p>
+      <p class="intro">자동 반영이 바꾼 내용과 직접 합친 인물입니다. 잘못 들어간 건 「되돌리기」로 하나씩 되돌릴 수 있습니다. 그 뒤에 다시 바뀌었거나 직접 고친 설정은 되돌리지 않습니다.</p>
       ${list.length ? `<div class="paper"><ul class="hist">${list.map((c) => `
         <li class="${c.undoneAt ? 'undone' : ''}">
           <div class="what">${(ACTION_TEXT[c.action] || (() => esc(c.action)))(c)}</div>
@@ -697,6 +741,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       const e = st.entities.find((x) => x.entityId === (st.editing || st.detail));
       if (e && st.editing) return formHtml(e, st.view);
       if (e) return detailHtml(e);
+      if (st.view === 'person' && st.dupes) return dupesHtml();
       return listHtml(st.view);
     }
     return overviewHtml();
@@ -708,7 +753,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     el.side.innerHTML = sideHtml();
     el.top.innerHTML = topHtml();
     el.rail.innerHTML = railHtml();
-    const screen = `${st.view}|${st.worldId}|${st.detail}|${st.editing}`;
+    const screen = `${st.view}|${st.worldId}|${st.detail}|${st.editing}|${st.dupes}`;
     const keep = screen === lastScreen ? el.main.scrollTop : 0;
     el.main.innerHTML = (st.msg ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + mainHtml();
     el.main.scrollTop = keep;
@@ -746,7 +791,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     };
   }
 
-  const go = (view) => { st.view = view; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; };
+  const go = (view) => { st.view = view; st.dupes = false; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; };
 
   const actions = {
     go: (b) => {
@@ -772,6 +817,20 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       await loadEntities();
       await loadRoom();
     }, '되돌렸습니다.'),
+    dupes: () => { st.dupes = true; st.detail = null; st.editing = null; st.ask = null; st.msg = ''; render(); },
+    merge: (b) => run(async () => {
+      const keep = st.entities.find((x) => x.entityId === b.dataset.keep);
+      const drop = st.entities.find((x) => x.entityId === b.dataset.drop);
+      if (!keep || !drop) throw Error('설정을 찾지 못했습니다. 새로 불러온 뒤 다시 해 주세요.');
+      st.ask = null;
+      await api('POST', `/worlds/${st.worldId}/merge`, { keepId: keep.entityId, dropId: drop.entityId, keepRevision: keep.revision, dropRevision: drop.revision });
+      await loadEntities();
+      await loadRoom();
+    }, '합쳤습니다. 잘못 합쳤다면 「기록」에서 되돌릴 수 있습니다.'),
+    dismiss: (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/duplicates/dismiss`, { a: b.dataset.a, b: b.dataset.b });
+      await loadEntities();
+    }, '다른 사람으로 두었습니다. 이 두 사람은 다시 묻지 않습니다.'),
     'save-auto': () => run(async () => {
       const w = world();
       const enabled = !!root.getElementById('a-on')?.checked;

@@ -278,6 +278,10 @@ async function routes(r) {
     await Promise.race([p, new Promise((r) => setTimeout(r, 300))]);
     return roomAuto(req.params.roomId);
   }));
+  // 같은 사람일 수 있음: suggestions only; merging takes the person's own press, and is undone from the history.
+  r.get('/worlds/:worldId/duplicates', handle(async (req) => ({ pairs: s().listDuplicates(req.params.worldId) })));
+  r.post('/worlds/:worldId/duplicates/dismiss', handle(async (req) => s().dismissPair(req.params.worldId, body(req).a, body(req).b)));
+  r.post('/worlds/:worldId/merge', handle(async (req) => s().mergeEntities(req.params.worldId, body(req))));
   r.get('/worlds/:worldId/history', handle(async (req) => ({ changes: s().listHistory(req.params.worldId, Math.min(Number(req.query?.limit) || 200, 1000)) })));
   r.post('/worlds/:worldId/history/:changeId/undo', handle(async (req) => s().undoChange(req.params.worldId, req.params.changeId)));
   r.get('/connections', handle(async () => ({ connections: await engineApi().listConnections() })));

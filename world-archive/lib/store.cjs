@@ -9,6 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { findPairs } = require('./same.cjs');
 
 const SCHEMA = 1;
 const NAME_MAX = 120;
@@ -177,6 +178,62 @@ function markManual(sources, before, after) {
   return out;
 }
 
+/**
+ * keep with drop folded in (nothing saved). The kept name stays; the other's name and other names become other
+ * names (up to ALIAS_MAX). Empty fields are filled from drop. A field the person wrote on keep is never replaced;
+ * a field the person wrote on drop replaces only an empty or automatic one on keep. A different memo is added
+ * below. A field written before sources were kept (no source) counts as the person's, as in applyAuto.
+ */
+function mergeInto(keep, drop) {
+  const mine = (sources, k, value) => !!value && sources[k] !== 'auto';
+  const ds = drop.sources || {};
+  const sources = { ...(keep.sources || {}) };
+  const fields = { ...(keep.fields || {}) };
+  for (const def of FIELDS[keep.type]) {
+    const k = def.key;
+    const dv = (drop.fields || {})[k] || '';
+    if (!dv) continue;
+    const kv = fields[k] || '';
+    if (!kv) {
+      fields[k] = dv;
+      if (ds[k]) sources[k] = ds[k];
+      else delete sources[k];
+    } else if (!mine(sources, k, kv) && mine(ds, k, dv)) {
+      fields[k] = dv;
+      sources[k] = 'manual';
+    }
+  }
+  let description = keep.description || '';
+  const dd = drop.description || '';
+  if (dd && !description) {
+    description = dd;
+    if (ds.description) sources.description = ds.description;
+    else delete sources.description;
+  } else if (dd && !description.includes(dd)) {
+    description = `${description}\n\n${dd}`.slice(0, DESC_MAX);
+    if (sources.description === 'auto' && ds.description !== 'auto') sources.description = 'manual';
+  }
+  for (const k of Object.keys(sources)) if (k === 'description' ? !description : !fields[k]) delete sources[k];
+  const aliases = [...keep.aliases];
+  const seen = new Set([keep.name, ...aliases].map((a) => a.toLowerCase()));
+  for (const a of [drop.name, ...drop.aliases]) {
+    if (aliases.length >= ALIAS_MAX) break;
+    if (seen.has(a.toLowerCase()) || a.length > ALIAS_LEN) continue;
+    aliases.push(a);
+    seen.add(a.toLowerCase());
+  }
+  const extra = [...(keep.extra || [])];
+  for (const x of drop.extra || []) {
+    if (extra.length >= EXTRA_MAX) break;
+    if (!extra.some((y) => y.label === x.label && y.value === x.value)) extra.push({ ...x });
+  }
+  const merged = [...(keep.provenance?.merged || []), { entityId: drop.entityId, name: drop.name, source: drop.provenance?.source ?? null }].slice(-ALIAS_MAX);
+  return { ...keep, aliases, fields, sources, description, extra, pinned: keep.pinned || drop.pinned, provenance: { ...keep.provenance, merged } };
+}
+
+const pairKey = (a, b) => [a, b].sort().join('|');
+const DISMISS_MAX = 5000;
+
 function cleanBudget(v) {
   if (v === undefined || v === null) return BUDGET_DEFAULT;
   if (!Number.isSafeInteger(v) || v < BUDGET_MIN || v > BUDGET_MAX) {
@@ -273,6 +330,7 @@ class Archive {
     this.entityDir = path.join(this.dir, 'entities');
     this.trashDir = path.join(this.dir, 'trash');
     this.historyDir = path.join(this.dir, 'history');
+    this.dismissDir = path.join(this.dir, 'dismissed');
   }
 
   // ---------------------------------------------------------------- files
@@ -689,7 +747,18 @@ class Archive {
     const index = doc.entities.findIndex((e) => e.entityId === c.entityId);
     const e = doc.entities[index];
     const later = '그 뒤에 다시 바뀌어서 되돌리지 않았습니다. 설정에서 직접 고쳐 주세요.';
-    if (c.action === 'create') {
+    if (c.action === 'merge') {
+      // Both come back as they were before the merge, only while the kept one is still exactly as the merge left it.
+      if (!e) throw new ArchiveError(409, '합친 설정이 지워져서 되돌리지 않았습니다.');
+      if (e.revision !== c.afterRevision) throw new ArchiveError(409, '합친 뒤에 다시 바뀌어서 되돌리지 않았습니다. 설정에서 직접 고쳐 주세요.');
+      if (!validEntity(c.before) || !validEntity(c.dropped) || c.before.entityId !== e.entityId) throw broken('변경 기록');
+      if (doc.entities.some((x) => x.entityId === c.dropped.entityId)) throw new ArchiveError(409, '합쳐진 설정이 이미 따로 있습니다.');
+      if (doc.entities.length >= ENTITY_MAX) throw new ArchiveError(409, `설정이 ${ENTITY_MAX}개라 되살릴 자리가 없습니다.`);
+      // The kept one's revision moves on (never back), so a screen still holding the merged one cannot write over it.
+      doc.entities[index] = { ...structuredClone(c.before), revision: e.revision + 1, updatedAt: now() };
+      const at = Number.isSafeInteger(c.dropIndex) ? Math.min(Math.max(c.dropIndex, 0), doc.entities.length) : doc.entities.length;
+      doc.entities.splice(at, 0, structuredClone(c.dropped));
+    } else if (c.action === 'create') {
       if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
       if (Object.values(e.sources || {}).includes('manual')) throw new ArchiveError(409, '직접 고친 칸이 있는 설정이라 지우지 않았습니다. 지우려면 설정에서 지워 주세요.');
       // Removing the setting would also throw away what was read into it afterwards: undo those first.
@@ -719,6 +788,89 @@ class Archive {
     c.undoneAt = now();
     this.writeJson(this.historyFile(worldId), history);
     return { undone: true, changeId };
+  }
+
+  // ---------------------------------------------------------------- 같은 사람일 수 있음
+
+  dismissFile(worldId) {
+    return path.join(this.dismissDir, `${needId(worldId)}.json`);
+  }
+
+  /** Pairs the person said are two people (「다른 사람이에요」): { pairs: [{ a, b, at }] }. */
+  readDismissed(worldId) {
+    return this.readJson(
+      this.dismissFile(worldId),
+      () => ({ schemaVersion: SCHEMA, worldId, pairs: [] }),
+      (d) => d.worldId === worldId && Array.isArray(d.pairs) && d.pairs.every((p) => isObject(p) && typeof p.a === 'string' && typeof p.b === 'string'),
+      '다른 사람 표시',
+    );
+  }
+
+  /** People who may be one person: [{ a, b, why }]. Only a suggestion; nothing is merged without mergeEntities. */
+  listDuplicates(worldId) {
+    this.getWorld(worldId);
+    const gone = new Set(this.readDismissed(worldId).pairs.map((p) => pairKey(p.a, p.b)));
+    return findPairs(this.readEntities(worldId).entities, (a, b) => gone.has(pairKey(a, b)));
+  }
+
+  /** 「다른 사람이에요」: the pair is not suggested again (by id, so renaming either does not bring it back). */
+  dismissPair(worldId, a, b) {
+    this.getWorld(worldId);
+    needId(a, '설정');
+    needId(b, '설정');
+    if (a === b) throw new ArchiveError(400, '서로 다른 두 설정을 골라 주세요.');
+    const ids = new Set(this.readEntities(worldId).entities.map((e) => e.entityId));
+    if (!ids.has(a) || !ids.has(b)) throw new ArchiveError(404, '설정을 찾지 못했습니다.');
+    const doc = this.readDismissed(worldId);
+    const key = pairKey(a, b);
+    if (!doc.pairs.some((p) => pairKey(p.a, p.b) === key)) {
+      const [x, y] = [a, b].sort();
+      doc.pairs.push({ a: x, b: y, at: now() });
+      if (doc.pairs.length > DISMISS_MAX) doc.pairs.splice(0, doc.pairs.length - DISMISS_MAX);
+      this.writeJson(this.dismissFile(worldId), doc);
+    }
+    return { dismissed: true, a, b };
+  }
+
+  /**
+   * Merges two settings the person said are one: body { keepId, dropId, keepRevision, dropRevision, preview? }.
+   * How fields are folded together: mergeInto. The dropped one is removed. One history entry (action 'merge')
+   * keeps the kept one as it was and the dropped one whole, so undoChange can bring both back. preview: true
+   * returns the merged setting without saving anything.
+   */
+  mergeEntities(worldId, body = {}) {
+    this.getWorld(worldId);
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
+    const keepId = needId(body.keepId, '남길 설정');
+    const dropId = needId(body.dropId, '합칠 설정');
+    if (keepId === dropId) throw new ArchiveError(400, '서로 다른 두 설정을 골라 주세요.');
+    const keepRevision = needRevision(body.keepRevision);
+    const dropRevision = needRevision(body.dropRevision);
+    const doc = this.readEntities(worldId);
+    const keepIndex = doc.entities.findIndex((x) => x.entityId === keepId);
+    const dropIndex = doc.entities.findIndex((x) => x.entityId === dropId);
+    if (keepIndex < 0 || dropIndex < 0) throw new ArchiveError(404, '설정을 찾지 못했습니다.');
+    const keep = doc.entities[keepIndex];
+    const drop = doc.entities[dropIndex];
+    if (keep.revision !== keepRevision || drop.revision !== dropRevision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
+    if (keep.type !== drop.type) throw new ArchiveError(400, '같은 종류의 설정끼리만 합칠 수 있습니다.');
+    const t = now();
+    const merged = { ...mergeInto(keep, drop), revision: keep.revision + 1, updatedAt: t };
+    if (body.preview === true) return merged;
+    const history = this.readHistory(worldId);
+    const before = structuredClone(keep);
+    const dropped = structuredClone(drop);
+    doc.entities[keepIndex] = merged;
+    doc.entities.splice(dropIndex, 1);
+    this.writeJson(this.entityFile(worldId), doc);
+    history.changes.push({
+      id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [],
+      entityId: keepId, name: merged.name, type: merged.type, action: 'merge',
+      dropId, dropName: drop.name, before, dropped, dropIndex, afterRevision: merged.revision,
+    });
+    if (history.changes.length > HISTORY_MAX) history.changes.splice(0, history.changes.length - HISTORY_MAX);
+    this.writeJson(this.historyFile(worldId), history);
+    return merged;
   }
 
   // ---------------------------------------------------------------- rooms

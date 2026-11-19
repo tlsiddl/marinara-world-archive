@@ -340,3 +340,173 @@ test('auto: history records who wrote a change (reader by default, a module by n
   assert.equal(c.by, 'reader', 'a name that is not a plain id falls back to reader');
   assert.equal(s.listEntities(w.worldId).find((e) => e.name === '도서관').provenance.by, 'reader');
 });
+
+// ---------------------------------------------------------------- 같은 사람일 수 있음
+
+const SAME = require('../world-archive/lib/same.cjs');
+const P = (name, aliases = []) => ({ entityId: name, type: 'person', name, aliases, fields: {}, description: '', createdAt: '' });
+
+test('same person: names, other names and titles; a shared surname alone is not enough', () => {
+  const yes = [
+    [P('세베루스 스네이프'), P('스네이프', ['Professor Snape'])],
+    [P('젬마 페얼리', ['prefect']), P('젬마')],
+    [P('젬마 페얼리', ['prefect']), P('슬리데린 5학년 반장', ['prefect'])],
+    [P('스네이프 교수'), P('스네이프교수님')],
+    [P('Mr. Filch'), P('Argus Filch')],
+    [P('마담 폼프리'), P('포피 폼프리')],
+    [P('해리 포터'), P('해리 제임스 포터')],
+    [P('지은'), P('박지은')],
+    [P('세베루스스네이프'), P('세베루스 스네이프')],
+  ];
+  for (const [a, b] of yes) assert.ok(SAME.whySame(a, b), `${a.name} · ${b.name}`);
+  assert.equal(SAME.whySame(P('세베루스 스네이프'), P('스네이프')), '「스네이프」 · 「세베루스 스네이프」의 일부');
+  assert.equal(SAME.whySame(P('젬마 페얼리', ['prefect']), P('슬리데린 5학년 반장', ['prefect'])), '같은 이름 「prefect」');
+  const no = [
+    [P('캐서린 베인'), P('줄리안 베인')],
+    [P('캐서린 베인'), P('베인 공작')],
+    [P('줄리안 베인'), P('베인 공작')],
+    [P('해리'), P('해리엇')],
+    [P('민경'), P('민')],
+    [P('젬마'), P('슬리데린 5학년 반장', ['prefect'])],
+    [P('A', ['교수']), P('B', ['Professor'])], // nothing but a title is no name
+  ];
+  for (const [a, b] of no) assert.equal(SAME.whySame(a, b), null, `${a.name} · ${b.name}`);
+  assert.deepEqual(SAME.words('Professor Snape'), ['snape']);
+  assert.deepEqual(SAME.words('스네이프 교수님'), ['스네이프']);
+});
+
+test('same person: the Harry Potter room — exactly the three pairs, family members left alone', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  const id = {};
+  for (const [name, aliases] of [
+    ['세베루스 스네이프', []], ['스네이프', ['Professor Snape']],
+    ['젬마 페얼리', ['prefect']], ['젬마', []], ['슬리데린 5학년 반장', ['prefect']],
+    ['캐서린 베인', []], ['줄리안 베인', []], ['베인 공작', []],
+  ]) id[name] = s.createEntity(w.worldId, { type: 'person', name, aliases }).entityId;
+  s.createEntity(w.worldId, { type: 'place', name: '스네이프' }); // only people are compared
+  const name = Object.fromEntries(Object.entries(id).map(([k, v]) => [v, k]));
+  const got = s.listDuplicates(w.worldId).map((p) => [name[p.a], name[p.b]].sort().join(' · ')).sort();
+  assert.deepEqual(got, ['세베루스 스네이프 · 스네이프', '슬리데린 5학년 반장 · 젬마 페얼리', '젬마 · 젬마 페얼리']);
+  for (const p of s.listDuplicates(w.worldId)) assert.equal(typeof p.why, 'string');
+});
+
+/** 세베루스 스네이프 (typed by hand, then read into) and 스네이프 (read from the chat, then partly typed by hand). */
+function snapes(s) {
+  const w = s.createWorld({ name: '호그와트' });
+  const keep = s.createEntity(w.worldId, { type: 'person', name: '세베루스 스네이프', fields: { gender: '남성', affiliation: '슬리데린 기숙사장' }, description: '마법약 교수' });
+  s.applyAuto(w.worldId, [{ type: 'person', name: '세베루스 스네이프', fields: { appearance: '검은 머리', personality: '냉정함' } }]);
+  s.applyAuto(w.worldId, [{ type: 'person', name: '스네이프', aliases: ['Professor Snape'], fields: { affiliation: '호그와트', age: '38세', gender: '남' }, memo: '어둠의 마법 방어술 자리를 원함' }]);
+  const d0 = s.listEntities(w.worldId).find((e) => e.name === '스네이프');
+  s.updateEntity(w.worldId, d0.entityId, { fields: { affiliation: '호그와트', age: '38세', gender: '남자', personality: '사실은 다정함' }, extra: [{ label: '좋아하는 것', value: '마법약' }], revision: d0.revision });
+  const all = s.listEntities(w.worldId);
+  return { w, keep: all.find((e) => e.entityId === keep.entityId), drop: all.find((e) => e.entityId === d0.entityId) };
+}
+const mergeBody = (keep, drop, more = {}) => ({ keepId: keep.entityId, dropId: drop.entityId, keepRevision: keep.revision, dropRevision: drop.revision, ...more });
+
+test('merge: names become other names, empty fields filled, hand-written fields of the kept one never replaced', (t) => {
+  const s = temp(t);
+  const { w, keep, drop } = snapes(s);
+  assert.equal(keep.sources.appearance, 'auto');
+  assert.equal(drop.sources.personality, 'manual');
+  assert.equal(drop.sources.affiliation, 'auto');
+
+  const files = () => [s.entityFile(w.worldId), s.historyFile(w.worldId)].map((f) => fs.readFileSync(f, 'utf8'));
+  const before = files();
+  const pv = s.mergeEntities(w.worldId, mergeBody(keep, drop, { preview: true }));
+  assert.deepEqual(files(), before, 'a preview saves nothing');
+
+  const m = s.mergeEntities(w.worldId, mergeBody(keep, drop));
+  assert.deepEqual({ ...m, updatedAt: null }, { ...pv, updatedAt: null }, 'the preview is what the merge does');
+  assert.equal(m.name, '세베루스 스네이프');
+  assert.deepEqual(m.aliases, ['스네이프', 'Professor Snape']);
+  assert.equal(m.fields.gender, '남성', 'hand-written on both: the kept one stays');
+  assert.equal(m.fields.affiliation, '슬리데린 기숙사장', 'hand-written on the kept one: an automatic one does not replace it');
+  assert.equal(m.fields.age, '38세', 'empty: filled');
+  assert.equal(m.sources.age, 'auto', 'and still automatic');
+  assert.equal(m.fields.appearance, '검은 머리');
+  assert.equal(m.fields.personality, '사실은 다정함', 'hand-written on the dropped one wins over an automatic one');
+  assert.equal(m.sources.personality, 'manual');
+  assert.equal(m.description, '마법약 교수\n\n어둠의 마법 방어술 자리를 원함', 'a different memo is added below');
+  assert.equal(m.sources.description, 'manual');
+  assert.deepEqual(m.extra, [{ label: '좋아하는 것', value: '마법약' }]);
+  assert.equal(m.revision, keep.revision + 1);
+  assert.equal(m.provenance.merged[0].entityId, drop.entityId);
+  const people = s.listEntities(w.worldId);
+  assert.deepEqual(people.map((e) => e.name), ['세베루스 스네이프'], 'the dropped one is gone');
+  const [h] = s.listHistory(w.worldId);
+  assert.equal(h.action, 'merge');
+  assert.equal(h.by, 'person');
+  assert.equal(h.dropName, '스네이프');
+  assert.equal(s.listDuplicates(w.worldId).length, 0);
+
+  // later automatic reading never writes over what came from the person's side
+  s.applyAuto(w.worldId, [{ type: 'person', name: '스네이프', fields: { personality: '음침함', age: '40세' } }]);
+  const after = s.listEntities(w.worldId)[0];
+  assert.equal(after.fields.personality, '사실은 다정함');
+  assert.equal(after.fields.age, '40세', 'an automatic field stays automatic');
+});
+
+test('merge: refused for a stale revision, the same setting, different kinds; aliases stop at the limit', (t) => {
+  const s = temp(t);
+  const { w, keep, drop } = snapes(s);
+  assert.throws(() => s.mergeEntities(w.worldId, mergeBody(keep, drop, { dropRevision: drop.revision - 1 })), status(409));
+  assert.throws(() => s.mergeEntities(w.worldId, mergeBody(keep, keep)), status(400));
+  assert.throws(() => s.mergeEntities(w.worldId, { keepId: keep.entityId, dropId: drop.entityId }), status(400));
+  const place = s.createEntity(w.worldId, { type: 'place', name: '지하 감옥' });
+  assert.throws(() => s.mergeEntities(w.worldId, mergeBody(keep, place)), status(400));
+  const many = s.createEntity(w.worldId, { type: 'person', name: '많은 이름', aliases: Array.from({ length: 19 }, (_, i) => `이름${i}`) });
+  const m = s.mergeEntities(w.worldId, mergeBody(many, drop));
+  assert.equal(m.aliases.length, 20);
+  assert.equal(m.aliases.at(-1), '스네이프');
+});
+
+test('merge: undo brings both back as they were, only while the kept one has not changed since', (t) => {
+  const s = temp(t);
+  const { w, keep, drop } = snapes(s);
+  const strip = (e) => ({ ...e, revision: null, updatedAt: null });
+  s.mergeEntities(w.worldId, mergeBody(keep, drop));
+  const [h] = s.listHistory(w.worldId);
+  assert.equal(s.undoChange(w.worldId, h.id).undone, true);
+  const back = s.listEntities(w.worldId);
+  assert.deepEqual(back.map((e) => e.entityId), [keep.entityId, drop.entityId], 'in their old places');
+  assert.deepEqual(strip(back[0]), strip(keep), 'the kept one as it was');
+  assert.equal(back[0].revision, keep.revision + 2, 'its revision moves on, never back');
+  assert.deepEqual(back[1], drop, 'the dropped one exactly as it was');
+  assert.throws(() => s.undoChange(w.worldId, h.id), status(409), 'twice');
+  assert.equal(s.listDuplicates(w.worldId).length, 1, 'suggested again');
+
+  // merged again, then the kept one is changed: the merge is not undone
+  const now = s.listEntities(w.worldId);
+  const m = s.mergeEntities(w.worldId, mergeBody(now[0], now[1]));
+  s.updateEntity(w.worldId, m.entityId, { pinned: true, revision: m.revision });
+  const [h2] = s.listHistory(w.worldId);
+  assert.equal(h2.action, 'merge');
+  assert.throws(() => s.undoChange(w.worldId, h2.id), (e) => e.status === 409 && /합친 뒤에 다시 바뀌어서/.test(e.message));
+  assert.equal(s.listEntities(w.worldId).length, 1, 'nothing changed');
+
+  // an automatic change to the kept one after a merge also stops it
+  const fresh = s.createEntity(w.worldId, { type: 'person', name: '젬마' });
+  const gemma = s.createEntity(w.worldId, { type: 'person', name: '젬마 페얼리' });
+  s.mergeEntities(w.worldId, mergeBody(gemma, fresh));
+  const [h3] = s.listHistory(w.worldId);
+  s.applyAuto(w.worldId, [{ type: 'person', name: '젬마 페얼리', fields: { age: '16세' } }]);
+  assert.throws(() => s.undoChange(w.worldId, h3.id), status(409));
+});
+
+test('same person: 「다른 사람이에요」 keeps a pair from being suggested again, also after a restart', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const a = s.createEntity(w.worldId, { type: 'person', name: '젬마 페얼리', aliases: ['prefect'] });
+  const b = s.createEntity(w.worldId, { type: 'person', name: '젬마' });
+  const c = s.createEntity(w.worldId, { type: 'person', name: '슬리데린 5학년 반장', aliases: ['prefect'] });
+  assert.equal(s.listDuplicates(w.worldId).length, 2);
+  assert.deepEqual(s.dismissPair(w.worldId, c.entityId, a.entityId), { dismissed: true, a: c.entityId, b: a.entityId });
+  s.dismissPair(w.worldId, a.entityId, c.entityId); // twice is the same
+  const left = new Archive(s.dir).listDuplicates(w.worldId);
+  assert.deepEqual(left.map((p) => [p.a, p.b].sort()), [[a.entityId, b.entityId].sort()]);
+  assert.equal(JSON.parse(fs.readFileSync(s.dismissFile(w.worldId), 'utf8')).pairs.length, 1);
+  assert.throws(() => s.dismissPair(w.worldId, a.entityId, a.entityId), status(400));
+  assert.throws(() => s.dismissPair(w.worldId, a.entityId, '00000000-0000-4000-8000-000000000000'), status(404));
+  assert.throws(() => s.dismissPair(w.worldId, a.entityId, 'x'), status(400));
+});

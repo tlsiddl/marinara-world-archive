@@ -293,3 +293,35 @@ test('the same three functions are offered in-process on globalThis.__marinaraWo
   assert.equal(r.written, true);
   assert.equal(s.listHistory(w.worldId)[0].by, 'memory-module');
 });
+
+test('same person over HTTP: suggestions, merge, history, undo, 「다른 사람이에요」', async (t) => {
+  const { call } = setup(t);
+  const w = (await call('POST', `${A}/worlds`, { name: '호그와트' })).data;
+  const add = async (name, aliases = []) => (await call('POST', `${A}/worlds/${w.worldId}/entities`, { type: 'person', name, aliases })).data;
+  const severus = await add('세베루스 스네이프');
+  const snape = await add('스네이프', ['Professor Snape']);
+  const gemma = await add('젬마 페얼리', ['prefect']);
+  const prefect = await add('슬리데린 5학년 반장', ['prefect']);
+  await add('캐서린 베인');
+  await add('베인 공작');
+  const d = await call('GET', `${A}/worlds/${w.worldId}/duplicates`);
+  assert.equal(d.status, 200);
+  assert.equal(d.data.pairs.length, 2);
+  assert.ok(d.data.pairs.every((p) => typeof p.a === 'string' && typeof p.b === 'string' && typeof p.why === 'string'));
+
+  const stale = await call('POST', `${A}/worlds/${w.worldId}/merge`, { keepId: severus.entityId, dropId: snape.entityId, keepRevision: 9, dropRevision: 1 });
+  assert.equal(stale.status, 409);
+  const m = await call('POST', `${A}/worlds/${w.worldId}/merge`, { keepId: severus.entityId, dropId: snape.entityId, keepRevision: 1, dropRevision: 1 });
+  assert.equal(m.status, 200);
+  assert.deepEqual(m.data.aliases, ['스네이프', 'Professor Snape']);
+  assert.equal((await call('GET', `${A}/worlds/${w.worldId}/entities`)).data.entities.length, 5);
+  const [h] = (await call('GET', `${A}/worlds/${w.worldId}/history`)).data.changes;
+  assert.equal(h.action, 'merge');
+  assert.equal((await call('POST', `${A}/worlds/${w.worldId}/history/${h.id}/undo`)).data.undone, true);
+  assert.equal((await call('GET', `${A}/worlds/${w.worldId}/entities`)).data.entities.length, 6);
+
+  const x = await call('POST', `${A}/worlds/${w.worldId}/duplicates/dismiss`, { a: gemma.entityId, b: prefect.entityId });
+  assert.equal(x.data.dismissed, true);
+  assert.equal((await call('GET', `${A}/worlds/${w.worldId}/duplicates`)).data.pairs.length, 1);
+  assert.equal((await call('POST', `${A}/worlds/${w.worldId}/duplicates/dismiss`, { a: gemma.entityId })).status, 400);
+});
