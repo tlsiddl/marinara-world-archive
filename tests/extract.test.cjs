@@ -75,7 +75,7 @@ test('each field is checked against its own evidence; a field that fails is left
       fields: {
         age: { v: '노인', n: ['1.1'] },
         appearance: { v: '왼손 약지가 없음', n: ['1.2'] },
-        gender: { v: '서른 해 전 서른둘, 콧수염이 검었음', n: ['1.2'] }, // the sentence says something else
+        state: { v: '서른 해 전 서른둘, 콧수염이 검었음', n: ['1.2'] }, // the sentence says something else
         family: { v: '아내가 있었음', n: ['8.8'] }, // no such sentence
         background: { v: '서른 해째 여관을 지킴', n: ['2.1'] }, // translated from English: not compared
         personality: '무뚝뚝함', // plain string: taken as before
@@ -87,7 +87,22 @@ test('each field is checked against its own evidence; a field that fails is left
   assert.equal(e.fieldEvidence.age, '물푸레의 주인은 노인이다.');
   assert.equal(e.fieldEvidence.appearance, '그의 왼손에는 약지가 없다.');
   assert.equal(e.fieldEvidence.personality, undefined);
-  assert.deepEqual(droppedFields.map((d) => [d.key, d.why]), [['gender', 'not in its evidence'], ['family', 'no evidence sentence']]);
+  assert.deepEqual(droppedFields.map((d) => [d.key, d.why]), [['state', 'not in its evidence'], ['family', 'no evidence sentence']]);
+});
+
+test('class fields need only their sentence; a field without numbers uses the item evidence; paragraphs need 20%', () => {
+  const [part] = X.batches([msg(1, '순찰이 다리를 건넌다. 그는 고개를 숙였다. 문은 세 번 두드려야 열린다.')], 0);
+  const { items, droppedFields } = X.checkItems({
+    items: [
+      { type: 'group', name: '순찰', evidence: [{ n: '1.1' }], fields: { kind: { v: '도시 경비대', n: ['1.1'] }, members: { v: '다리를 건너는 사람들', n: [] } } },
+      { type: 'person', name: '순찰', evidence: [{ n: '1.2' }], fields: { gender: { v: '남성', n: ['1.2'] }, personality: { v: '고개를 잘 숙임', n: ['1.2'] } } },
+      { type: 'rule', name: '문은 세 번 두드린다', evidence: [{ n: '1.3' }], fields: { category: { v: '관례' } } },
+    ],
+  }, part, []);
+  assert.deepEqual(items.map((i) => Object.keys(i.fields).sort()), [['kind', 'members'], ['gender', 'personality'], ['category']]);
+  assert.equal(items[0].fieldEvidence.members, '순찰이 다리를 건넌다.', 'no numbers: the item evidence');
+  assert.equal(items[2].fieldEvidence.category, '문은 세 번 두드려야 열린다.');
+  assert.deepEqual(droppedFields, []);
 });
 
 test('overlap counts the value\'s two-letter pieces found in the evidence', () => {

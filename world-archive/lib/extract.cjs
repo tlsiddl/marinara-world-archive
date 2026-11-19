@@ -102,7 +102,7 @@ function buildPrompt(world, entities, part, cast) {
 - 아래 "카드가 있는 인물"(주인공과 사용자 캐릭터).
 - 글에 나오지 않은 추측. 원문에 쓰여 있거나 분명히 보이는 것만 적는다.
 - 이미 있는 항목과 똑같은 내용.
-- 이름 없이 지나가는 사람(「등불을 든 사람」, 「지나가던 학생」). 이름이 없는 인물은 고정된 직함이 있고(수위, 사감, 여관 주인) 다시 나올 사람만 직함을 이름으로 적는다.
+- 이름 없이 지나가는 사람(「지나가던 학생」). 이름이 없는 인물은 고정된 직함·역할이 있고(수위, 사감, 여관 주인, 생선 장수) 다시 나올 사람만, 그 직함·역할을 이름으로 적는다. 외모로 부르지 않는다(「붉은 머리 남자」가 아니라 「대장장이」). 직함·역할도 없으면 만들지 않는다.
 - 흔한 일반 장소(「시내」, 「복도」, 「거리」). 장소는 고유한 이름이 있거나 특정한 한 곳만 적는다.
 
 종류 (맞는 것을 고른다):
@@ -118,7 +118,7 @@ ${fieldGuide()}
 칸 쓰는 법:
 - 칸마다 그 값이 나온 문장 번호를 n에 1~3개 적는다. 그 칸의 내용이 실제로 쓰인 문장이어야 한다(다른 사실이 쓰인 문장을 대지 마).
 - age(나이·생일)에는 나이를 나타내는 말만 쓴다(예: 열두 살, 노인, 50대). 몇 해째 일했다거나 외모 같은 것은 다른 칸에 쓴다.
-- state(지금 상태)에는 며칠 뒤에도 사실일 상태만 쓴다: 다침, 병, 이사, 직위·소속 변화, 관계 단절, 잃어버린 물건 같은 것. 지금 하는 동작, 잠깐 간 곳, 그날의 기분은 쓰지 않는다.
+- state(지금 상태)에는 며칠 뒤에도 사실일 상태만 쓴다: 다침, 병, 이사, 직위·소속 변화, 관계 단절, 잃어버린 물건 같은 것. 지금 하는 동작, 잠깐 간 곳, 그날의 기분은 쓰지 않는다. 버릇·걸음걸이·말투는 상태가 아니라 appearance(외형)나 personality(성격)에 쓴다.
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
   좋은 예: "오른팔이 부러져 붕대를 감고 다님", "기사단에서 쫓겨나 항구 창고에서 지냄"
 - 각 칸의 뜻에 맞는 값만 넣는다(위계 칸에는 위계·역할만, 위치 칸에는 위치만).
@@ -165,15 +165,19 @@ function overlap(value, evidence) {
   for (let i = 0; i < v.length - 1; i++) if (e.includes(v.slice(i, i + 2))) hit++;
   return hit / (v.length - 1);
 }
-const FIELD_OVERLAP = { line: 0.5, text: 0.3 };
+const FIELD_OVERLAP = { line: 0.5, text: 0.2 };
+/** Fields that name a class rather than repeat the text (성별 from "그", 분류 "관례"): their sentence is enough. */
+const CLASS_FIELDS = new Set(['person.gender', 'group.kind', 'rule.category', 'system.category']);
 
 /**
  * Fields come as {key: {v, n: ["12.3"]}} (each with its own evidence) or, as before, {key: "value"}.
  * A field with its own evidence is kept only when that sentence is found and, when value and sentence are both Korean,
- * enough of the value's two-letter pieces are in it (line fields 50%, paragraph fields 30%). A value translated from
- * an English sentence is not compared. A plain string is taken as before (checked only through the item's evidence).
+ * enough of the value's two-letter pieces are in it (line fields 50%, paragraph fields 20%). A field given without
+ * sentence numbers is checked against the item's evidence sentences (itemFound). Class fields (CLASS_FIELDS) and values
+ * translated from an English sentence are not compared. A plain string is taken as before (checked only through the
+ * item's evidence).
  */
-function checkFields(type, raw, index) {
+function checkFields(type, raw, index, itemFound = []) {
   const fields = {};
   const fieldEvidence = {};
   const droppedFields = [];
@@ -184,15 +188,15 @@ function checkFields(type, raw, index) {
       continue;
     }
     if (!given || typeof given !== 'object' || typeof given.v !== 'string' || !given.v.trim()) continue;
-    const refs = (Array.isArray(given.n) ? given.n : given.n != null ? [given.n] : []).map((x) => (typeof x === 'object' && x ? x : { n: x }));
-    const found = S.resolveEvidence(refs, index).slice(0, 3);
+    const refs = (Array.isArray(given.n) ? given.n : given.n != null && given.n !== '' ? [given.n] : []).map((x) => (typeof x === 'object' && x ? x : { n: x }));
+    const found = refs.length ? S.resolveEvidence(refs, index).slice(0, 3) : itemFound;
     if (!found.length) {
       droppedFields.push({ key, why: 'no evidence sentence' });
       continue;
     }
     const said = found.map((p) => p.text).join(' ');
     const kind = FIELDS[type]?.find((f) => f.key === key)?.kind || 'text';
-    if (isKorean(given.v) && isKorean(said) && overlap(given.v, said) < FIELD_OVERLAP[kind]) {
+    if (!CLASS_FIELDS.has(`${type}.${key}`) && isKorean(given.v) && isKorean(said) && overlap(given.v, said) < FIELD_OVERLAP[kind]) {
       droppedFields.push({ key, why: 'not in its evidence' });
       continue;
     }
@@ -229,7 +233,7 @@ function checkItems(parsed, part, cast) {
     const raw = Array.isArray(it.evidence) ? it.evidence : it.evidence ? [it.evidence] : [];
     const found = S.resolveEvidence(raw.map((e) => (typeof e === 'string' ? { q: e } : e)), index).slice(0, 3);
     if (!found.length) { dropped.push({ name, why: 'no evidence sentence' }); continue; }
-    const f = checkFields(it.type, it.fields, index);
+    const f = checkFields(it.type, it.fields, index, found);
     for (const d of f.droppedFields) droppedFields.push({ name, ...d });
     items.push({
       type: it.type,
