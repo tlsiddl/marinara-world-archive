@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { findPairs } = require('./same.cjs');
+const N = require('./names.cjs');
 
 const SCHEMA = 1;
 const NAME_MAX = 120;
@@ -174,7 +175,8 @@ function markManual(sources, before, after) {
     if (after.description) out.description = 'manual';
     else delete out.description;
   }
-  for (const k of Object.keys(out)) if (k !== 'description' && !(after.fields || {})[k]) delete out[k];
+  // the name: marked manual once the person renames (see updateEntity); it has no field of its own
+  for (const k of Object.keys(out)) if (k !== 'description' && k !== 'name' && !(after.fields || {})[k]) delete out[k];
   return out;
 }
 
@@ -213,7 +215,7 @@ function mergeInto(keep, drop) {
     description = `${description}\n\n${dd}`.slice(0, DESC_MAX);
     if (sources.description === 'auto' && ds.description !== 'auto') sources.description = 'manual';
   }
-  for (const k of Object.keys(sources)) if (k === 'description' ? !description : !fields[k]) delete sources[k];
+  for (const k of Object.keys(sources)) if (k !== 'name' && (k === 'description' ? !description : !fields[k])) delete sources[k];
   const aliases = [...keep.aliases];
   const seen = new Set([keep.name, ...aliases].map((a) => a.toLowerCase()));
   for (const a of [drop.name, ...drop.aliases]) {
@@ -587,6 +589,12 @@ class Archive {
     const next = this.entityInput(rest, entity);
     // What the person changed by hand becomes theirs: automatic updates never write over it again.
     next.sources = markManual(entity.sources || {}, entity, next);
+    // A name the person typed is theirs too: the glossary only suggests its own form from then on.
+    if (next.name !== entity.name) {
+      next.sources.name = 'manual';
+      delete next.glossaryName;
+      delete entity.glossaryName;
+    }
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
     this.writeJson(this.entityFile(worldId), doc);
     return entity;
@@ -780,6 +788,16 @@ class Archive {
         const i = e.aliases.indexOf(c.after);
         if (i < 0) throw new ArchiveError(409, later);
         e.aliases.splice(i, 1);
+      } else if (c.action === 'rename') {
+        // The old name comes back and is kept as the person's choice (nameKept): the glossary's form is then only a
+        // suggestion, so the next reading does not rename it again. (Not a manual source: undoing 'create' still works.)
+        if (e.name !== c.after) throw new ArchiveError(409, later);
+        e.name = c.before;
+        const added = new Set(c.addedAliases || []);
+        e.aliases = e.aliases.filter((a) => !added.has(a) && a.toLowerCase() !== e.name.toLowerCase());
+        for (const a of c.removedAliases || []) if (!e.aliases.includes(a) && e.aliases.length < ALIAS_MAX) e.aliases.push(a);
+        e.nameKept = true;
+        e.glossaryName = c.after;
       }
       e.revision++;
       e.updatedAt = now();
@@ -788,6 +806,70 @@ class Archive {
     c.undoneAt = now();
     this.writeJson(this.historyFile(worldId), history);
     return { undone: true, changeId };
+  }
+
+  // ---------------------------------------------------------------- names from the translation glossary
+
+  /**
+   * Brings names in line with the room's glossary pairs ([{ from, to }], from vendor/glossary.cjs). ids: only these
+   * settings (after a reading), or all when omitted (the glossary changed). A setting whose name or other name is
+   * either side of a pair gets the glossary's Korean as its name and the original form among its other names; that is
+   * a 'rename' in the history, undoable like the rest. A name the person chose is not renamed: the setting carries
+   * glossaryName (shown as a suggestion) instead. When another setting already has the glossary's name, both stay as
+   * they are (「같은 사람일 수 있음」 shows them). Returns the changes.
+   */
+  alignGlossary(worldId, pairs, meta = {}) {
+    this.getWorld(worldId);
+    if (!Array.isArray(pairs)) return [];
+    const doc = this.readEntities(worldId);
+    const history = this.readHistory(worldId); // a broken history file stops this before anything is written
+    const t = now();
+    const changes = [];
+    const only = meta.ids ? new Set(meta.ids) : null;
+    let dirty = false;
+    const log = (c) => changes.push({ id: randomUUID(), at: t, by: 'glossary', roomId: meta.roomId ?? null, messageIds: [], ...c });
+    for (const e of doc.entities) {
+      if (only && !only.has(e.entityId)) continue;
+      const p = N.pairFor(e, pairs);
+      if (!p) {
+        if (e.glossaryName) {
+          delete e.glossaryName; // the glossary no longer names it
+          dirty = true;
+        }
+        continue;
+      }
+      const taken = new Set(doc.entities.filter((o) => o !== e).map((o) => N.key(o.name)));
+      const plan = N.planFor(e, p, taken, { aliasMax: ALIAS_MAX, aliasLen: ALIAS_LEN });
+      const evidence = `번역 단어장: ${p.from} = ${p.to}`;
+      if (plan?.suggest) {
+        if (e.glossaryName !== plan.suggest) (e.glossaryName = plan.suggest), (dirty = true);
+        continue;
+      }
+      if (e.glossaryName && (e.name === p.to || plan?.rename)) {
+        delete e.glossaryName;
+        dirty = true;
+      }
+      if (plan?.alias) {
+        e.aliases.push(plan.alias);
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'alias', after: plan.alias, evidence });
+      } else if (plan?.rename) {
+        const before = e.name;
+        e.name = plan.rename.name;
+        e.aliases = plan.rename.aliases;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'rename', before, after: e.name, addedAliases: plan.rename.added, removedAliases: plan.rename.removed, evidence });
+      } else continue;
+      e.revision++;
+      e.updatedAt = t;
+      dirty = true;
+    }
+    if (!dirty) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    if (changes.length) {
+      history.changes.push(...changes);
+      if (history.changes.length > HISTORY_MAX) history.changes.splice(0, history.changes.length - HISTORY_MAX);
+      this.writeJson(this.historyFile(worldId), history);
+    }
+    return changes;
   }
 
   // ---------------------------------------------------------------- 같은 사람일 수 있음
@@ -914,6 +996,21 @@ class Archive {
     if (!rooms.rooms[roomId]) return;
     if (read === null) delete rooms.rooms[roomId].read;
     else rooms.rooms[roomId].read = { lastId: read.lastId ?? null, count: read.count, at: now() };
+    this.writeJson(this.roomsFile, rooms);
+  }
+
+  /** The hash of the glossary pairs last brought into this room's world (null: never; relinking forgets it). */
+  roomGlossaryHash(roomId) {
+    if (typeof roomId !== 'string' || !ROOM_RE.test(roomId)) return null;
+    const h = this.readRooms().rooms[roomId]?.glossary?.hash;
+    return typeof h === 'string' ? h : null;
+  }
+
+  setRoomGlossary(roomId, hash) {
+    needRoom(roomId);
+    const rooms = this.readRooms();
+    if (!rooms.rooms[roomId]) return;
+    rooms.rooms[roomId].glossary = { hash: String(hash), at: now() };
     this.writeJson(this.roomsFile, rooms);
   }
 

@@ -275,7 +275,40 @@ test('suggest: writes only when automatic updates are on, never over hand-writte
   assert.equal((await call('POST', `${A}/rooms/bad%2Fid/suggest`, { items })).status, 400);
 });
 
-test('the same three functions are offered in-process on globalThis.__marinaraWorldArchive.api', async (t) => {
+test('names over HTTP: settings with a romanized other name, every kind, in the glossary\'s shape', async (t) => {
+  const { call, s, w } = sceneSetup(t);
+  s.createEntity(w.worldId, { type: 'person', name: '세베루스 스네이프', aliases: ['Professor Snape', 'Severus Snape', 'Snape', '스네이프 교수'] });
+  s.createEntity(w.worldId, { type: 'place', name: '호그와트', aliases: ['Hogwarts'] });
+  s.createEntity(w.worldId, { type: 'group', name: '슬리데린', aliases: ['Slytherin'] });
+  s.createEntity(w.worldId, { type: 'system', name: '기숙사 점수', aliases: ['House Points'] });
+  s.createEntity(w.worldId, { type: 'person', name: 'Argus Filch', aliases: ['Filch'] }); // no Korean name: not a translation
+  s.createEntity(w.worldId, { type: 'person', name: '마담 폼프리', aliases: ['폼프리'] }); // no romanized form
+  const r = await call('GET', `${A}/rooms/room/names`);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data, { names: [
+    { original: 'Severus Snape', translation: '세베루스 스네이프', kind: '인물' },
+    { original: 'Hogwarts', translation: '호그와트', kind: '장소' },
+    { original: 'Slytherin', translation: '슬리데린', kind: '집단' },
+    { original: 'House Points', translation: '기숙사 점수', kind: '시스템' },
+  ] });
+  assert.deepEqual((await call('GET', `${A}/rooms/lonely/names`)).data, { names: [] }, 'a room with no world');
+  assert.equal((await call('GET', `${A}/rooms/bad%2Fid/names`)).status, 400);
+});
+
+test('suggest: names follow the room\'s glossary as last read, like the reader\'s', async (t) => {
+  const { call, s, w } = sceneSetup(t, { auto: { enabled: true } });
+  service._test.glossaries.clear();
+  t.after(() => service._test.glossaries.clear());
+  const items = [{ type: 'person', name: '마가렛', aliases: ['Margaret'], evidence: 'Margaret가 왔다' }];
+  await call('POST', `${A}/rooms/room/suggest`, { items: [{ ...items[0], name: '젬마', aliases: ['Gemma'] }], by: 'memory-module' });
+  assert.ok(s.listEntities(w.worldId).some((e) => e.name === '젬마'), 'no glossary read yet: as sent');
+  service._test.glossaries.set('room', [{ from: 'Margaret', to: '마거릿' }]);
+  const r = (await call('POST', `${A}/rooms/room/suggest`, { items, by: 'memory-module' })).data;
+  assert.deepEqual(r.changes.map((c) => c.action), ['create', 'rename']);
+  assert.deepEqual(s.listEntities(w.worldId).find((e) => e.entityId === r.changes[0].entityId).aliases, ['Margaret', '마가렛']);
+});
+
+test('the same four functions are offered in-process on globalThis.__marinaraWorldArchive.api', async (t) => {
   const before = globalThis.__marinaraWorldArchive;
   globalThis.__marinaraWorldArchive = { version: 'test' };
   t.after(() => {
@@ -285,8 +318,10 @@ test('the same three functions are offered in-process on globalThis.__marinaraWo
   const { s, w, ids } = sceneSetup(t, { auto: { enabled: true } });
   const api = globalThis.__marinaraWorldArchive.api;
   assert.equal(api.version, 1);
-  assert.deepEqual(Object.keys(api).sort(), ['lookup', 'roomEntities', 'suggest', 'version']);
+  assert.deepEqual(Object.keys(api).sort(), ['lookup', 'names', 'roomEntities', 'suggest', 'version']);
   assert.equal(api.roomEntities('room').entities.length, 4);
+  assert.deepEqual(api.names('room'), { names: [] }, 'no romanized other names yet');
+  assert.deepEqual(api.names('../x'), { names: [] });
   assert.equal(api.lookup('room', '반장').entity.entityId, ids.summer);
   assert.equal(api.lookup('../x', '반장').entity, null, 'a bad room id finds nothing');
   const r = api.suggest('room', [{ type: 'place', name: '강당', evidence: '강당에 모였다' }], 'memory-module');

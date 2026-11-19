@@ -391,7 +391,104 @@ test('same person: the Harry Potter room — exactly the three pairs, family mem
   for (const p of s.listDuplicates(w.worldId)) assert.equal(typeof p.why, 'string');
 });
 
-/** 세베루스 스네이프 (typed by hand, then read into) and 스네이프 (read from the chat, then partly typed by hand). */
+test('same person: different family names are two people, even with a shared other name; whole words only', () => {
+  const no = [
+    [P('줄리안 에이버리', ['Julian']), P('줄리안 베인', ['Julian'])],
+    [P('바너비 파이', ['Barnaby']), P('바너비 윌크스', ['Barnaby'])],
+    [P('Julian Avery', ['Julian']), P('Julian Bane', ['Julian'])],
+    [P('줄리안 에이버리', ['줄리안']), P('줄리안 베인', ['줄리안'])],
+    [P('공작'), P('공작부인')],
+    [P('공작'), P('베인 공작부인')],
+    [P('베인 공작'), P('베인 공작부인')],
+  ];
+  for (const [a, b] of no) assert.equal(SAME.whySame(a, b), null, `${a.name} · ${b.name}`);
+  const yes = [
+    [P('스네이프'), P('세베루스 스네이프')],
+    [P('젬마'), P('젬마 페얼리')],
+    [P('줄리안 에이버리', ['Julian Avery']), P('Julian Avery')], // one family name in Latin letters on both
+    [P('젬마 페럴리', ['Gemma Farley']), P('젬마 페얼리', ['Gemma Farley'])], // two spellings of one name
+    [P('스네이프부인'), P('스네이프')], // a title written onto a name is still taken off
+  ];
+  for (const [a, b] of yes) assert.ok(SAME.whySame(a, b), `${a.name} · ${b.name}`);
+  assert.deepEqual(SAME.words('공작부인'), ['공작부인']);
+});
+
+// ---------------------------------------------------------------- names from the translation glossary
+
+test('glossary names: renamed with the original kept, places too, a hand-typed name only gets a suggestion', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  s.applyAuto(w.worldId, [
+    { type: 'person', name: '마가렛', aliases: ['Margaret', '마거릿 '] },
+    { type: 'place', name: 'Hogwarts' },
+    { type: 'person', name: '스네이프' },
+    { type: 'person', name: 'Severus Snape' },
+  ]);
+  const hand = s.createEntity(w.worldId, { type: 'person', name: '젬마 페럴리', aliases: ['Gemma Farley'] });
+  const pairs = [
+    { from: 'Margaret', to: '마거릿' }, { from: 'Hogwarts', to: '호그와트' },
+    { from: 'Severus Snape', to: '세베루스 스네이프' }, { from: 'Gemma Farley', to: '젬마 페얼리' },
+  ];
+  const changes = s.alignGlossary(w.worldId, pairs, { roomId: 'room' });
+  const by = (n) => s.listEntities(w.worldId).find((e) => e.name === n);
+  assert.deepEqual(by('마거릿').aliases, ['Margaret', '마가렛'], 'the glossary form leaves the other names, the old name joins them');
+  assert.deepEqual(by('호그와트').aliases, ['Hogwarts']);
+  assert.deepEqual(by('세베루스 스네이프').aliases, ['Severus Snape']);
+  assert.ok(by('스네이프'), 'a surname alone stays as it is');
+  const g = s.listEntities(w.worldId).find((e) => e.entityId === hand.entityId);
+  assert.deepEqual([g.name, g.glossaryName], ['젬마 페럴리', '젬마 페얼리']);
+  assert.deepEqual(changes.map((c) => c.action), ['rename', 'rename', 'rename']);
+  assert.ok(changes.every((c) => c.by === 'glossary' && c.roomId === 'room' && /^번역 단어장: /.test(c.evidence)));
+  assert.deepEqual(s.alignGlossary(w.worldId, pairs, {}), [], 'twice: nothing');
+  const [h] = s.listHistory(w.worldId);
+  assert.equal(h.action, 'rename');
+
+  // another setting already has the glossary's name: both stay (the same-person list shows them)
+  const w2 = s.createWorld({ name: 'B' });
+  s.createEntity(w2.worldId, { type: 'person', name: '세베루스 스네이프' });
+  s.applyAuto(w2.worldId, [{ type: 'person', name: '스네이프', aliases: ['Severus Snape'] }]);
+  assert.deepEqual(s.alignGlossary(w2.worldId, pairs, {}).map((c) => [c.action, c.name, c.after]), [['alias', '세베루스 스네이프', 'Severus Snape']],
+    'the one already named so only gains the original form');
+  assert.deepEqual(s.listEntities(w2.worldId).map((e) => e.name), ['세베루스 스네이프', '스네이프']);
+  assert.equal(s.listDuplicates(w2.worldId).length, 1);
+  // only the settings asked for
+  const w3 = s.createWorld({ name: 'C' });
+  const [a, b] = s.applyAuto(w3.worldId, [{ type: 'person', name: 'Margaret' }, { type: 'place', name: 'Hogwarts' }]);
+  assert.deepEqual(s.alignGlossary(w3.worldId, pairs, { ids: [b.entityId] }).map((c) => c.entityId), [b.entityId]);
+  assert.equal(s.listEntities(w3.worldId).find((e) => e.entityId === a.entityId).name, 'Margaret');
+});
+
+test('glossary names: undo a rename; a name typed by hand stays the person\'s through other edits and merges', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  const [c] = s.applyAuto(w.worldId, [{ type: 'person', name: 'Margaret', fields: { age: '17세' } }]);
+  const pairs = [{ from: 'Margaret', to: '마거릿' }];
+  const [r] = s.alignGlossary(w.worldId, pairs, {});
+  let e = s.listEntities(w.worldId)[0];
+  assert.deepEqual([e.name, e.aliases, e.revision], ['마거릿', ['Margaret'], 2]);
+  // renamed again by the person after the glossary: the glossary's rename is not undone over it
+  const typed = s.updateEntity(w.worldId, e.entityId, { name: '메기', revision: e.revision });
+  assert.equal(typed.sources.name, 'manual');
+  assert.throws(() => s.undoChange(w.worldId, r.id), status(409));
+  const again = s.updateEntity(w.worldId, e.entityId, { name: '마거릿', revision: typed.revision });
+  assert.equal(s.undoChange(w.worldId, r.id).undone, true);
+  e = s.listEntities(w.worldId)[0];
+  assert.deepEqual([e.name, e.aliases], ['Margaret', []]);
+  assert.ok(e.revision > again.revision);
+  // a field edit keeps the name the person's
+  const f = s.updateEntity(w.worldId, e.entityId, { name: 'Maggie', revision: e.revision });
+  const g = s.updateEntity(w.worldId, e.entityId, { fields: { age: '18세' }, revision: f.revision });
+  assert.equal(g.sources.name, 'manual');
+  assert.deepEqual(s.alignGlossary(w.worldId, [{ from: 'Maggie', to: '매기' }], {}), []);
+  assert.equal(s.listEntities(w.worldId)[0].glossaryName, '매기');
+  // merged into another: the kept one's name stays the person's
+  const other = s.createEntity(w.worldId, { type: 'person', name: '매기 벨' });
+  const cur = s.listEntities(w.worldId).find((x) => x.entityId === e.entityId);
+  const m = s.mergeEntities(w.worldId, { keepId: cur.entityId, dropId: other.entityId, keepRevision: cur.revision, dropRevision: other.revision });
+  assert.equal(m.sources.name, 'manual');
+  void c;
+});
+
 function snapes(s) {
   const w = s.createWorld({ name: '호그와트' });
   const keep = s.createEntity(w.worldId, { type: 'person', name: '세베루스 스네이프', fields: { gender: '남성', affiliation: '슬리데린 기숙사장' }, description: '마법약 교수' });

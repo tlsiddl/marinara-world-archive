@@ -4,6 +4,7 @@
 //   serverDist, engine, parseExtra, characterName, connectionWithKey, connectionProvider, memoryCallOptions (as
 //   callOptions), askModel, and ledger.cjs parseJsonObject. Changes: only the storages World Archive needs, messages
 //   without the Memory Module's language/tracker steps, World Archive's own error wording, no usage bookkeeping.
+//   The glossary reader at the end is World Archive's own (the Memory Module reads it in the browser).
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -190,4 +191,48 @@ async function listConnections() {
   return (await e.connections.list()).map((c) => ({ id: c.id, name: c.name, model: c.model, provider: c.provider }));
 }
 
-module.exports = { engine, chatMessages, model, askModel, parseJsonObject, listConnections };
+// ---------------------------------------------------------------- the 번역 프리셋·단어장 glossary (World Archive's own)
+// Read in-process the way Marinara's own GET /api/personal-extensions/:id/storage reads it
+// (packages/server/src/routes/personal-extensions.routes.ts): the extension from personal-extension-storage.service,
+// its stored value from personal-extension-settings.service over app-settings.storage. Only an enabled, approved
+// browser extension counts, as for that route. READ ONLY: nothing here writes to any extension or its storage.
+const G = require('./glossary.cjs');
+
+let extPromise = null;
+function extensions() {
+  extPromise ??= (async () => {
+    const dist = serverDist();
+    const load = (rel) => import(pathToFileURL(path.join(dist, rel)).href);
+    const [db, installed, settings, appSettings] = await Promise.all([
+      load('db/connection.js'),
+      load('services/extensions/personal-extension-storage.service.js'),
+      load('services/extensions/personal-extension-settings.service.js'),
+      load('services/storage/app-settings.storage.js'),
+    ]);
+    const handle = await db.getDB();
+    return {
+      installed: installed.createPersonalExtensionsStorage(handle),
+      settings: settings.createPersonalExtensionSettingsStorage(appSettings.createAppSettingsStorage(handle)),
+    };
+  })();
+  extPromise.catch(() => (extPromise = null));
+  return extPromise;
+}
+
+/**
+ * The room's glossary text ("A = B" lines): config.chats[roomId].glossary, else config.defaults.glossary. null when the
+ * extension is not installed, cannot be read, or has no glossary field — never '' for a failure.
+ */
+async function glossary(roomId) {
+  try {
+    const x = await extensions();
+    const list = (await x.installed.list()).filter((e) => e?.runtime === 'client' && e.enabled && e.approvedHash === e.contentHash);
+    const ext = G.findExtension(list);
+    if (!ext) return null;
+    return G.glossaryText(await x.settings.get(ext.id), roomId);
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { engine, chatMessages, model, askModel, parseJsonObject, listConnections, glossary };

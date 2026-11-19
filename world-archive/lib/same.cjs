@@ -10,6 +10,9 @@
 //   4. a Korean given name and the same name with a one-syllable surname before it (「지은」 · 「박지은」)
 // Sharing one word between two names of several words is not enough: 「캐서린 베인」, 「줄리안 베인」 and
 // 「베인 공작」 are a family, not one person.
+// Two people whose own names are both a given name and a family name, with different family names, are never one
+// person — even when they share an other name (「줄리안 에이버리」 · 「줄리안 베인」, both also "Julian").
+// Words are compared whole: 「공작」 is not 「공작부인」 (a rank keeps the title written onto it).
 
 /** Titles and honorifics that are a word of their own ("Professor Snape", "스네이프 교수", "마담 폼프리"). */
 const TITLE_WORDS = new Set([
@@ -18,6 +21,11 @@ const TITLE_WORDS = new Set([
 ]);
 /** Titles written onto the name ("스네이프교수님", "젬마씨"); taken off only when two letters or more are left. */
 const TITLE_ENDINGS = ['선생님', '교수님', '선생', '교수', '부인', '여사', '박사', '님', '씨'];
+
+/** Ranks: 「공작부인」 is a title of its own (the duchess), not 「공작」 with 「부인」 written onto it. */
+const RANKS = new Set(['공작', '후작', '백작', '자작', '남작', '대공', '왕', '국왕', '여왕', '황제', '황후', '왕비', '왕자', '공주', '영주']);
+/** Words that make a name a role, not a given name and a family name (「슬리데린 5학년 반장」). */
+const ROLE = /\d|반장|사감|감독|회장|단장|대장|주인|장수|학생|학년|하인|집사|관리인|수위|사서|선배|후배|기사단/;
 
 const HANGUL = /^[가-힣]+$/;
 const len = (s) => [...s].length;
@@ -33,7 +41,7 @@ function words(name) {
   for (let w of plain.split(/\s+/)) {
     if (!w || TITLE_WORDS.has(w)) continue;
     for (const end of TITLE_ENDINGS) {
-      if (w.endsWith(end) && len(w) - len(end) >= 2) {
+      if (w.endsWith(end) && len(w) - len(end) >= 2 && !RANKS.has(w.slice(0, -end.length))) {
         w = w.slice(0, -end.length);
         break;
       }
@@ -76,10 +84,48 @@ function whyForms(x, y) {
   return null;
 }
 
+/** A name of a given name and a family name: two to four words of letters, none a rank, not a role. */
+const personal = (f) => f.words.length >= 2 && f.words.length <= 4 && f.words.every((w) => /^\p{L}+$/u.test(w) && !RANKS.has(w)) && !ROLE.test(f.text);
+const script = (w) => (/[가-힣]/.test(w) ? 'ko' : /[a-z]/.test(w) ? 'latin' : 'other');
+
+/** Family names (last words) of a person's personal names and other names, by script. */
+function families(fs) {
+  const out = new Map();
+  for (const f of fs) {
+    if (!personal(f)) continue;
+    const last = f.words.at(-1);
+    const s = script(last);
+    if (!out.has(s)) out.set(s, new Set());
+    out.get(s).add(last);
+  }
+  return out;
+}
+
+/**
+ * Both people's own names are a given name and a family name, and their family names differ (compared within one
+ * script, so 「줄리안 에이버리」 and "Julian Avery" are not told apart by spelling; any family name in common wins).
+ */
+function otherFamilies(fa, fb) {
+  const na = fa.find((f) => !f.alias);
+  const nb = fb.find((f) => !f.alias);
+  if (!na || !nb || !personal(na) || !personal(nb)) return false;
+  const A = families(fa);
+  const B = families(fb);
+  let differ = false;
+  for (const [s, set] of A) {
+    const other = B.get(s);
+    if (!other) continue;
+    if ([...set].some((x) => other.has(x))) return false;
+    differ = true;
+  }
+  return differ;
+}
+
 /** Why two people may be one, or null. */
 function whySame(a, b) {
   const fa = forms(a);
   const fb = forms(b);
+  if (otherFamilies(fa, fb)) return null;
   // the people's own names first, then other names
   const order = (f) => [...f.filter((x) => !x.alias), ...f.filter((x) => x.alias)];
   for (const x of order(fa)) for (const y of order(fb)) {

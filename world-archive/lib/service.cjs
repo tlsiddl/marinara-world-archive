@@ -5,6 +5,8 @@
 const path = require('node:path');
 const { Archive, ArchiveError, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY } = require('./store.cjs');
 const X = require('./extract.cjs');
+const N = require('./names.cjs');
+const G = require('./vendor/glossary.cjs');
 const { assembleWorld } = require('./inject.cjs');
 
 const TAG = '[world-archive]';
@@ -66,6 +68,47 @@ function autoReady(world) {
   return !!(world?.auto?.enabled && world.auto.connectionId);
 }
 
+// ---------------------------------------------------------------- the translation glossary (read only)
+const glossaries = new Map(); // roomId -> the pairs last read, for suggest() between readings
+
+/**
+ * The room's 「번역 프리셋·단어장」 pairs, or null when the glossary cannot be read or has no glossary field (then
+ * nothing follows it — a failure is never an empty glossary). Never throws.
+ */
+async function roomGlossary(api, roomId) {
+  try {
+    if (typeof api.glossary !== 'function') return null;
+    const text = await api.glossary(roomId);
+    if (typeof text !== 'string') return null;
+    const pairs = G.parseGlossary(text);
+    glossaries.set(roomId, pairs);
+    return pairs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When the room's glossary differs from the one last brought in (by hash), every setting of the world is brought in
+ * line with it; otherwise nothing. Returns the changes.
+ */
+function followGlossary(roomId, worldId, pairs) {
+  const hash = N.hashPairs(pairs);
+  if (store().roomGlossaryHash(roomId) === hash) return [];
+  const changes = store().alignGlossary(worldId, pairs, { roomId });
+  store().setRoomGlossary(roomId, hash);
+  if (changes.length) log(`chat ${roomId}: glossary changed; ${changes.length} name change(s)`);
+  return changes;
+}
+
+/** The settings a reading touched or named (by name or other name), for checking their names after saving. */
+function touchedIds(worldId, items, changes) {
+  const ids = new Set(changes.map((c) => c.entityId));
+  const keys = new Set(items.flatMap((it) => [it.name, it.match, ...(Array.isArray(it.aliases) ? it.aliases : [])]).filter((n) => typeof n === 'string' && n.trim()).map(N.key));
+  for (const e of store().readEntities(worldId).entities) if ([e.name, ...e.aliases].some((n) => keys.has(N.key(n)))) ids.add(e.entityId);
+  return ids;
+}
+
 /**
  * Reads what was not read yet in one room and writes what it finds into the room's world.
  * all: read everything pending now (the 「지금 읽기」 button); otherwise only when at least `every` settled messages
@@ -78,7 +121,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
   const worldId = s.roomWorldId(roomId);
   if (!worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
   const world = s.getWorld(worldId);
-  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, dropped: 0, fieldsDropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
+  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, renamed: 0, dropped: 0, fieldsDropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
   jobs.set(roomId, job);
   // 「처음부터 다시 읽기」: only where the room was read is forgotten. Settings stay; what is read again is applied (and
   // recorded) the usual way, so a person's own fields are still never written over.
@@ -88,6 +131,9 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
   }
   try {
     const api = engineApi();
+    // The glossary is read first: a changed one brings the existing names in line even when nothing new waits.
+    const glossary = await roomGlossary(api, roomId);
+    if (glossary) job.renamed += followGlossary(roomId, worldId, glossary).filter((c) => c.action === 'rename').length;
     const m = await api.model(world.auto.connectionId);
     const { messages, cast } = await api.chatMessages(roomId);
     const { start, pending, settled } = X.unread(messages, s.getRoom(roomId).read);
@@ -110,7 +156,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         let parsed = null;
         let split = false;
         for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-          const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast), { maxTokens: READ_MAX_TOKENS });
+          const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast, glossary || []), { maxTokens: READ_MAX_TOKENS });
           job.calls++;
           // Whatever token counts the provider reports (names differ between providers), summed for measuring.
           for (const [k, v] of Object.entries(reply.usage || {})) if (typeof v === 'number') job.tokens[k] = (job.tokens[k] || 0) + v;
@@ -138,6 +184,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
         job.added += changes.filter((c) => c.action === 'create').length;
         job.changed += changes.filter((c) => c.action !== 'create').length;
+        // Saved, then checked by the program: names the glossary has become the glossary's (model or not).
+        if (glossary) job.renamed += s.alignGlossary(worldId, glossary, { roomId, ids: touchedIds(worldId, items, changes) }).filter((c) => c.action === 'rename').length;
         job.dropped += dropped.length;
         job.fieldsDropped += droppedFields.length;
         s.setRoomRead(roomId, { lastId: part.batch.at(-1).id, count: part.end });
@@ -150,7 +198,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
     job.state = 'done';
     job.stage = '';
     const secs = ((Date.now() - Date.parse(job.startedAt)) / 1000).toFixed(1);
-    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.dropped} left out, ${job.fieldsDropped} field(s) left out`);
+    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.renamed} renamed by the glossary, ${job.dropped} left out, ${job.fieldsDropped} field(s) left out`);
   } catch (error) {
     job.state = 'error';
     job.error = error?.message || String(error);
@@ -322,6 +370,7 @@ async function routes(r) {
   r.get('/connections', handle(async () => ({ connections: await engineApi().listConnections() })));
   r.get('/rooms/:roomId/entities', handle(async (req) => { s().getRoom(req.params.roomId); return roomEntities(req.params.roomId); }));
   r.get('/rooms/:roomId/lookup', handle(async (req) => { s().getRoom(req.params.roomId); return lookup(req.params.roomId, String(req.query?.name || '')); }));
+  r.get('/rooms/:roomId/names', handle(async (req) => { s().getRoom(req.params.roomId); return names(req.params.roomId); }));
   r.post('/rooms/:roomId/suggest', handle(async (req) => {
     s().getRoom(req.params.roomId);
     const by = typeof body(req).by === 'string' ? body(req).by : 'module';
@@ -340,7 +389,7 @@ async function routes(r) {
 }
 
 // ---------------------------------------------------------------- for other modules (기억 서재 and others)
-// Contract: docs/연동-계약.md. The same three things are offered in-process on globalThis.__marinaraWorldArchive.api
+// Contract: docs/연동-계약.md. The same four things are offered in-process on globalThis.__marinaraWorldArchive.api
 // (no HTTP, for preloads in the same server) and over HTTP under /api/world-archive/rooms/:roomId/….
 const compact = (e) => ({ entityId: e.entityId, type: e.type, name: e.name, aliases: e.aliases, fields: e.fields, description: e.description, pinned: e.pinned, sources: e.sources, updatedAt: e.updatedAt });
 
@@ -372,7 +421,21 @@ function suggest(roomId, items, by = 'module') {
   // `by` names the module in the history; a name that is not a plain id is recorded as 'module'.
   const who = typeof by === 'string' && /^[a-z0-9-]{1,40}$/.test(by) ? by : 'module';
   const changes = store().applyAuto(worldId, list, { roomId, by: who });
+  // the room's glossary as last read: names it has become its own, as after the reader's saving
+  const pairs = glossaries.get(roomId);
+  if (pairs) changes.push(...store().alignGlossary(worldId, pairs, { roomId, ids: touchedIds(worldId, list.filter((x) => x && typeof x === 'object'), changes) }));
   return { written: true, changes: changes.map((c) => ({ id: c.id, action: c.action, entityId: c.entityId, name: c.name, key: c.key })) };
+}
+
+/**
+ * GET …/names: the room's names in the glossary's shape, { names: [{ original, translation, kind }] } — settings with
+ * a Korean name and a romanized other name, of every kind (kind is the Korean label: 인물, 장소, 집단, …). A room
+ * with no world: { names: [] }. Names that follow the glossary come back as the glossary's own pairs.
+ */
+function names(roomId) {
+  const worldId = store().roomWorldId(roomId);
+  if (!worldId) return { names: [] };
+  return { names: N.glossaryNames(store().readEntities(worldId).entities) };
 }
 
 /**
@@ -400,7 +463,7 @@ function branchOnSend(req, reply, payload) {
 }
 
 function attach(app) {
-  if (globalThis.__marinaraWorldArchive) globalThis.__marinaraWorldArchive.api = { version: 1, roomEntities, lookup, suggest };
+  if (globalThis.__marinaraWorldArchive) globalThis.__marinaraWorldArchive.api = { version: 1, roomEntities, lookup, suggest, names };
   app.register(routes, { prefix: PREFIX });
   app.addHook('preHandler', sceneBeforeReply);
   app.addHook('onSend', (req, reply, payload, done) => {
@@ -418,4 +481,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { render, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes } };
+module.exports = { render, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };

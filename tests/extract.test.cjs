@@ -308,3 +308,156 @@ test('a cut-off batch is read again in two halves, so nothing in it is lost', as
   assert.equal(s.getRoom('room').read.lastId, 'm5');
   assert.ok(fs.existsSync(path.join(s.dir, 'debug', 'cut-room.txt')));
 });
+
+// ---------------------------------------------------------------- the translation glossary (번역 프리셋·단어장)
+const G = require('../world-archive/lib/vendor/glossary.cjs');
+
+test('glossary: "A = B" either way round, the room\'s own else the default, nothing when it cannot be read', async () => {
+  assert.deepEqual(G.parseGlossary('Severus Snape = 세베루스 스네이프\n마거릿 = Margaret\n노트\n단어 = 낱말\nHogwarts=호그와트'), [
+    { from: 'Severus Snape', to: '세베루스 스네이프' },
+    { from: 'Margaret', to: '마거릿' },
+    { from: 'Hogwarts', to: '호그와트' },
+  ]);
+  const value = { config: { defaults: { glossary: 'A = 가' }, chats: { room: { glossary: 'B = 나' }, bare: {} } } };
+  assert.equal(G.glossaryText(value, 'room'), 'B = 나');
+  assert.equal(G.glossaryText(value, 'other'), 'A = 가', 'a room without its own: the default');
+  assert.equal(G.glossaryText(value, 'bare'), null, 'a room scope without a glossary field: nothing (not empty)');
+  assert.equal(G.glossaryText({ config: { defaults: {} } }, 'room'), null);
+  assert.equal(G.glossaryText({}, 'room'), null);
+  assert.equal(G.glossaryText(null, 'room'), null);
+  assert.equal(G.glossaryText({ config: { defaults: { glossary: '' } } }, 'room'), '', 'a saved empty glossary is a glossary');
+  assert.equal(G.findExtension([{ id: 'x', name: '다른 것' }, { id: 'g', name: '번역 프리셋·단어장 (기억 서재 호환)' }]).id, 'g');
+  assert.equal(G.findExtension([{ id: 'x', name: '다른 것' }]), null);
+  assert.equal(await real.glossary('room'), null, 'outside Marinara the reader fails quietly: null, never empty');
+});
+
+test('buildPrompt: only the glossary pairs named in the batch go in, with how to use them', () => {
+  const part = X.batches([msg(0, 'Severus Snape가 들어왔다. 마거릿도 왔다.')], 0)[0];
+  const pairs = [{ from: 'Severus Snape', to: '세베루스 스네이프' }, { from: 'Margaret', to: '마거릿' }, { from: 'Albus Dumbledore', to: '알버스 덤블도어' }];
+  const [sys, user] = X.buildPrompt({ name: '호그와트', description: '' }, [], part, [], pairs);
+  assert.match(user.content, /\[번역 단어장 — [^\]]*name을 단어장의 한국어 표기 그대로[^\]]*aliases에 넣어\]\n- Severus Snape = 세베루스 스네이프\n- Margaret = 마거릿\n\n/);
+  assert.doesNotMatch(user.content, /덤블도어/, 'a pair not in the batch stays out');
+  const [sys0, plain] = X.buildPrompt({ name: '호그와트', description: '' }, [], part, []);
+  assert.doesNotMatch(plain.content, /번역 단어장/, 'no glossary: no section');
+  assert.equal(sys.content, sys0.content, 'the system prompt does not change');
+});
+
+/** setup() with a stand-in glossary reader: source.text is what the extension holds (null: none), source.fail throws. */
+function glossarySetup(t, messages, replies, source) {
+  const r = setup(t, messages, replies);
+  service._test.glossaries.clear();
+  service._test.useEngine({
+    model: async () => ({}),
+    chatMessages: async () => ({ messages, cast: [] }),
+    askModel: async (m, prompt) => { r.calls.push(prompt); return { content: replies.shift() ?? '{"items":[]}' }; },
+    parseJsonObject: real.parseJsonObject,
+    listConnections: async () => [],
+    glossary: async (roomId) => { source.asked = (source.asked || 0) + 1; if (source.fail) throw Error('storage down'); return roomId === 'room' ? source.text : null; },
+  });
+  return r;
+}
+const six = (first) => [msg(0, first), msg(1, '응.'), msg(2, '그래?'), msg(3, '응.'), msg(4, '내일 봐.'), msg(5, '잘 자.')];
+
+test('runRoom with the glossary: the prompt names the pairs, saved names follow the glossary, renames are undoable', async (t) => {
+  const messages = six('Margaret Bell과 Gemma Farley가 왔다.');
+  const reply = JSON.stringify({ items: [
+    { type: 'person', name: '마가렛 벨', aliases: ['Margaret Bell'], evidence: [{ n: '1.1' }] },
+    { type: 'person', name: '젬마 페럴리', aliases: ['Gemma Farley'], evidence: [{ n: '1.1' }] },
+  ] });
+  const source = { text: 'Margaret Bell = 마거릿 벨\nGemma Farley = 젬마 페얼리\nHogwarts = 호그와트' };
+  const { s, w, calls } = glossarySetup(t, messages, [reply, reply], source);
+  const job = await service.runRoom('room', { all: true });
+  assert.equal(job.state, 'done');
+  assert.match(calls[0][1].content, /- Margaret Bell = 마거릿 벨\n- Gemma Farley = 젬마 페얼리\n\n/);
+  assert.doesNotMatch(calls[0][1].content, /호그와트/);
+  const people = s.listEntities(w.worldId);
+  assert.deepEqual(people.map((e) => [e.name, e.aliases]), [['마거릿 벨', ['Margaret Bell', '마가렛 벨']], ['젬마 페얼리', ['Gemma Farley', '젬마 페럴리']]]);
+  assert.equal(job.renamed, 2);
+  const renames = s.listHistory(w.worldId).filter((c) => c.action === 'rename');
+  assert.deepEqual(renames.map((c) => [c.before, c.after, c.by]).sort(), [['마가렛 벨', '마거릿 벨', 'glossary'], ['젬마 페럴리', '젬마 페얼리', 'glossary']]);
+
+  // undone: the old name comes back, and the glossary's stays only a suggestion
+  const r = renames.find((c) => c.before === '마가렛 벨');
+  assert.equal(s.undoChange(w.worldId, r.id).undone, true);
+  let mg = s.listEntities(w.worldId).find((e) => e.entityId === r.entityId);
+  assert.deepEqual([mg.name, mg.aliases, mg.glossaryName], ['마가렛 벨', ['Margaret Bell'], '마거릿 벨']);
+  s.setRoomRead('room', null);
+  await service.runRoom('room', { all: true }); // the same names read again
+  mg = s.listEntities(w.worldId).find((e) => e.entityId === r.entityId);
+  assert.equal(mg.name, '마가렛 벨', 'an undone rename is not done again');
+  // 「적용」 is the person's own rename: the suggestion goes, the name is the person's
+  const applied = s.updateEntity(w.worldId, mg.entityId, { name: mg.glossaryName, aliases: [...mg.aliases, mg.name], revision: mg.revision });
+  assert.deepEqual([applied.name, applied.glossaryName, applied.sources.name], ['마거릿 벨', undefined, 'manual']);
+});
+
+test('runRoom with the glossary: a changed glossary renames existing settings; the same one does not run again', async (t) => {
+  const messages = six('아무 일도 없었다.');
+  const source = { text: 'Margaret = 마가렛' };
+  const { s, w } = glossarySetup(t, messages, [], source);
+  const auto = s.applyAuto(w.worldId, [
+    { type: 'person', name: '마가렛', aliases: ['Margaret'] },
+    { type: 'place', name: 'Hogwarts' },
+    { type: 'person', name: '스네이프', aliases: ['Snape'] },
+  ]);
+  assert.equal(auto.length, 3);
+  const hand = s.createEntity(w.worldId, { type: 'person', name: 'Gemma Farley' });
+  await service.runRoom('room');
+  assert.equal(s.listHistory(w.worldId).filter((c) => c.action === 'rename').length, 0, 'already as the glossary says');
+
+  source.text = 'Margaret = 마거릿\nHogwarts = 호그와트\nGemma Farley = 젬마 페얼리\nSeverus Snape = 세베루스 스네이프';
+  const job = await service.runRoom('room'); // nothing new to read: idle, but the names follow
+  assert.equal(job.state, 'idle');
+  const by = (id) => s.listEntities(w.worldId).find((e) => e.entityId === id);
+  const [mg, hw, sn] = auto.map((c) => by(c.entityId));
+  assert.deepEqual([mg.name, mg.aliases], ['마거릿', ['Margaret', '마가렛']]);
+  assert.deepEqual([hw.name, hw.aliases, hw.type], ['호그와트', ['Hogwarts'], 'place'], 'places too');
+  assert.deepEqual([sn.name, sn.aliases], ['스네이프', ['Snape']], 'a surname alone is not the full name: left alone');
+  const g = by(hand.entityId);
+  assert.deepEqual([g.name, g.glossaryName], ['Gemma Farley', '젬마 페얼리'], 'a name the person typed: only a suggestion');
+  const count = s.listHistory(w.worldId).length;
+  await service.runRoom('room');
+  assert.equal(s.listHistory(w.worldId).length, count, 'the same glossary again: nothing');
+});
+
+test('runRoom with the glossary: unreadable or missing means nothing at all, never an empty glossary', async (t) => {
+  const messages = six('Margaret가 왔다.');
+  const reply = () => JSON.stringify({ items: [{ type: 'person', name: '마가렛', aliases: ['Margaret'], evidence: [{ n: '1.1' }] }] });
+  for (const source of [{ fail: true, text: 'Margaret = 마거릿' }, { text: null }]) {
+    const { s, w, calls } = glossarySetup(t, messages, [reply()], source);
+    const job = await service.runRoom('room', { all: true });
+    assert.equal(job.state, 'done');
+    assert.equal(source.asked, 1);
+    assert.doesNotMatch(calls[0][1].content, /번역 단어장/);
+    assert.equal(s.listEntities(w.worldId)[0].name, '마가렛');
+    assert.equal(s.roomGlossaryHash('room'), null, 'nothing remembered either');
+  }
+});
+
+test('round trip: glossary → archive names → glossary changes nothing the second time', async (t) => {
+  const messages = six('Margaret Bell과 Hogwarts, 그리고 Slytherin.');
+  const reply = JSON.stringify({ items: [
+    { type: 'person', name: '마가렛 벨', aliases: ['Margaret Bell', 'Professor Bell'], evidence: [{ n: '1.1' }] },
+    { type: 'place', name: '호그와트 성', aliases: ['Hogwarts'], evidence: [{ n: '1.1' }] },
+    { type: 'group', name: '슬리데린', aliases: ['Slytherin'], evidence: [{ n: '1.1' }] },
+  ] });
+  const glossary = 'Margaret Bell = 마거릿 벨\nHogwarts = 호그와트';
+  const source = { text: glossary };
+  const { s, w } = glossarySetup(t, messages, [reply], source);
+  await service.runRoom('room', { all: true });
+  const { names } = service.names('room');
+  assert.deepEqual(names, [
+    { original: 'Margaret Bell', translation: '마거릿 벨', kind: '인물' },
+    { original: 'Hogwarts', translation: '호그와트', kind: '장소' },
+    { original: 'Slytherin', translation: '슬리데린', kind: '집단' },
+  ]);
+  const pairs = G.parseGlossary(glossary);
+  for (const p of pairs) assert.ok(names.some((n) => n.original === p.from && n.translation === p.to), `${p.from} comes back as the glossary has it`);
+  // the archive's names added to the glossary, read again: no change anywhere
+  source.text = [...new Set([...glossary.split('\n'), ...names.map((n) => `${n.original} = ${n.translation}`)])].join('\n');
+  const before = JSON.stringify(s.listEntities(w.worldId));
+  const historyBefore = s.listHistory(w.worldId).length;
+  await service.runRoom('room');
+  assert.equal(JSON.stringify(s.listEntities(w.worldId)), before);
+  assert.equal(s.listHistory(w.worldId).length, historyBefore);
+  assert.deepEqual(service.names('room').names, names);
+});

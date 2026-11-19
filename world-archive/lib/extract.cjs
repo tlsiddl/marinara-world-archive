@@ -6,6 +6,7 @@
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
 const { TYPES, FIELDS } = require('./store.cjs');
 const S = require('./vendor/sentences.cjs');
+const N = require('./names.cjs');
 
 const HOLD_BACK = 2; // the newest messages may still be rerolled or edited: they are read on a later pass
 const BATCH_MESSAGES = 30;
@@ -93,9 +94,16 @@ function fieldGuide() {
   return TYPES.map((t) => `${t}: ${FIELDS[t].map((f) => `${f.key}(${f.label})`).join(', ') || '(칸 없음, memo만)'}`).join('\n');
 }
 
-/** The messages for one batch. world: { name, description }; entities: the world's settings; cast: names to skip. */
-function buildPrompt(world, entities, part, cast) {
+/**
+ * The messages for one batch. world: { name, description }; entities: the world's settings; cast: names to skip;
+ * glossary: the room's translation glossary pairs [{ from, to }] — only those named in the batch go in.
+ */
+function buildPrompt(world, entities, part, cast, glossary = []) {
   const text = part.batch.map((m) => m.content).join('\n');
+  const terms = N.pairsInText(glossary, text);
+  const glossed = terms.length
+    ? `[번역 단어장 — 여기 있는 이름은 name을 단어장의 한국어 표기 그대로 쓰고, 원래(로마자) 표기는 aliases에 넣어]\n${terms.map((p) => `- ${p.from} = ${p.to}`).join('\n')}\n\n`
+    : '';
   const system = `너는 롤플레이 세계관 설정집의 기록자다. 새 대화를 읽고, 이 세계에 **오래 유지되는 설정**만 골라 JSON으로 적는다.
 
 적을 것: 처음 나오거나 새로 밝혀진 인물(NPC)·장소·집단·규칙·시스템·일정·역사·기타 설정, 그리고 이미 있는 항목에 대해 새로 밝혀진 사실.
@@ -145,7 +153,7 @@ ${cast.length ? cast.join(', ') : '(없음)'}
 [이미 있는 항목]
 ${knownList(entities, text) || '(없음)'}
 
-${part.context.length ? `[앞 내용 — 참고만, 여기서 뽑지 마]\n${part.context.map((m) => line(m, CONTEXT_CHARS)).join('\n')}\n\n` : ''}[새 대화 — 여기서만 뽑아. 문장 앞 숫자가 근거 번호]
+${glossed}${part.context.length ? `[앞 내용 — 참고만, 여기서 뽑지 마]\n${part.context.map((m) => line(m, CONTEXT_CHARS)).join('\n')}\n\n` : ''}[새 대화 — 여기서만 뽑아. 문장 앞 숫자가 근거 번호]
 ${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) => `${m.number}.${i + 1} ${t}`).join('\n')}`).join('\n')}`;
   return [
     { role: 'system', content: system },
