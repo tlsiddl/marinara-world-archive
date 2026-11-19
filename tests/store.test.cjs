@@ -220,6 +220,28 @@ test('auto: undo one change at a time, only while it is still there', (t) => {
   assert.throws(() => s.undoChange(w.worldId, create.id), status(409), 'hand-edited setting is not removed');
 });
 
+test('auto: undoing a creation waits until what was read into it later is undone', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const [create] = s.applyAuto(w.worldId, [{ type: 'person', name: '수위', fields: { affiliation: '등대' } }]);
+  const later = s.applyAuto(w.worldId, [{ type: 'person', name: '수위', aliases: ['등대지기'], fields: { state: '다리를 다침' } }]);
+  assert.equal(later.length, 2);
+  assert.throws(() => s.undoChange(w.worldId, create.id), (e) => e.status === 409 && /그 뒤 자동으로 2번 바뀌었어요/.test(e.message));
+  assert.equal(s.listEntities(w.worldId).length, 1, 'nothing removed');
+  for (const c of later) s.undoChange(w.worldId, c.id);
+  assert.equal(s.undoChange(w.worldId, create.id).undone, true, 'newest first, then the creation');
+  assert.equal(s.listEntities(w.worldId).length, 0);
+});
+
+test('auto: a field change is recorded with that field\'s own evidence when there is one', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const [c] = s.applyAuto(w.worldId, [{ type: 'person', name: '사자', fields: { age: '노인' }, fieldEvidence: { age: '늙은 생선 장수였다.' }, evidence: '사자가 웃었다.' }]);
+  assert.equal(c.evidence, '사자가 웃었다.', 'a creation keeps the item evidence');
+  const [f] = s.applyAuto(w.worldId, [{ type: 'person', name: '사자', fields: { gender: '남성' }, fieldEvidence: { gender: '그는 고개를 들었다.' }, evidence: '다른 문장.' }]);
+  assert.equal(f.evidence, '그는 고개를 들었다.');
+});
+
 test('auto settings and read progress', (t) => {
   const s = temp(t);
   const w = s.createWorld({ name: 'A' });
@@ -236,4 +258,8 @@ test('auto settings and read progress', (t) => {
   const w2 = s.createWorld({ name: 'B' });
   s.linkRoom('r1', w2.worldId);
   assert.equal(s.getRoom('r1').read, null, 'another world starts from the beginning');
+  s.setRoomRead('r1', { lastId: 'm3', count: 3 });
+  s.setRoomRead('r1', null);
+  assert.equal(s.getRoom('r1').read, null, '「처음부터 다시 읽기」 forgets the place');
+  assert.equal(s.getRoom('r1').worldId, w2.worldId, 'and keeps the link');
 });

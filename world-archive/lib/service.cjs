@@ -59,15 +59,21 @@ function autoReady(world) {
  * all: read everything pending now (the 「지금 읽기」 button); otherwise only when at least `every` settled messages
  * wait, and at most AUTO_MAX_BATCHES batches.
  */
-async function runRoom(roomId, { all = false, reason = 'reply' } = {}) {
+async function runRoom(roomId, { all = false, reason = 'reply', restart = false } = {}) {
   const running = jobs.get(roomId);
   if (running?.state === 'running') return running;
   const s = store();
   const worldId = s.roomWorldId(roomId);
   if (!worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
   const world = s.getWorld(worldId);
-  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, dropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
+  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, dropped: 0, fieldsDropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
   jobs.set(roomId, job);
+  // 「처음부터 다시 읽기」: only where the room was read is forgotten. Settings stay; what is read again is applied (and
+  // recorded) the usual way, so a person's own fields are still never written over.
+  if (restart) {
+    s.setRoomRead(roomId, null);
+    log(`chat ${roomId}: reading again from the start`);
+  }
   try {
     const api = engineApi();
     const m = await api.model(world.auto.connectionId);
@@ -93,21 +99,23 @@ async function runRoom(roomId, { all = false, reason = 'reply' } = {}) {
         parsed = api.parseJsonObject(reply.content);
       }
       if (!parsed) throw Error('모델 답을 읽지 못했습니다. 잠시 뒤 다시 해 보거나, 다른 연결을 골라 주세요.');
-      const { items, dropped } = X.checkItems(parsed, part, cast);
+      const { items, dropped, droppedFields } = X.checkItems(parsed, part, cast);
       const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
       job.added += changes.filter((c) => c.action === 'create').length;
       job.changed += changes.filter((c) => c.action !== 'create').length;
       job.dropped += dropped.length;
+      job.fieldsDropped += droppedFields.length;
       const last = part.batch.at(-1);
       s.setRoomRead(roomId, { lastId: last.id, count: part.end });
       job.done++;
       if (dropped.length) log(`chat ${roomId}: left out ${dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
+      if (droppedFields.length) log(`chat ${roomId}: left out fields ${droppedFields.map((d) => `${d.name}.${d.key} (${d.why})`).join(', ')}`);
     }
     job.pending = settled.length - todo.at(-1).end;
     job.state = 'done';
     job.stage = '';
     const secs = ((Date.now() - Date.parse(job.startedAt)) / 1000).toFixed(1);
-    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.dropped} left out`);
+    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.dropped} left out, ${job.fieldsDropped} field(s) left out`);
   } catch (error) {
     job.state = 'error';
     job.error = error?.message || String(error);
@@ -221,7 +229,7 @@ async function routes(r) {
     if (!room.worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
     const world = s().getWorld(room.worldId);
     if (!world.auto.connectionId) throw new ArchiveError(400, '자동 반영에 쓸 연결을 먼저 골라 주세요 (세계관 정보).');
-    const p = runRoom(req.params.roomId, { all: body(req).all !== false, reason: 'button' });
+    const p = runRoom(req.params.roomId, { all: body(req).all !== false, reason: body(req).restart === true ? 'restart' : 'button', restart: body(req).restart === true });
     // Reading can take minutes: answer at once, the screen asks again for progress.
     await Promise.race([p, new Promise((r) => setTimeout(r, 300))]);
     return roomAuto(req.params.roomId);

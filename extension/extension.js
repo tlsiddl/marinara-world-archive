@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.3.0';
+  const VERSION = '0.3.1';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -448,10 +448,13 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     const status = running
       ? `${esc(job.stage || '읽는 중')}`
       : `메시지 ${w.auto.every}개마다 읽습니다${a?.pending != null ? ` · 아직 안 읽은 메시지 ${a.pending}개` : ''}`;
-    const last = job && !running && job.state === 'done' ? `<div class="sub">지난번: 새 설정 ${job.added}개 · 바뀐 칸 ${job.changed}개${job.dropped ? ` · 근거가 없어 뺀 것 ${job.dropped}개` : ''}</div>` : '';
+    const last = job && !running && job.state === 'done' ? `<div class="sub">지난번: 새 설정 ${job.added}개 · 바뀐 칸 ${job.changed}개${job.dropped ? ` · 근거가 없어 뺀 것 ${job.dropped}개` : ''}${job.fieldsDropped ? ` · 근거와 안 맞아 뺀 칸 ${job.fieldsDropped}개` : ''}</div>` : '';
     const err = job?.state === 'error' ? `<div class="err">${esc(job.error)}</div>` : '';
+    const again = st.ask === 'restart'
+      ? `<span class="ask">이 방을 처음부터 다시 읽을까요? 설정은 지우지 않고, 읽은 위치만 처음으로 돌아갑니다. <button type="button" data-act="read-restart">다시 읽기</button><button class="quiet" type="button" data-act="ask" data-key="">취소</button></span>`
+      : `<button class="quiet" type="button" data-act="ask" data-key="restart">처음부터 다시 읽기</button>`;
     return `<div class="auto-line"><span class="dot ${running ? 'run' : 'on'}"></span><span class="sub">자동 반영 · ${status}</span></div>${last}${err}
-      ${running ? '' : `<div class="row" style="margin-top:8px"><button type="button" data-act="read-now" ${a?.pending === 0 ? 'disabled' : ''}>지금 읽기</button></div>`}`;
+      ${running ? '' : `<div class="row" style="margin-top:8px"><button type="button" data-act="read-now" ${a?.pending === 0 ? 'disabled' : ''}>지금 읽기</button>${compact ? '' : again}</div>`}`;
   }
 
   function railHtml() {
@@ -749,6 +752,12 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     },
     'read-now': () => run(async () => {
       st.auto = await api('POST', `/rooms/${encodeURIComponent(activeChatId())}/auto`, { all: true });
+      if (st.auto.job?.state !== 'running') { await loadEntities(); await loadRoom(); }
+      pollAuto();
+    }),
+    'read-restart': () => run(async () => {
+      st.ask = null;
+      st.auto = await api('POST', `/rooms/${encodeURIComponent(activeChatId())}/auto`, { all: true, restart: true });
       if (st.auto.job?.state !== 'running') { await loadEntities(); await loadRoom(); }
       pollAuto();
     }),

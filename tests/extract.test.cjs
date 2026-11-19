@@ -49,6 +49,53 @@ test('checkItems keeps only what the text supports, and takes the evidence sente
   assert.deepEqual(dropped.map((d) => d.why), ['card', 'name not in text', 'no evidence sentence', 'type']);
 });
 
+test('rules, schedules and the rest are named by description: their evidence is the check, not the name', () => {
+  const [part] = X.batches([msg(1, '여관 문은 세 번 두드려야 주인이 연다. 두 번 두드리면 아무도 열지 않는다.'), msg(2, '안개가 짙은 날에는 시장이 닫힌다.')], 0);
+  const { items, dropped } = X.checkItems({
+    items: [
+      { type: 'rule', name: '여관 문 두드리는 관례', evidence: [{ n: '1.1', q: '세 번 두드려야' }] },
+      { type: 'schedule', name: '가라앉는 날', fields: { when: { v: '안개가 짙은 날', n: ['2.1'] } }, evidence: [{ n: '2.1' }] },
+      { type: 'rule', name: '지어낸 규칙', evidence: [{ n: '9.9', q: '없는 구절' }] },
+      { type: 'person', name: '등대지기', evidence: [{ n: '1.1' }] },
+    ],
+  }, part, []);
+  assert.deepEqual(items.map((x) => x.name), ['여관 문 두드리는 관례', '가라앉는 날']);
+  assert.equal(items[1].fields.when, '안개가 짙은 날');
+  assert.deepEqual(dropped.map((d) => [d.name, d.why]), [['지어낸 규칙', 'no evidence sentence'], ['등대지기', 'name not in text']]);
+});
+
+test('each field is checked against its own evidence; a field that fails is left out, the item stays', () => {
+  const [part] = X.batches([
+    msg(1, '물푸레의 주인은 노인이다. 그의 왼손에는 약지가 없다.'),
+    msg(2, 'The old man has kept the inn for thirty years.'),
+  ], 0);
+  const { items, droppedFields } = X.checkItems({
+    items: [{
+      type: 'person', name: '물푸레의 주인', evidence: [{ n: '1.1' }],
+      fields: {
+        age: { v: '노인', n: ['1.1'] },
+        appearance: { v: '왼손 약지가 없음', n: ['1.2'] },
+        gender: { v: '서른 해 전 서른둘, 콧수염이 검었음', n: ['1.2'] }, // the sentence says something else
+        family: { v: '아내가 있었음', n: ['8.8'] }, // no such sentence
+        background: { v: '서른 해째 여관을 지킴', n: ['2.1'] }, // translated from English: not compared
+        personality: '무뚝뚝함', // plain string: taken as before
+      },
+    }],
+  }, part, []);
+  const [e] = items;
+  assert.deepEqual(Object.keys(e.fields).sort(), ['age', 'appearance', 'background', 'personality']);
+  assert.equal(e.fieldEvidence.age, '물푸레의 주인은 노인이다.');
+  assert.equal(e.fieldEvidence.appearance, '그의 왼손에는 약지가 없다.');
+  assert.equal(e.fieldEvidence.personality, undefined);
+  assert.deepEqual(droppedFields.map((d) => [d.key, d.why]), [['gender', 'not in its evidence'], ['family', 'no evidence sentence']]);
+});
+
+test('overlap counts the value\'s two-letter pieces found in the evidence', () => {
+  assert.equal(X.overlap('노인', '주인은 노인이다'), 1);
+  assert.equal(X.overlap('검은 콧수염', '약지가 없다'), 0);
+  assert.equal(X.overlap('경계심이 많음', '그는 경계심 어린 눈으로 보았다'), 0.4, 'enough for a paragraph field (30%), not for a line (50%)');
+});
+
 test('buildPrompt names the cards to skip, the known settings near the text, and only the new messages to read', () => {
   const part = X.batches([msg(0, '앞 내용'), msg(1, '앞 내용 2'), msg(2, '마르타가 들어왔다.')], 2)[0];
   const [sys, user] = X.buildPrompt({ name: '별빛 학원', description: '' }, [
@@ -108,6 +155,22 @@ test('runRoom: waits for enough settled messages, then reads, writes, and rememb
   assert.equal((await service.runRoom('room', { all: true })).state, 'idle', 'nothing new to read');
   assert.equal(calls.length, 1);
   assert.equal(s.listHistory(w.worldId)[0].roomId, 'room');
+});
+
+test('runRoom restart: forgets where the room was read and reads it all again, keeping the settings', async (t) => {
+  const messages = [msg(0, '안녕'), msg(1, '사서 마르타는 열쇠를 목에 건다.'), msg(2, '그래?'), msg(3, '응.'), msg(4, '내일 봐.'), msg(5, '잘 자.')];
+  const first = JSON.stringify({ items: [{ type: 'person', name: '마르타', fields: { affiliation: { v: '도서관', n: ['2.1'] } }, evidence: [{ n: '2.1', q: '사서 마르타는' }] }] });
+  const again = JSON.stringify({ items: [{ type: 'person', name: '마르타', aliases: ['사서'], evidence: [{ n: '2.1', q: '사서 마르타는' }] }] });
+  const { s, w, calls } = setup(t, messages, [first, again]);
+  await service.runRoom('room', { all: true });
+  assert.equal(s.getRoom('room').read.lastId, 'm3');
+  assert.equal((await service.runRoom('room', { all: true })).state, 'idle');
+  const job = await service.runRoom('room', { all: true, restart: true, reason: 'restart' });
+  assert.equal(job.state, 'done');
+  assert.equal(calls.length, 2, 'read from the first message again');
+  assert.equal(s.getRoom('room').read.lastId, 'm3');
+  const [e] = s.listEntities(w.worldId);
+  assert.deepEqual([e.name, e.aliases], ['마르타', ['사서']], 'the setting stays and is updated, not made twice');
 });
 
 test('runRoom: a broken reply is tried twice and then reported; nothing is marked read', async (t) => {

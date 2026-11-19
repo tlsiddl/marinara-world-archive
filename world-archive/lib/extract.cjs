@@ -74,6 +74,19 @@ function knownList(entities, text) {
   return clip(out, KNOWN_CHARS);
 }
 
+/** One line per kind, for choosing the kind (custom last: only when nothing else fits). */
+const KIND_GUIDE = [
+  '- person(인물): 이름이 있거나 고정된 직함이 있는 사람·존재',
+  '- place(장소): 이름이 있거나 특정한 한 곳(건물·방·마을·지역)',
+  '- group(집단): 가문·학교·기숙사·조직·무리·행렬처럼 여럿이 묶인 것',
+  '- rule(규칙): 이 세계에서 지켜야 하는 것 — 법·제도·관례·금기·학교 규칙',
+  '- schedule(일정): 정해진 때나 주기로 돌아오는 것 — 축제·수업 시간표·통금 시간·특별한 날',
+  '- custom(기타): 위 어디에도 안 맞는 오래가는 설정',
+].join('\n');
+
+/** Kinds whose name must appear in the text (a proper name or a fixed title). The others are named by description. */
+const NAMED_KINDS = new Set(['person', 'place', 'group']);
+
 function fieldGuide() {
   return TYPES.map((t) => `${t}: ${FIELDS[t].map((f) => `${f.key}(${f.label})`).join(', ') || '(칸 없음, memo만)'}`).join('\n');
 }
@@ -85,16 +98,32 @@ function buildPrompt(world, entities, part, cast) {
 
 적을 것: 처음 나오거나 새로 밝혀진 인물(NPC)·장소·집단·규칙·일정·기타 설정, 그리고 이미 있는 항목에 대해 새로 밝혀진 사실.
 적지 않을 것:
-- 한 번 일어난 사건, 대화 내용, 감정의 흐름 (그건 기억 모듈이 맡는다). 단, 사건 때문에 인물의 상태가 오래 바뀌었으면(다침, 이사, 직위 변화, 관계 단절) person의 state 칸에 적는다.
+- 한 번 일어난 사건, 대화 내용, 감정의 흐름 (그건 기억 모듈이 맡는다).
 - 아래 "카드가 있는 인물"(주인공과 사용자 캐릭터).
 - 글에 나오지 않은 추측. 원문에 쓰여 있거나 분명히 보이는 것만 적는다.
 - 이미 있는 항목과 똑같은 내용.
+- 이름 없이 지나가는 사람(「등불을 든 사람」, 「지나가던 학생」). 이름이 없는 인물은 고정된 직함이 있고(수위, 사감, 여관 주인) 다시 나올 사람만 직함을 이름으로 적는다.
+- 흔한 일반 장소(「시내」, 「복도」, 「거리」). 장소는 고유한 이름이 있거나 특정한 한 곳만 적는다.
+
+종류 (맞는 것을 고른다):
+${KIND_GUIDE}
+- custom(기타)은 위 어디에도 안 맞을 때만 쓴다. 무리·행렬·조직은 group, 지켜야 하는 관례·금기·법은 rule, 정해진 때에 돌아오는 날·행사는 schedule이다.
 
 각 항목:
-{"type":"person|place|group|rule|schedule|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","fields":{"칸키":"값"},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
+{"type":"person|place|group|rule|schedule|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
 
 칸 키 (이것 말고는 쓰지 마):
 ${fieldGuide()}
+
+칸 쓰는 법:
+- 칸마다 그 값이 나온 문장 번호를 n에 1~3개 적는다. 그 칸의 내용이 실제로 쓰인 문장이어야 한다(다른 사실이 쓰인 문장을 대지 마).
+- age(나이·생일)에는 나이를 나타내는 말만 쓴다(예: 열두 살, 노인, 50대). 몇 해째 일했다거나 외모 같은 것은 다른 칸에 쓴다.
+- state(지금 상태)에는 며칠 뒤에도 사실일 상태만 쓴다: 다침, 병, 이사, 직위·소속 변화, 관계 단절, 잃어버린 물건 같은 것. 지금 하는 동작, 잠깐 간 곳, 그날의 기분은 쓰지 않는다.
+  나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
+  좋은 예: "오른팔이 부러져 붕대를 감고 다님", "기사단에서 쫓겨나 항구 창고에서 지냄"
+- 각 칸의 뜻에 맞는 값만 넣는다(위계 칸에는 위계·역할만, 위치 칸에는 위치만).
+
+규칙·일정·기타는 이름을 설명형으로 지어도 된다(예: "밤에는 문을 세 번 두드린다"). 이미 있는 규칙·일정·기타와 같은 내용이면 새로 만들지 말고 match에 그 이름을 그대로 적는다.
 
 근거 적는 법: [새 대화]의 문장 앞 번호(메시지 번호.문장 번호)로 그 사실이 나온 문장을 가리킨다. q는 그 문장에 실제로 있는 말을 5~20자 그대로 옮긴다. 사실 하나에 근거 문장 1~3개.
 
@@ -117,10 +146,69 @@ ${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) =
   ];
 }
 
+// ---------------------------------------------------------------- one field against its own evidence
+
+const letters = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+/** Mostly Korean: more Hangul than Latin letters. */
+function isKorean(s) {
+  const h = (String(s).match(/\p{Script=Hangul}/gu) || []).length;
+  const l = (String(s).match(/[A-Za-z]/g) || []).length;
+  return h > 0 && h >= l;
+}
+/** Share of the value's two-letter pieces that appear in the evidence (1 for a one-letter value that appears). */
+function overlap(value, evidence) {
+  const v = letters(value);
+  const e = letters(evidence);
+  if (!v) return 0;
+  if (v.length < 2) return e.includes(v) ? 1 : 0;
+  let hit = 0;
+  for (let i = 0; i < v.length - 1; i++) if (e.includes(v.slice(i, i + 2))) hit++;
+  return hit / (v.length - 1);
+}
+const FIELD_OVERLAP = { line: 0.5, text: 0.3 };
+
 /**
- * Keeps the items that hold up against the text they came from: a known kind, a name (or other name) that appears in
- * the batch, at least one evidence sentence found by number (or by its phrase), and not one of the card characters.
- * The evidence kept is the sentence itself, taken from the text. Returns { items, dropped } ([{ name, why }]).
+ * Fields come as {key: {v, n: ["12.3"]}} (each with its own evidence) or, as before, {key: "value"}.
+ * A field with its own evidence is kept only when that sentence is found and, when value and sentence are both Korean,
+ * enough of the value's two-letter pieces are in it (line fields 50%, paragraph fields 30%). A value translated from
+ * an English sentence is not compared. A plain string is taken as before (checked only through the item's evidence).
+ */
+function checkFields(type, raw, index) {
+  const fields = {};
+  const fieldEvidence = {};
+  const droppedFields = [];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields };
+  for (const [key, given] of Object.entries(raw)) {
+    if (typeof given === 'string') {
+      fields[key] = given;
+      continue;
+    }
+    if (!given || typeof given !== 'object' || typeof given.v !== 'string' || !given.v.trim()) continue;
+    const refs = (Array.isArray(given.n) ? given.n : given.n != null ? [given.n] : []).map((x) => (typeof x === 'object' && x ? x : { n: x }));
+    const found = S.resolveEvidence(refs, index).slice(0, 3);
+    if (!found.length) {
+      droppedFields.push({ key, why: 'no evidence sentence' });
+      continue;
+    }
+    const said = found.map((p) => p.text).join(' ');
+    const kind = FIELDS[type]?.find((f) => f.key === key)?.kind || 'text';
+    if (isKorean(given.v) && isKorean(said) && overlap(given.v, said) < FIELD_OVERLAP[kind]) {
+      droppedFields.push({ key, why: 'not in its evidence' });
+      continue;
+    }
+    fields[key] = given.v;
+    fieldEvidence[key] = clip(found.map((p) => p.text).join(' / '), 300);
+  }
+  return { fields, fieldEvidence, droppedFields };
+}
+
+/**
+ * Keeps the items that hold up against the text they came from: a known kind, at least one evidence sentence found by
+ * number (or by its phrase), and not one of the card characters. People, places and groups also need their name (or
+ * another name) in the batch; rules, schedules and the rest are named by description, so their evidence is the check.
+ * Each field with its own evidence is checked against it (checkFields); a field that fails is left out, the item stays.
+ * The evidence kept is the sentence itself, taken from the text.
+ * Returns { items, dropped: [{ name, why }], droppedFields: [{ name, key, why }] }.
  */
 function checkItems(parsed, part, cast) {
   const list = Array.isArray(parsed?.items) ? parsed.items : [];
@@ -129,6 +217,7 @@ function checkItems(parsed, part, cast) {
   const castSet = new Set(cast.map(squash));
   const items = [];
   const dropped = [];
+  const droppedFields = [];
   for (const it of list) {
     if (!it || typeof it !== 'object' || typeof it.name !== 'string') continue;
     const name = it.name.trim();
@@ -136,22 +225,25 @@ function checkItems(parsed, part, cast) {
     const names = [name, ...aliases].map(squash).filter(Boolean);
     if (!TYPES.includes(it.type)) { dropped.push({ name, why: 'type' }); continue; }
     if (names.some((n) => castSet.has(n))) { dropped.push({ name, why: 'card' }); continue; }
-    if (!names.some((n) => n.length >= 1 && text.includes(n))) { dropped.push({ name, why: 'name not in text' }); continue; }
+    if (NAMED_KINDS.has(it.type) && !names.some((n) => n.length >= 1 && text.includes(n))) { dropped.push({ name, why: 'name not in text' }); continue; }
     const raw = Array.isArray(it.evidence) ? it.evidence : it.evidence ? [it.evidence] : [];
     const found = S.resolveEvidence(raw.map((e) => (typeof e === 'string' ? { q: e } : e)), index).slice(0, 3);
     if (!found.length) { dropped.push({ name, why: 'no evidence sentence' }); continue; }
+    const f = checkFields(it.type, it.fields, index);
+    for (const d of f.droppedFields) droppedFields.push({ name, ...d });
     items.push({
       type: it.type,
       name,
       aliases,
       match: typeof it.match === 'string' && it.match.trim() ? it.match.trim() : null,
-      fields: it.fields && typeof it.fields === 'object' && !Array.isArray(it.fields) ? it.fields : {},
+      fields: f.fields,
+      fieldEvidence: f.fieldEvidence,
       memo: typeof it.memo === 'string' ? it.memo : '',
       evidence: clip(found.map((p) => p.text).join(' / '), 300),
       evidenceAt: found.map((p) => ({ messageId: p.messageId, sentence: p.sentence })),
     });
   }
-  return { items, dropped };
+  return { items, dropped, droppedFields };
 }
 
-module.exports = { unread, batches, buildPrompt, checkItems, squash, HOLD_BACK };
+module.exports = { unread, batches, buildPrompt, checkItems, checkFields, overlap, squash, HOLD_BACK };

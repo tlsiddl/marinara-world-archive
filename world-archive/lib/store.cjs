@@ -624,7 +624,8 @@ class Archive {
         e.fields[key] = value;
         e.sources[key] = 'auto';
         touched = true;
-        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence });
+        const said = isObject(item.fieldEvidence) && typeof item.fieldEvidence[key] === 'string' ? item.fieldEvidence[key].slice(0, 300) : evidence;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said });
       }
       const known = new Set([e.name, ...e.aliases].map(norm));
       for (const a of [name, ...aliases]) {
@@ -667,6 +668,9 @@ class Archive {
     if (c.action === 'create') {
       if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
       if (Object.values(e.sources || {}).includes('manual')) throw new ArchiveError(409, '직접 고친 칸이 있는 설정이라 지우지 않았습니다. 지우려면 설정에서 지워 주세요.');
+      // Removing the setting would also throw away what was read into it afterwards: undo those first.
+      const after = history.changes.slice(history.changes.indexOf(c) + 1).filter((x) => x.entityId === c.entityId && !x.undoneAt).length;
+      if (after) throw new ArchiveError(409, `그 뒤 자동으로 ${after}번 바뀌었어요. 최근 기록부터 되돌리거나 설정에서 지워 주세요.`);
       doc.entities.splice(index, 1);
     } else {
       if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
@@ -727,11 +731,13 @@ class Archive {
   }
 
   /** How far the automatic reader got in a room: { lastId, count } of the last message it read. */
+  /** read null forgets how far the room was read (「처음부터 다시 읽기」); the settings stay as they are. */
   setRoomRead(roomId, read) {
     needRoom(roomId);
     const rooms = this.readRooms();
     if (!rooms.rooms[roomId]) return;
-    rooms.rooms[roomId].read = { lastId: read.lastId ?? null, count: read.count, at: now() };
+    if (read === null) delete rooms.rooms[roomId].read;
+    else rooms.rooms[roomId].read = { lastId: read.lastId ?? null, count: read.count, at: now() };
     this.writeJson(this.roomsFile, rooms);
   }
 
