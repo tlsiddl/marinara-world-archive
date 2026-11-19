@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { assembleWorld, sanitize } = require('../world-archive/lib/inject.cjs');
+const { assembleWorld, sanitize, TYPE_ORDER, ALWAYS } = require('../world-archive/lib/inject.cjs');
 
 let n = 0;
 const id = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
@@ -92,6 +92,39 @@ test('scene order: pinned first, then settings named in the scene, then by kind'
   assert.equal(out.skipped, 0, 'mode all: nothing is left out for the scene');
   const tight = assembleWorld(world, [a, b], 42, { scene: new Set([b.entityId]) });
   assert.deepEqual([tight.included, tight.omitted], [[b.entityId], [a.entityId]], 'short on space: the one in the scene wins');
+});
+
+test('kind order: 인물 · 장소 · 집단 · 규칙 · 시스템 · 일정 · 역사 · 기타, with the new kinds\' fields', () => {
+  assert.deepEqual(TYPE_ORDER, ['person', 'place', 'group', 'rule', 'system', 'schedule', 'history', 'custom']);
+  const out = assembleWorld(world, [
+    ent('custom', '별자리 점'),
+    ent('history', '북부 전쟁', '', { fields: { result: '강이 국경이 됨', when: '100년 전', who: '두 왕국' } }),
+    ent('schedule', '축제'),
+    ent('system', '기숙사 점수', '', { fields: { how: '잘하면 더하고 어기면 뺀다', category: '점수', limits: '교수만 줄 수 있다' } }),
+    ent('rule', '통금'),
+    ent('group', '천문부'),
+    ent('place', '옥상'),
+    ent('person', '한여름'),
+  ]);
+  const heads = out.text.match(/^\[[^\]]+\]$/gm);
+  assert.deepEqual(heads, ['[인물]', '[장소]', '[집단]', '[규칙]', '[시스템]', '[일정]', '[역사]', '[기타]']);
+  assert.match(out.text, /\[시스템\]\n- 기숙사 점수\n {2}분류: 점수\n {2}작동 방식: 잘하면 더하고 어기면 뺀다\n {2}제약·대가: 교수만 줄 수 있다/);
+  assert.match(out.text, /\[역사\]\n- 북부 전쟁\n {2}시기: 100년 전 \/ 관련 인물·집단: 두 왕국\n {2}결과·영향: 강이 국경이 됨/);
+});
+
+test('scene mode: rules and systems always go in; history is like the rest', () => {
+  const w = { ...world, injectMode: 'scene' };
+  const rule = ent('rule', '통금');
+  const sys = ent('system', '마법');
+  const past = ent('history', '북부 전쟁');
+  const here = ent('person', '한여름');
+  const out = assembleWorld(w, [rule, sys, past, here], 3000, { scene: new Set([here.entityId]) });
+  assert.deepEqual(out.included, [here.entityId, rule.entityId, sys.entityId]);
+  assert.equal(out.skipped, 1);
+  assert.doesNotMatch(out.text, /북부 전쟁/);
+  const named = assembleWorld(w, [rule, sys, past, here], 3000, { scene: new Set([past.entityId]) });
+  assert.deepEqual(named.included, [past.entityId, rule.entityId, sys.entityId], 'history named in the scene goes in');
+  assert.deepEqual([...ALWAYS].sort(), ['rule', 'system']);
 });
 
 test('scene mode: pinned and rules always, the rest only when named in the scene', () => {

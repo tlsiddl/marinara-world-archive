@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Archive, ArchiveError } = require('../world-archive/lib/store.cjs');
+const { Archive, ArchiveError, TYPES, FIELDS } = require('../world-archive/lib/store.cjs');
 
 const temp = (t) => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-store-'));
@@ -100,6 +100,50 @@ test('settings saved before fields existed still read and update', (t) => {
   assert.deepEqual(old.fields, {});
   assert.deepEqual(old.extra, []);
   assert.equal(s.updateEntity(w.worldId, e.entityId, { fields: { gender: '남' }, revision: 1 }).fields.gender, '남');
+});
+
+test('history and system kinds: their own fields, validated like the rest; rule keeps only its category', (t) => {
+  const s = temp(t);
+  assert.deepEqual(TYPES, ['person', 'place', 'group', 'rule', 'system', 'schedule', 'history', 'custom']);
+  assert.deepEqual(FIELDS.history.map((f) => [f.key, f.kind]), [['when', 'line'], ['where', 'line'], ['who', 'line'], ['result', 'text']]);
+  assert.deepEqual(FIELDS.system.map((f) => [f.key, f.kind]), [['category', 'line'], ['how', 'text'], ['limits', 'text']]);
+  assert.deepEqual(FIELDS.rule.map((f) => f.key), ['category']);
+  assert.doesNotMatch(FIELDS.rule[0].hint, /능력|점수|세계 법칙/, 'abilities and points are systems now');
+  const w = s.createWorld({ name: 'A' });
+  const h = s.createEntity(w.worldId, {
+    type: 'history', name: '북부 전쟁',
+    fields: { when: ' 100년 전 ', where: '북쪽 국경', who: '두 왕국', result: '  국경이 강으로 정해졌다\n휴전 조약  ' },
+  });
+  assert.deepEqual(h.fields, { when: '100년 전', where: '북쪽 국경', who: '두 왕국', result: '국경이 강으로 정해졌다\n휴전 조약' });
+  const m = s.createEntity(w.worldId, { type: 'system', name: '마법', fields: { category: '마법', how: '지팡이로 힘을 모은다', limits: '쓰면 지친다' } });
+  assert.equal(m.fields.how, '지팡이로 힘을 모은다');
+  assert.throws(() => s.createEntity(w.worldId, { type: 'history', name: 'x', fields: { category: '전쟁' } }), status(400));
+  assert.throws(() => s.createEntity(w.worldId, { type: 'system', name: 'x', fields: { result: '결과' } }), status(400));
+  assert.throws(() => s.createEntity(w.worldId, { type: 'system', name: 'x', fields: { how: 'ㄱ'.repeat(2001) } }), status(400));
+  assert.throws(() => s.createEntity(w.worldId, { type: 'history', name: 'x', fields: { when: 100 } }), status(400));
+  const r = s.updateEntity(w.worldId, m.entityId, { type: 'rule', revision: 1 });
+  assert.deepEqual(r.fields, { category: '마법' }, 'system → rule keeps only the shared category');
+  const sc = s.updateEntity(w.worldId, h.entityId, { type: 'schedule', revision: 1 });
+  assert.deepEqual(sc.fields, { when: '100년 전', where: '북쪽 국경', who: '두 왕국' });
+  const back = new Archive(s.dir);
+  assert.deepEqual(back.listEntities(w.worldId).map((e) => e.type).sort(), ['rule', 'schedule']);
+  const k = s.createEntity(w.worldId, { type: 'system', name: '기숙사 점수' });
+  assert.equal(new Archive(s.dir).listEntities(w.worldId).find((e) => e.entityId === k.entityId).type, 'system', 'new kinds survive a restart');
+  assert.deepEqual(s.countEntities(w.worldId), { person: 0, place: 0, group: 0, rule: 1, system: 1, schedule: 1, history: 0, custom: 0 });
+});
+
+test('a settings file written before history and system existed still loads and counts', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const a = s.createEntity(w.worldId, { type: 'rule', name: '통금', fields: { category: '능력 체계' } });
+  s.createEntity(w.worldId, { type: 'custom', name: '별자리 점' });
+  const raw = JSON.parse(fs.readFileSync(s.entityFile(w.worldId), 'utf8'));
+  fs.writeFileSync(s.entityFile(w.worldId), JSON.stringify(raw)); // the old shape: only the six old kinds
+  const again = new Archive(s.dir);
+  assert.deepEqual(again.listEntities(w.worldId).map((e) => [e.type, e.name]), [['rule', '통금'], ['custom', '별자리 점']]);
+  assert.equal(again.listEntities(w.worldId)[0].fields.category, '능력 체계', 'old rules stay rules: nothing is moved');
+  assert.deepEqual(again.countEntities(w.worldId), { person: 0, place: 0, group: 0, rule: 1, system: 0, schedule: 0, history: 0, custom: 1 });
+  assert.equal(again.updateEntity(w.worldId, a.entityId, { description: '밤 10시', revision: 1 }).revision, 2);
 });
 
 test('rooms: link, relink, unlink, branch inheritance', (t) => {

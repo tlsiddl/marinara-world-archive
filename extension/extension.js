@@ -15,8 +15,10 @@
     { type: 'person', label: '인물', en: 'PEOPLE', icon: 'person', hint: '이 세계에 사는 사람들. 외형·성격 같은 기본 정보와, 사건으로 바뀐 「지금 상태」를 따로 적어 둡니다.' },
     { type: 'place', label: '장소', en: 'PLACES', icon: 'place', hint: '건물, 방, 숲, 도시. 고정된 구조와 출입구·연결을 적어 둡니다. 누가 잠깐 들른 일은 여기가 아니라 기억 쪽에 남습니다.' },
     { type: 'group', label: '집단', en: 'GROUPS', icon: 'group', hint: '가문, 학교, 기숙사, 동아리, 조직. 구성원과 위계를 적어 둡니다.' },
-    { type: 'rule', label: '규칙', en: 'RULES', icon: 'rule', hint: '세계의 법칙, 능력 체계, 학교 규칙, 점수·계급. 내용은 메모 칸에 적어 주세요.' },
+    { type: 'rule', label: '규칙', en: 'RULES', icon: 'rule', hint: '법, 제도, 관례, 금기, 학교 규칙처럼 지켜야 하는 것. 내용은 메모 칸에 적어 주세요.' },
+    { type: 'system', label: '시스템', en: 'SYSTEMS', icon: 'gear', hint: '마법, 능력, 경제, 점수처럼 이 세계가 돌아가는 원리. 작동 방식과 제약·대가를 적어 둡니다.' },
     { type: 'schedule', label: '일정', en: 'SCHEDULE', icon: 'calendar', hint: '수업 시간표, 반복 행사, 정기 활동. 언제·어디서·누가를 적어 둡니다.' },
+    { type: 'history', label: '역사', en: 'HISTORY', icon: 'book', hint: '이야기가 시작되기 전의 일과 세계관 연혁. 시기·장소·관련 인물과 결과를 적어 둡니다. 이야기 안에서 지금 일어나는 일은 기억 쪽에 남습니다.' },
     { type: 'custom', label: '기타', en: 'MISC', icon: 'star', hint: '어디에도 안 맞는 이 세계만의 설정. 필요한 칸은 「칸 추가」로 만들 수 있습니다.' },
   ];
   const KIND = Object.fromEntries(KINDS.map((k) => [k.type, k]));
@@ -28,6 +30,8 @@
     place: '<path d="M4 20h16M6 20V9l6-4.5L18 9v11"/><path d="M10 20v-5h4v5"/>',
     group: '<circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="10" r="2.4"/><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6M14.6 14.6c2.5-.3 4.6 1 5.4 3.9"/>',
     rule: '<path d="M7 3.5h10v17H7z"/><path d="M10 8h4M10 11.5h4M10 15h2.5"/>',
+    gear: '<path d="M17.7 9.9L20 10.1v3.8l-2.3.2-.1.4 1.4 1.8-2.7 2.7-1.8-1.4-.4.1-.2 2.3h-3.8l-.2-2.3-.4-.1-1.8 1.4L5 16.3l1.4-1.8-.1-.4L4 13.9v-3.8l2.3-.2.1-.4L5 7.7 7.7 5l1.8 1.4.4-.1.2-2.3h3.8l.2 2.3.4.1L16.3 5 19 7.7l-1.4 1.8z"/><circle cx="12" cy="12" r="2.6"/>',
+    book: '<path d="M12 6.8C10 5.3 7.2 4.9 4 5.3v13c3.2-.4 6 0 8 1.5 2-1.5 4.8-1.9 8-1.5v-13c-3.2-.4-6 0-8 1.5zM12 6.8v13"/>',
     calendar: '<rect x="4" y="5.5" width="16" height="14.5" rx="1"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
     star: '<path d="M12 4l1.8 6.2L20 12l-6.2 1.8L12 20l-1.8-6.2L4 12l6.2-1.8z"/>',
     world: '<circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.6" ry="8.5"/><path d="M3.8 9h16.4M3.8 15h16.4"/>',
@@ -36,7 +40,7 @@
     moon: '<path d="M20 14.2A8 8 0 0 1 9.8 4 8 8 0 1 0 20 14.2z"/>',
     search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
     back: '<path d="M14.5 6 8.5 12l6 6"/>',
-    history: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/><path d="M3.5 12h2M18.5 12h2" opacity=".5"/>',
+    log: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/><path d="M3.5 12h2M18.5 12h2" opacity=".5"/>',
   };
   const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
@@ -359,7 +363,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         if (st.auto.job?.state !== 'running') {
           await loadEntities();
           st.preview = await api('GET', `/rooms/${encodeURIComponent(id)}/preview`);
-          if (st.view === 'history') await loadHistory();
+          if (st.view === 'log') await loadHistory();
         }
       } catch {}
       if (!st.busy) render();
@@ -384,7 +388,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   const roomTitle = () => esc(st.roomName || (activeChatId() ? '지금 채팅방' : '열린 채팅방 없음'));
 
   function sideHtml() {
-    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)]), ['history', '기록', 'history', null]];
+    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)]), ['log', '기록', 'log', null]];
     return `
       <div class="brand">${BRAND}<div><b>세계관 설정집</b><small>WORLD ARCHIVE</small></div></div>
       <div class="nav-label">YOUR WORLD</div>
@@ -476,14 +480,14 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   // ------------------------------------------------------------------ views
   function overviewHtml() {
     const w = world();
-    const stubs = [['person', '인물'], ['place', '장소'], ['group', '집단'], ['rule', '규칙·일정·기타']];
-    const n = (t) => (t === 'rule' ? count('rule') + count('schedule') + count('custom') : count(t));
+    // One tile per kind, in the order they go into the prompt: two rows of four (two columns on a phone).
+    const stubs = KINDS.map((k) => [k.type, k.label]);
     const p = st.preview;
     return `
       <div class="eyebrow">WORLD ARCHIVE · V${VERSION}</div>
       <h1>${esc(w.name)}</h1>
       <p class="intro">${w.description ? esc(w.description) : '시대·배경 설명이 아직 없습니다. 「세계관 정보 고치기」에서 적어 두면 설정 맨 앞에 함께 들어갑니다.'}</p>
-      <div class="stubs">${stubs.map(([t, label]) => `<button class="stub" type="button" data-act="go" data-view="${t}"><strong>${n(t)}</strong><small>${label}</small></button>`).join('')}</div>
+      <div class="stubs">${stubs.map(([t, label]) => `<button class="stub" type="button" data-act="go" data-view="${t}"><strong>${count(t)}</strong><small>${label}</small></button>`).join('')}</div>
       <div class="paper">
         <h2>이 방 · ${roomTitle()}</h2>
         <p class="sub" style="margin:0 0 12px">${roomLine()}</p>
@@ -637,7 +641,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <label class="f" for="w-name">이름</label><input id="w-name" maxlength="120" value="${esc(w.name)}">
         <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
         <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정하지 않은 설정부터 빠집니다</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
-        <label class="f" for="w-mode">넣는 방식<em>장면 방식은 최근 메시지 12개에 이름이 나온 설정만 넣습니다</em></label><select id="w-mode" style="max-width:360px"><option value="all" ${w.injectMode === 'scene' ? '' : 'selected'}>전부 넣기</option><option value="scene" ${w.injectMode === 'scene' ? 'selected' : ''}>장면에 나온 것만(고정·규칙은 늘)</option></select>
+        <label class="f" for="w-mode">넣는 방식<em>장면 방식은 최근 메시지 12개에 이름이 나온 설정만 넣습니다</em></label><select id="w-mode" style="max-width:360px"><option value="all" ${w.injectMode === 'scene' ? '' : 'selected'}>전부 넣기</option><option value="scene" ${w.injectMode === 'scene' ? 'selected' : ''}>장면에 나온 것만(고정·규칙·시스템은 늘)</option></select>
         <div class="actions"><button class="primary" type="button" data-act="save-world">저장</button></div>
       </form>
       <form class="paper" onsubmit="return false">
@@ -687,7 +691,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     if (!st.loaded) return st.bad ? '' : '<p class="sub">불러오는 중…</p>';
     if (st.view === 'new-world' || !world()) return newWorldHtml(!st.worlds.length);
     if (st.view === 'world') return worldHtml();
-    if (st.view === 'history') return historyHtml();
+    if (st.view === 'log') return historyHtml();
     if (KIND[st.view]) {
       if (st.editing === 'new') return formHtml(null, st.view);
       const e = st.entities.find((x) => x.entityId === (st.editing || st.detail));
@@ -747,7 +751,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   const actions = {
     go: (b) => {
       go(b.dataset.view);
-      if (b.dataset.view === 'history') return run(loadHistory);
+      if (b.dataset.view === 'log') return run(loadHistory);
       if (b.dataset.view === 'world' && st.connections == null) { render(); return run(loadConnections); }
       render();
     },
@@ -855,9 +859,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     if (ev.target.id === 'worldSelect') {
       st.worldId = ev.target.value;
       store.set('world-archive-world', st.worldId);
-      const keep = KIND[st.view] || st.view === 'history' ? st.view : 'overview';
+      const keep = KIND[st.view] || st.view === 'log' ? st.view : 'overview';
       go(keep);
-      run(async () => { await loadEntities(); if (keep === 'history') await loadHistory(); });
+      run(async () => { await loadEntities(); if (keep === 'log') await loadHistory(); });
     } else if (ev.target.id === 'fd-type' && st.editing) {
       // Switching kind in the form keeps everything typed; fields the new kind has keep their text.
       const now = readForm();

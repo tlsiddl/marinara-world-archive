@@ -119,6 +119,34 @@ test('a card character\'s own details and mixed-script names are left out; a pla
   assert.deepEqual(dropped.map((d) => [d.name, d.why]), [['이리나의 지팡이', 'about a card'], ['론ald', 'mixed script name']]);
 });
 
+test('history and system are named by description: kept on their evidence without the name in the text', () => {
+  const [part] = X.batches([
+    msg(1, '백 년 전 두 왕국이 북쪽 국경에서 싸웠고, 그 뒤로 강이 국경이 되었다. 마법은 지팡이 없이 쓰면 힘이 흩어진다. 많이 쓰면 며칠 앓는다.'),
+    msg(2, '이리나의 마력은 남들보다 약하다.'),
+  ], 0);
+  const { items, dropped, droppedFields } = X.checkItems({
+    items: [
+      {
+        type: 'history', name: '북부 전쟁', evidence: [{ n: '1.1' }],
+        fields: { when: { v: '백 년 전', n: ['1.1'] }, who: { v: '두 왕국', n: ['1.1'] }, result: { v: '강이 국경이 되었다', n: ['1.1'] } },
+      },
+      {
+        type: 'system', name: '마법의 원리', evidence: [{ n: '1.2' }],
+        fields: { category: { v: '마법', n: ['1.2'] }, how: { v: '지팡이 없이 쓰면 힘이 흩어짐', n: ['1.2'] }, limits: { v: '많이 쓰면 며칠 앓음', n: ['1.3'] } },
+      },
+      { type: 'history', name: '지어낸 옛일', evidence: [{ n: '9.9', q: '없는 구절' }] },
+      { type: 'system', name: '이리나의 마력', evidence: [{ n: '2.1' }] },
+      { type: 'history', name: '건국', evidence: [{ n: '1.1' }], fields: { where: { v: '남쪽 바닷가 항구', n: ['1.1'] } } },
+    ],
+  }, part, ['이리나 베인']);
+  assert.deepEqual(items.map((i) => [i.type, i.name]), [['history', '북부 전쟁'], ['system', '마법의 원리'], ['history', '건국']]);
+  assert.deepEqual(items[0].fields, { when: '백 년 전', who: '두 왕국', result: '강이 국경이 되었다' });
+  assert.deepEqual(Object.keys(items[1].fields).sort(), ['category', 'how', 'limits']);
+  assert.equal(items[1].fieldEvidence.limits, '많이 쓰면 며칠 앓는다.');
+  assert.deepEqual(dropped.map((d) => [d.name, d.why]), [['지어낸 옛일', 'no evidence sentence'], ['이리나의 마력', 'about a card']]);
+  assert.deepEqual(droppedFields.map((d) => [d.name, d.key, d.why]), [['건국', 'where', 'not in its evidence']]);
+});
+
 test('overlap counts the value\'s two-letter pieces found in the evidence', () => {
   assert.equal(X.overlap('노인', '주인은 노인이다'), 1);
   assert.equal(X.overlap('검은 콧수염', '약지가 없다'), 0);
@@ -137,6 +165,24 @@ test('buildPrompt names the cards to skip, the known settings near the text, and
   assert.match(user.content, /그 밖에 이미 있는 항목: 옥상\(place\)/);
   assert.match(user.content, /\[앞 내용 — 참고만[^\]]*\]\n\[나\] 앞 내용\n\[서하\] 앞 내용 2/);
   assert.match(user.content, /\[새 대화 — 여기서만 뽑아[^\]]*\]\n#3 \[나\]\n3\.1 마르타가 들어왔다\./);
+});
+
+test('buildPrompt explains rule, system and history, and lists them in the item shape and the fields', () => {
+  const part = X.batches([msg(0, '마르타가 들어왔다.')], 0)[0];
+  const [sys] = X.buildPrompt({ name: '별빛 학원', description: '' }, [], part, []);
+  const guide = sys.content.split('종류 (맞는 것을 고른다):\n')[1].split('\n\n')[0].split('\n');
+  const kinds = guide.map((l) => l.match(/^- (\w+)\(/)?.[1]).filter(Boolean);
+  assert.deepEqual(kinds.slice(0, 7), ['person', 'place', 'group', 'rule', 'system', 'schedule', 'history']);
+  assert.equal(kinds[7], 'custom', 'the custom line comes last');
+  assert.match(sys.content, /- system\(시스템\): [^\n]*마법·능력·경제·점수/);
+  assert.match(sys.content, /- history\(역사\): 이야기가 시작되기 전/);
+  assert.match(sys.content, /- rule\(규칙\): 이 세계에서 지켜야 하는 것/);
+  assert.match(sys.content, /이야기 안에서 지금 일어나는 사건은 history\(역사\)가 아니다\(그건 기억 서재 몫이다\)/);
+  assert.match(sys.content, /rule·system·history 구별/);
+  assert.match(sys.content, /"type":"person\|place\|group\|rule\|system\|schedule\|history\|custom"/);
+  assert.match(sys.content, /system: category\(분류\), how\(작동 방식\), limits\(제약·대가\)/);
+  assert.match(sys.content, /history: when\(시기\), where\(장소\), who\(관련 인물·집단\), result\(결과·영향\)/);
+  assert.match(sys.content, /규칙·시스템·일정·역사·기타는 이름을 설명형으로/);
 });
 
 test('parseJsonObject reads fenced or thinking replies', () => {

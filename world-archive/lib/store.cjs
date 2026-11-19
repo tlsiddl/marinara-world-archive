@@ -19,7 +19,7 @@ const ENTITY_MAX = 2000;
 const FILE_MAX = 8 * 1024 * 1024;
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROOM_RE = /^[A-Za-z0-9_-]{1,128}$/;
-const TYPES = ['person', 'place', 'group', 'rule', 'schedule', 'custom'];
+const TYPES = ['person', 'place', 'group', 'rule', 'system', 'schedule', 'history', 'custom'];
 const LINE_MAX = 200;
 const TEXT_MAX = 2000;
 const EXTRA_MAX = 20;
@@ -53,11 +53,25 @@ const FIELDS = {
     { key: 'members', label: '구성원', kind: 'text' },
     { key: 'hierarchy', label: '위계·역할', kind: 'text' },
   ],
-  rule: [{ key: 'category', label: '분류', kind: 'line', hint: '사회 제도, 세계 법칙, 능력 체계, 학교 규칙, 점수·계급 같은 것' }],
+  // rule: what must be obeyed. system: how the world works (magic, abilities, economy, points).
+  rule: [{ key: 'category', label: '분류', kind: 'line', hint: '법, 제도, 관례, 금기, 학교 규칙 같은 것' }],
+  system: [
+    { key: 'category', label: '분류', kind: 'line', hint: '마법, 능력, 경제, 점수 같은 것' },
+    { key: 'how', label: '작동 방식', kind: 'text' },
+    { key: 'limits', label: '제약·대가', kind: 'text' },
+  ],
   schedule: [
     { key: 'when', label: '언제·주기', kind: 'line' },
     { key: 'where', label: '어디서', kind: 'line' },
     { key: 'who', label: '누가', kind: 'line' },
+  ],
+  // history: what happened before the story began (the world's timeline). Events of the story itself are the
+  // Memory Module's.
+  history: [
+    { key: 'when', label: '시기', kind: 'line' },
+    { key: 'where', label: '장소', kind: 'line' },
+    { key: 'who', label: '관련 인물·집단', kind: 'line' },
+    { key: 'result', label: '결과·영향', kind: 'text' },
   ],
   custom: [],
 };

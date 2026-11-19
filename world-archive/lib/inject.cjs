@@ -9,10 +9,14 @@ const TYPE_LABEL = {
   place: '장소',
   group: '집단',
   rule: '규칙',
+  system: '시스템',
   schedule: '일정',
+  history: '역사',
   custom: '기타',
 };
-const TYPE_ORDER = ['person', 'place', 'group', 'rule', 'schedule', 'custom'];
+const TYPE_ORDER = ['person', 'place', 'group', 'rule', 'system', 'schedule', 'history', 'custom'];
+/** Kinds that hold everywhere: in 'scene' mode they go in whether or not the scene names them. */
+const ALWAYS = new Set(['rule', 'system']);
 
 /** Text taken from settings must never turn into new macros: {{ and }} get a zero-width space. */
 function sanitize(text) {
@@ -82,11 +86,11 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   }
 
   // 'scene' mode: only what the scene needs — pinned settings, settings named in the latest messages, and rules
-  // (they hold everywhere). Without scene information yet (a fresh start), everything is a candidate.
+  // and systems (they hold everywhere). Without scene information yet (a fresh start), everything is a candidate.
   let pool = entities || [];
   let skipped = 0;
   if (world.injectMode === 'scene' && scene) {
-    const keep = pool.filter((e) => e.pinned || e.type === 'rule' || scene.has(e.entityId));
+    const keep = pool.filter((e) => e.pinned || ALWAYS.has(e.type) || scene.has(e.entityId));
     skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
     pool = keep;
   }
@@ -118,4 +122,4 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   return { text, chars: text.length, budget, included, omitted, skipped };
 }
 
-module.exports = { assembleWorld, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER };
+module.exports = { assembleWorld, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS };
