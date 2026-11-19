@@ -51,6 +51,17 @@ const READ_MAX_TOKENS = 8192; // a full batch with per-field evidence can pass 4
 const jobs = new Map(); // roomId -> job
 const timers = new Map();
 
+/** The last cut-off reply of a room, for looking into why (DATA_DIR/world-archive/debug/cut-<room>.txt). Never throws. */
+function keepCut(roomId, text) {
+  try {
+    const fs = require('node:fs');
+    const dir = path.join(store().dir, 'debug');
+    fs.mkdirSync(dir, { recursive: true });
+    const s = String(text || '');
+    fs.writeFileSync(path.join(dir, `cut-${roomId}.txt`), `${new Date().toISOString()} · ${s.length} chars\n--- start\n${s.slice(0, 3000)}\n--- end\n${s.slice(-3000)}\n`);
+  } catch {}
+}
+
 function autoReady(world) {
   return !!(world?.auto?.enabled && world.auto.connectionId);
 }
@@ -89,31 +100,51 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
     const parts = X.batches(settled, start);
     const todo = all ? parts : parts.slice(0, AUTO_MAX_BATCHES);
     job.total = todo.length;
-    for (const [i, part] of todo.entries()) {
+    for (const [i, first] of todo.entries()) {
       job.stage = `${i + 1}/${todo.length}번째 묶음을 읽는 중`;
-      let parsed = null;
-      for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-        const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast), { maxTokens: READ_MAX_TOKENS });
-        job.calls++;
-        // Whatever token counts the provider reports (names differ between providers), summed for measuring.
-        for (const [k, v] of Object.entries(reply.usage || {})) if (typeof v === 'number') job.tokens[k] = (job.tokens[k] || 0) + v;
-        // A reply cut off at the length limit never closes {"items":[…]}: keep the items that did arrive whole.
-        const got = X.readReply(reply.content, api.parseJsonObject);
-        if (got?.cut) log(`chat ${roomId}: reply cut off in batch ${i + 1}; kept ${got.items.length} whole item(s)`);
-        parsed = got;
+      // A reply cut off at the length limit is read again as two halves (at most twice), so nothing in the batch is
+      // lost; only a single message that still does not fit keeps the whole items that arrived.
+      const queue = [first];
+      while (queue.length) {
+        const part = queue.shift();
+        let parsed = null;
+        let split = false;
+        for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+          const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast), { maxTokens: READ_MAX_TOKENS });
+          job.calls++;
+          // Whatever token counts the provider reports (names differ between providers), summed for measuring.
+          for (const [k, v] of Object.entries(reply.usage || {})) if (typeof v === 'number') job.tokens[k] = (job.tokens[k] || 0) + v;
+          const got = X.readReply(reply.content, api.parseJsonObject);
+          if (got?.cut || (!got && /"items"\s*:\s*\[/.test(reply.content || ''))) {
+            keepCut(roomId, reply.content);
+            if (part.batch.length > 1 && (part.depth || 0) < 2) {
+              const k = Math.ceil(part.batch.length / 2);
+              const depth = (part.depth || 0) + 1;
+              queue.unshift(
+                { batch: part.batch.slice(0, k), context: part.context, end: part.end - (part.batch.length - k), depth },
+                { batch: part.batch.slice(k), context: part.batch.slice(Math.max(0, k - 2), k), end: part.end, depth },
+              );
+              log(`chat ${roomId}: reply cut off in batch ${i + 1} (${part.batch.length} messages); reading it again in two halves`);
+              split = true;
+              break;
+            }
+            if (got) log(`chat ${roomId}: reply cut off in batch ${i + 1}; kept ${got.items.length} whole item(s)`);
+          }
+          parsed = got;
+        }
+        if (split) continue;
+        if (!parsed) throw Error('모델 답을 읽지 못했습니다. 잠시 뒤 다시 해 보거나, 다른 연결을 골라 주세요.');
+        const { items, dropped, droppedFields } = X.checkItems(parsed, part, cast);
+        const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
+        job.added += changes.filter((c) => c.action === 'create').length;
+        job.changed += changes.filter((c) => c.action !== 'create').length;
+        job.dropped += dropped.length;
+        job.fieldsDropped += droppedFields.length;
+        s.setRoomRead(roomId, { lastId: part.batch.at(-1).id, count: part.end });
+        if (dropped.length) log(`chat ${roomId}: left out ${dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
+        if (droppedFields.length) log(`chat ${roomId}: left out fields ${droppedFields.map((d) => `${d.name}.${d.key} (${d.why})`).join(', ')}`);
       }
-      if (!parsed) throw Error('모델 답을 읽지 못했습니다. 잠시 뒤 다시 해 보거나, 다른 연결을 골라 주세요.');
-      const { items, dropped, droppedFields } = X.checkItems(parsed, part, cast);
-      const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
-      job.added += changes.filter((c) => c.action === 'create').length;
-      job.changed += changes.filter((c) => c.action !== 'create').length;
-      job.dropped += dropped.length;
-      job.fieldsDropped += droppedFields.length;
-      const last = part.batch.at(-1);
-      s.setRoomRead(roomId, { lastId: last.id, count: part.end });
       job.done++;
-      if (dropped.length) log(`chat ${roomId}: left out ${dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
-      if (droppedFields.length) log(`chat ${roomId}: left out fields ${droppedFields.map((d) => `${d.name}.${d.key} (${d.why})`).join(', ')}`);
     }
     job.pending = settled.length - todo.at(-1).end;
     job.state = 'done';

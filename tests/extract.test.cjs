@@ -293,3 +293,18 @@ test('runRoom asks for room to answer (8192 tokens) and uses a cut-off reply ins
   assert.equal(asked.maxTokens, 8192);
   assert.deepEqual(s.listEntities(w.worldId).map((e) => e.name), ['마르타']);
 });
+
+test('a cut-off batch is read again in two halves, so nothing in it is lost', async (t) => {
+  const messages = Array.from({ length: 8 }, (_, i) => msg(i, i === 1 ? '사서 마르타는 열쇠를 건다.' : i === 4 ? '수위 오렌은 등대에 산다.' : `글 ${i}`));
+  const { s, w, calls } = setup(t, messages, [
+    '{"items":[{"type":"person","name":"마르타","evidence":[{"n":"2.1"}]},{"type":"person","name":"오',
+    '{"items":[{"type":"person","name":"마르타","evidence":[{"n":"2.1"}]}]}',
+    '{"items":[{"type":"person","name":"오렌","evidence":[{"n":"5.1"}]}]}',
+  ]);
+  const job = await service.runRoom('room', { all: true });
+  assert.equal(job.state, 'done');
+  assert.equal(calls.length, 3, 'one cut reply, then two halves');
+  assert.deepEqual(s.listEntities(w.worldId).map((e) => e.name).sort(), ['마르타', '오렌']);
+  assert.equal(s.getRoom('room').read.lastId, 'm5');
+  assert.ok(fs.existsSync(path.join(s.dir, 'debug', 'cut-room.txt')));
+});
