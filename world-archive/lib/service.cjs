@@ -3,7 +3,7 @@
 // Routes are registered with app.register at the app.js anchor, so Marinara's own access checks (login, IP allowlist,
 // CSRF, host validation) cover them exactly like the engine's routes. There is no separate token.
 const path = require('node:path');
-const { Archive, ArchiveError, TYPES, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX } = require('./store.cjs');
+const { Archive, ArchiveError, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX } = require('./store.cjs');
 const { assembleWorld } = require('./inject.cjs');
 
 const TAG = '[world-archive]';
@@ -86,6 +86,7 @@ async function routes(r) {
     patches: globalThis.__marinaraWorldArchive?.patches ?? {},
     memoryModule: globalThis.__marinaraMemory?.version ?? null,
     types: TYPES,
+    fields: FIELDS,
     budget: { default: BUDGET_DEFAULT, min: BUDGET_MIN, max: BUDGET_MAX },
   })));
 

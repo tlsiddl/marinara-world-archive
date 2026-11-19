@@ -59,7 +59,7 @@ test('worlds → entities → room link → {{세계}}', async (t) => {
 
   assert.equal(service.render({ chatId: 'room_A' }), '', 'unlinked room: empty');
   assert.equal((await call('PUT', `${A}/rooms/room_A`, { worldId: id })).data.worldId, id);
-  assert.equal(service.render({ chatId: 'room_A' }), '[세계관] 별빛 학원\n산 위의 기숙학교\n\n[인물]\n- 한여름 — 반장');
+  assert.equal(service.render({ chatId: 'room_A' }), '[세계관] 별빛 학원\n산 위의 기숙학교\n\n[인물]\n- 한여름\n  메모: 반장');
   const pv = await call('GET', `${A}/rooms/room_A/preview`);
   assert.equal(pv.data.included.length, 1);
   assert.equal(pv.data.worldName, '별빛 학원');

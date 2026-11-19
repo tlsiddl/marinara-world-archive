@@ -18,7 +18,7 @@ test('groups by kind in a fixed order with names and aliases', () => {
   ]);
   assert.equal(
     out.text,
-    '[세계관] 별빛 학원\n산 위의 기숙학교. 1988년.\n\n[인물]\n- 한여름 (다른 이름: 여름, Summer) — 3학년 반장\n\n[장소]\n- 옥상 정원\n\n[규칙]\n- 통금 — 밤 10시',
+    '[세계관] 별빛 학원\n산 위의 기숙학교. 1988년.\n\n[인물]\n- 한여름 (다른 이름: 여름, Summer)\n  메모: 3학년 반장\n\n[장소]\n- 옥상 정원\n\n[규칙]\n- 통금\n  메모: 밤 10시',
   );
   assert.equal(out.chars, out.text.length);
   assert.equal(out.included.length, 3);
@@ -42,6 +42,20 @@ test('pinned first: a pinned rule beats unpinned people when space is short', ()
   const rule = ent('rule', '금지 구역', '북쪽 숲', { pinned: true });
   const out = assembleWorld(world, [...people, rule], 120);
   assert.ok(out.included.includes(rule.entityId));
+});
+
+test('fields: short ones share a line, long ones and extras get their own, in schema order', () => {
+  const p = ent('person', '윤서하', '사서 선생님과 친함', {
+    fields: { personality: '조용하지만 고집이 세다', gender: '여', affiliation: '도서부', state: '왼팔 깁스 (3장)', age: '16' },
+    extra: [{ label: '좋아하는 것', value: '비 오는 날\n따뜻한 우유' }],
+  });
+  const out = assembleWorld(world, [p]);
+  assert.equal(
+    out.text.split('[인물]\n')[1],
+    '- 윤서하\n  성별: 여 / 나이·생일: 16 / 소속: 도서부\n  성격: 조용하지만 고집이 세다\n  지금 상태: 왼팔 깁스 (3장)\n  좋아하는 것: 비 오는 날 / 따뜻한 우유\n  메모: 사서 선생님과 친함',
+  );
+  const c = ent('custom', '별자리 점', '매일 아침 게시판에 붙는다');
+  assert.match(assembleWorld(world, [c]).text, /- 별자리 점\n {2}매일 아침 게시판에 붙는다$/);
 });
 
 test('only confirmed settings are injected', () => {

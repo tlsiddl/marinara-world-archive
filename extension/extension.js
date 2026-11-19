@@ -1,93 +1,260 @@
-/* Marinara World Archive (세계관 설정집) — personal extension UI. Talks only to /api/world-archive on the same server. */
+/* 세계관 설정집 · Marinara World Archive — personal extension UI.
+ * Talks only to /api/world-archive on the same server. Visual language follows its sister module 기억 서재
+ * (paper grain, ticket notches, ink shadows); the motif here is a star chart instead of a record. */
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
+  const VERSION = '0.2.0';
   const BASE = '/api/world-archive';
-  const TYPES = [
-    ['person', '인물'],
-    ['place', '장소'],
-    ['group', '집단'],
-    ['rule', '규칙'],
-    ['schedule', '일정'],
-    ['custom', '기타'],
-  ];
-  const TYPE_LABEL = Object.fromEntries(TYPES);
+  // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
+  const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
+  // Stamp-edge ticket outline from 기억 서재's launcher (same commit, extension/runtime.js LAUNCH_ICON)
+  const STAMP = "M4 11L4.75 11A2.05 2.05 0 0 0 8.85 11L10.35 11A2.05 2.05 0 0 0 14.45 11L15.95 11A2.05 2.05 0 0 0 20.05 11L21.55 11A2.05 2.05 0 0 0 25.65 11L27.15 11A2.05 2.05 0 0 0 31.25 11L32.75 11A2.05 2.05 0 0 0 36.85 11L38.35 11A2.05 2.05 0 0 0 42.45 11L43.95 11A2.05 2.05 0 0 0 48.05 11L49.55 11A2.05 2.05 0 0 0 53.65 11L55.15 11A2.05 2.05 0 0 0 59.25 11L60 11L60 11.57A2.05 2.05 0 0 0 60 15.68L60 16.82A2.05 2.05 0 0 0 60 20.93L60 22.07A2.05 2.05 0 0 0 60 26.18L60 27.32A2.05 2.05 0 0 0 60 31.43L60 32.58A2.05 2.05 0 0 0 60 36.67L60 37.83A2.05 2.05 0 0 0 60 41.92L60 43.08A2.05 2.05 0 0 0 60 47.17L60 48.33A2.05 2.05 0 0 0 60 52.42L60 53L59.25 53A2.05 2.05 0 0 0 55.15 53L53.65 53A2.05 2.05 0 0 0 49.55 53L48.05 53A2.05 2.05 0 0 0 43.95 53L42.45 53A2.05 2.05 0 0 0 38.35 53L36.85 53A2.05 2.05 0 0 0 32.75 53L31.25 53A2.05 2.05 0 0 0 27.15 53L25.65 53A2.05 2.05 0 0 0 21.55 53L20.05 53A2.05 2.05 0 0 0 15.95 53L14.45 53A2.05 2.05 0 0 0 10.35 53L8.85 53A2.05 2.05 0 0 0 4.75 53L4 53L4 52.42A2.05 2.05 0 0 0 4 48.33L4 47.17A2.05 2.05 0 0 0 4 43.08L4 41.92A2.05 2.05 0 0 0 4 37.83L4 36.67A2.05 2.05 0 0 0 4 32.58L4 31.43A2.05 2.05 0 0 0 4 27.32L4 26.18A2.05 2.05 0 0 0 4 22.07L4 20.93A2.05 2.05 0 0 0 4 16.82L4 15.68A2.05 2.05 0 0 0 4 11.57Z";
 
+  const KINDS = [
+    { type: 'person', label: '인물', en: 'PEOPLE', icon: 'person', hint: '이 세계에 사는 사람들. 외형·성격 같은 기본 정보와, 사건으로 바뀐 「지금 상태」를 따로 적어 둬.' },
+    { type: 'place', label: '장소', en: 'PLACES', icon: 'place', hint: '건물, 방, 숲, 도시. 고정된 구조와 출입구·연결을 적어 둬. 누가 잠깐 들른 건 여기가 아니라 기억 쪽이야.' },
+    { type: 'group', label: '집단', en: 'GROUPS', icon: 'group', hint: '가문, 학교, 기숙사, 동아리, 조직. 구성원과 위계를 적어 둬.' },
+    { type: 'rule', label: '규칙', en: 'RULES', icon: 'rule', hint: '세계의 법칙, 능력 체계, 학교 규칙, 점수·계급. 내용은 메모 칸에 적으면 돼.' },
+    { type: 'schedule', label: '일정', en: 'SCHEDULE', icon: 'calendar', hint: '수업 시간표, 반복 행사, 정기 활동. 언제·어디서·누가를 적어 둬.' },
+    { type: 'custom', label: '기타', en: 'MISC', icon: 'star', hint: '어디에도 안 맞는 이 세계만의 설정. 필요한 칸은 「칸 추가」로 만들어.' },
+  ];
+  const KIND = Object.fromEntries(KINDS.map((k) => [k.type, k]));
+
+  // ------------------------------------------------------------------ icons (line, currentColor)
+  const ICONS = {
+    overview: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h17" stroke-dasharray="1.6 2"/><path d="M12 8.6l.9 2.5 2.5.9-2.5.9-.9 2.5-.9-2.5-2.5-.9 2.5-.9z"/>',
+    person: '<circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.8 3.6-5.6 7-5.6s6.2 1.8 7 5.6"/>',
+    place: '<path d="M4 20h16M6 20V9l6-4.5L18 9v11"/><path d="M10 20v-5h4v5"/>',
+    group: '<circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="10" r="2.4"/><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6M14.6 14.6c2.5-.3 4.6 1 5.4 3.9"/>',
+    rule: '<path d="M7 3.5h10v17H7z"/><path d="M10 8h4M10 11.5h4M10 15h2.5"/>',
+    calendar: '<rect x="4" y="5.5" width="16" height="14.5" rx="1"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+    star: '<path d="M12 4l1.8 6.2L20 12l-6.2 1.8L12 20l-1.8-6.2L4 12l6.2-1.8z"/>',
+    world: '<circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.6" ry="8.5"/><path d="M3.8 9h16.4M3.8 15h16.4"/>',
+    close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
+    moon: '<path d="M20 14.2A8 8 0 0 1 9.8 4 8 8 0 1 0 20 14.2z"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
+    back: '<path d="M14.5 6 8.5 12l6 6"/>',
+  };
+  const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+
+  // A paper ticket with stamp edges, sister of 기억 서재's launcher.
+  const LAUNCH_ICON = `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="${STAMP}" fill="#f1eee7" stroke="#0000002e" stroke-width=".5"/><rect x="9" y="15.5" width="46" height="33" fill="none" stroke="#141414" stroke-width=".9"/><line x1="43.5" y1="16.5" x2="43.5" y2="47.5" stroke="#141414" stroke-width=".9" stroke-dasharray="1.6 1.6"/><text x="26.2" y="29.6" font-family="Georgia,'Times New Roman',serif" font-weight="700" font-size="6.4" text-anchor="middle" fill="#141414" letter-spacing=".3">WORLD</text><text x="26.2" y="37.8" font-family="ui-monospace,Menlo,monospace" font-size="3.4" text-anchor="middle" fill="#141414" letter-spacing=".25">ARCHIVE</text><circle cx="49.3" cy="32" r="3.9" fill="none" stroke="#141414" stroke-width=".55" stroke-dasharray=".9 .9"/><path d="M49.3 28.9l.55 2.55 2.55.55-2.55.55-.55 2.55-.55-2.55-2.55-.55 2.55-.55z" fill="#141414"/></svg>`;
+
+  // Brand mark: a small star chart (dotted orbit, axes, four-point star).
+  const BRAND = `<svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="1"/><circle cx="24" cy="24" r="14.5" fill="none" stroke="currentColor" stroke-width=".8" stroke-dasharray="1.4 2.2"/><path d="M24 2v44M2 24h44" stroke="currentColor" stroke-width=".5" opacity=".55"/><path d="M24 14.5l2 7.5 7.5 2-7.5 2-2 7.5-2-7.5-7.5-2 7.5-2z" fill="currentColor"/><circle cx="37" cy="12" r="1.1" fill="currentColor"/><circle cx="11" cy="35" r=".8" fill="currentColor"/><circle cx="35.5" cy="36.5" r=".6" fill="currentColor"/></svg>`;
+
+  // ------------------------------------------------------------------ styles
+  const CSS = `
+:host{all:initial;--ink:#151515;--paper:#f4f1ea;--paper2:#ebe7dd;--muted:#6d685f;--line:#15151526;--field:#faf8f3;--field-line:#1515153a;--soft:#e4dfd3;--side:#151515;--side-ink:#ece8df;
+  --serif:var(--font-y2k,"Gowun Batang","Nanum Myeongjo","Noto Serif KR",Georgia,serif);--mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  --sans:var(--font-y2k,"Pretendard","Noto Sans KR",-apple-system,system-ui,sans-serif);--grain:${GRAIN};
+  font:14px/1.65 var(--sans);color:var(--ink)}
+:host([data-theme=dark]){--ink:#ece8df;--paper:#1b1a18;--paper2:#131312;--muted:#a39d92;--line:#ece8df2b;--field:#222120;--field-line:#ece8df40;--soft:#2a2826;--side:#0c0c0b}
+*{box-sizing:border-box}[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1.5px solid var(--ink);background:transparent;border-radius:3px;padding:8px 14px;transition:background .15s,transform .15s}
+button:hover{background:var(--soft)}button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--ink);color:var(--paper);font-weight:700}
+button.primary:hover{background:#000}:host([data-theme=dark]) button.primary:hover{background:#fff}
+button.quiet{border-color:transparent;color:var(--muted);padding:6px 8px}button.quiet:hover{color:var(--ink);background:transparent;text-decoration:underline}
+button.danger{color:#a3321f;border-color:#a3321f}:host([data-theme=dark]) button.danger{color:#f0a18f;border-color:#f0a18f}
+:focus-visible{outline:3px solid #8fa3c9;outline-offset:2px}
+.icon{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+input,select,textarea{width:100%;border-radius:3px;background:var(--field);border:1px solid var(--field-line);padding:9px 11px;line-height:1.55}
+textarea{min-height:84px;resize:vertical}
+label.f{display:block;font:11px/1.4 var(--mono);letter-spacing:1.5px;color:var(--muted);margin:14px 0 6px}
+label.f em{font:12px var(--sans);letter-spacing:0;font-style:normal;opacity:.85;margin-left:6px}
+
+#launch{position:fixed;right:18px;bottom:196px;z-index:2147483600;width:64px;height:64px;padding:0;border:0;background:transparent;filter:drop-shadow(0 3px 6px #0005);transition:transform .2s}
+#launch:hover{background:transparent;transform:translateY(-2px) rotate(3deg)}
+#launch svg{width:100%;height:100%;display:block}
+@media(max-width:720px){#launch{width:58px;height:58px;bottom:186px}}
+#backdrop{position:fixed;inset:0;z-index:2147483601;background:#0a0a0a8c;backdrop-filter:grayscale(1)}
+#panel{position:fixed;z-index:2147483602;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1280px,96vw);height:min(880px,92vh);
+  display:grid;grid-template-columns:200px minmax(0,1fr) 248px;background:var(--grain),var(--paper);color:var(--ink);border:1.5px solid var(--ink);border-radius:6px;box-shadow:0 30px 90px #0007;overflow:hidden}
+
+.side{position:relative;display:flex;flex-direction:column;padding:28px 16px 18px;background:var(--grain),var(--side);color:var(--side-ink);min-width:0}
+.side:after{content:"";position:absolute;top:10px;bottom:10px;right:-1px;border-right:2px dashed #ece8df55;pointer-events:none}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px 26px}
+.brand-mark{width:44px;height:44px;flex:none;color:var(--side-ink)}
+.brand b{display:block;font:700 18px/1.2 var(--serif);letter-spacing:-.5px}
+.brand small{display:block;font:7.5px/1.8 var(--mono);letter-spacing:2.4px;color:#ece8df99;white-space:nowrap}
+.nav-label{font:9px var(--mono);letter-spacing:3px;color:#ece8df80;padding:6px 12px 10px}
+nav{display:flex;flex-direction:column;gap:4px}
+nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;border:1px solid transparent;color:#ece8dfcc;padding:10px 12px;font-size:13px}
+nav button:hover{background:#ece8df14;color:#fff}
+nav button .n{margin-left:auto;font:10px var(--mono);opacity:.6}
+nav button.on{background:#ece8df;color:#151515;font-weight:700;
+  -webkit-mask:radial-gradient(circle at 0 50%,#0000 6px,#000 6.5px) left/51% 100% no-repeat,radial-gradient(circle at 100% 50%,#0000 6px,#000 6.5px) right/51% 100% no-repeat;
+  mask:radial-gradient(circle at 0 50%,#0000 6px,#000 6.5px) left/51% 100% no-repeat,radial-gradient(circle at 100% 50%,#0000 6px,#000 6.5px) right/51% 100% no-repeat}
+.side-bottom{margin-top:auto;padding-top:20px;display:grid;gap:8px}
+.side-bottom button{display:flex;align-items:center;gap:8px;border:1px solid #ece8df55;color:var(--side-ink);font-size:12px}
+.side-bottom button:hover{background:#ece8df14}
+.side-bottom small{font:9.5px var(--mono);color:#ece8df80;letter-spacing:.5px;padding:0 4px}
+
+.work{display:flex;flex-direction:column;min-width:0;min-height:0}
+.top{display:flex;align-items:center;gap:12px;padding:18px 28px;border-bottom:1.5px solid var(--ink)}
+.top select{max-width:340px}
+.top .grow{flex:1}
+.round{width:42px;height:42px;padding:0;border-radius:50%!important;display:grid;place-items:center;border:1px solid var(--ink)}
+main{flex:1;overflow:auto;padding:30px 30px 60px}
+.eyebrow{display:flex;align-items:center;gap:10px;font:10.5px var(--mono);letter-spacing:3px;opacity:.75;margin:0 0 8px}
+.eyebrow:after{content:"";flex:1;max-width:220px;border-top:1px dashed currentColor;opacity:.6}
+h1{font:800 28px/1.3 var(--serif);letter-spacing:-.5px;margin:0 0 10px;overflow-wrap:anywhere}
+h2{font:700 17px/1.4 var(--serif);margin:0 0 10px}
+.intro{color:var(--muted);margin:0 0 22px;max-width:760px;text-align:justify;white-space:pre-wrap}
+.msg{font-size:13px;margin:0 0 16px;padding:9px 13px;border:1.5px dashed currentColor;border-radius:3px;white-space:pre-wrap}
+.msg.bad{color:#a3321f}:host([data-theme=dark]) .msg.bad{color:#f0a18f}
+.paper{background:var(--grain),var(--paper);border:1.5px solid var(--ink);border-radius:4px;box-shadow:4px 4px 0 var(--ink);padding:20px 22px;margin:0 4px 22px 0}
+.paper .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sub{color:var(--muted);font-size:12.5px}
+.pill{display:inline-block;font:10px/1.6 var(--mono);letter-spacing:1.5px;text-transform:uppercase;border:1px solid var(--ink);border-radius:2px;padding:1px 7px;transform:rotate(-2deg);white-space:nowrap}
+pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);margin:12px 0 0;max-height:340px;overflow:auto;background:var(--field);border:1px dashed var(--field-line);border-radius:3px;padding:14px}
+
+/* admission stubs */
+.stubs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 24px}
+.stub{position:relative;text-align:left;background:var(--grain),var(--paper);border:0;border-radius:0;padding:16px 16px 26px;outline:1.5px solid var(--ink);outline-offset:-6px;filter:drop-shadow(0 2px 3px #0002);
+  -webkit-mask:radial-gradient(circle at 0 50%,#0000 7px,#000 7.5px) left/51% 100% no-repeat,radial-gradient(circle at 100% 50%,#0000 7px,#000 7.5px) right/51% 100% no-repeat;
+  mask:radial-gradient(circle at 0 50%,#0000 7px,#000 7.5px) left/51% 100% no-repeat,radial-gradient(circle at 100% 50%,#0000 7px,#000 7.5px) right/51% 100% no-repeat}
+.stub:hover{background:var(--grain),var(--soft)}
+.stub:after{content:"";position:absolute;left:14px;right:14px;bottom:10px;height:7px;opacity:.35;background:repeating-linear-gradient(90deg,currentColor 0 1px,#0000 1px 3px,currentColor 3px 5px,#0000 5px 7px)}
+.stub strong{display:block;font:800 26px/1.2 var(--serif)}
+.stub small{font-size:11.5px;color:var(--muted)}
+
+/* entity cards */
+.toolbar{display:flex;gap:10px;align-items:center;margin:0 0 18px}
+.search{position:relative;flex:1;max-width:360px}
+.search input{padding-left:36px}
+.search .icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px;padding:0 4px 4px 0}
+.card{position:relative;display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;width:100%;text-align:left;padding:16px 18px 14px;background:var(--grain),var(--paper);border:1.5px solid var(--ink);border-radius:4px;box-shadow:3px 3px 0 var(--ink)}
+.card:hover{background:var(--grain),var(--paper);transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink)}
+.card .nm{font:700 17px/1.35 var(--serif);padding-right:48px;overflow-wrap:anywhere}
+.card .al{font:10.5px/1.5 var(--mono);color:var(--muted);letter-spacing:.3px;margin-top:2px;overflow-wrap:anywhere}
+.card .pin{position:absolute;right:12px;top:14px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0}
+.chip{font-size:11.5px;line-height:1.5;padding:2px 10px;border:1px solid var(--ink);border-radius:999px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip:nth-child(even){border-radius:2px}
+.card .snip{margin:10px 0 12px;font-size:12.5px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:justify}
+.card .foot{margin-top:auto;margin-bottom:0;padding-top:8px;padding-top:8px;border-top:1px dashed var(--line);font:9.5px var(--mono);letter-spacing:1.5px;color:var(--muted);display:flex;justify-content:space-between}
+.empty{padding:40px 20px;text-align:center;border:1.5px dashed var(--line);border-radius:4px;color:var(--muted)}
+.empty h2{color:var(--ink)}
+
+/* detail sheet */
+.sheet-head{display:flex;gap:18px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.sheet-head .al{font:11px var(--mono);color:var(--muted);letter-spacing:.5px;margin:-4px 0 0}
+.facts{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 6px}
+.fact{min-width:120px;max-width:100%;padding:10px 18px 12px;background:var(--grain),var(--paper);outline:1.2px solid var(--ink);outline-offset:-4px;
+  -webkit-mask:radial-gradient(circle at 0 50%,#0000 5px,#000 5.5px) left/51% 100% no-repeat,radial-gradient(circle at 100% 50%,#0000 5px,#000 5.5px) right/51% 100% no-repeat;
+  mask:radial-gradient(circle at 0 50%,#0000 5px,#000 5.5px) left/51% 100% no-repeat,radial-gradient(circle at 100% 50%,#0000 5px,#000 5.5px) right/51% 100% no-repeat}
+.fact small{display:block;font:9.5px var(--mono);letter-spacing:1.5px;color:var(--muted)}
+.fact b{font:700 15px var(--serif);overflow-wrap:anywhere}
+.sec{padding:16px 0 4px;border-top:1px dashed var(--line);margin-top:14px}
+.sec small,.state small{display:block;font:10px var(--mono);letter-spacing:2px;color:var(--muted);margin-bottom:6px}
+.sec p,.state p{margin:0;white-space:pre-wrap;text-align:justify;overflow-wrap:anywhere}
+.state{margin-top:18px;padding:14px 16px;border:1.5px dashed var(--ink);border-radius:3px}
+.meta{margin-top:20px;font:10px var(--mono);letter-spacing:1px;color:var(--muted)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:20px}
+.actions .grow{flex:1}
+
+/* forms */
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 14px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+.extra-row{display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr) auto;gap:8px;align-items:start;margin-top:8px}
+.check{display:flex;gap:8px;align-items:center;margin-top:16px;font-size:13px}.check input{width:auto}
+.ask{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 10px;border:1.5px dashed #a3321f;border-radius:3px;color:#a3321f;font-size:13px}
+:host([data-theme=dark]) .ask{border-color:#f0a18f;color:#f0a18f}
+.back{display:inline-flex;align-items:center;gap:4px;border:0;padding:4px 0;margin:0 0 14px;color:var(--muted);font-size:13px}
+.back:hover{background:transparent;color:var(--ink)}
+
+/* rail */
+.rail{border-left:1.5px solid var(--ink);padding:26px 20px;overflow:auto;display:flex;flex-direction:column;gap:14px}
+.rail-title{font:10.5px var(--mono);letter-spacing:2px;text-transform:uppercase}
+.rail .room{font:700 16px/1.4 var(--serif);overflow-wrap:anywhere}
+.chart{position:relative;width:150px;height:150px;margin:6px auto 0}
+.chart svg{width:100%;height:100%}
+.chart .num{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.chart .num b{font:800 22px/1 var(--serif)}
+.chart .num small{font:9px var(--mono);letter-spacing:1.5px;color:var(--muted);margin-top:4px}
+.rail hr{border:0;border-top:1.5px dashed var(--line);margin:4px 0;width:100%}
+.rail p{margin:0;font-size:12px;color:var(--muted);text-align:justify}
+.rail .row{display:flex;flex-wrap:wrap;gap:6px}
+
+@media(max-width:1080px){#panel{grid-template-columns:190px minmax(0,1fr)}.rail{display:none}}
+@media(max-width:720px){
+  #panel{inset:0;left:0;top:0;transform:none;width:100vw;height:100dvh;border:0;border-radius:0;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .side{padding:12px 12px 8px}
+  .side:after{top:auto;left:8px;right:8px;bottom:-1px;border-right:0;border-bottom:2px dashed #ece8df55}
+  .brand{padding:0 52px 10px 2px}.brand-mark{width:32px;height:32px}.brand b{font-size:16px}
+  .nav-label,.side-bottom{display:none}
+  nav{flex-direction:row;overflow-x:auto;gap:4px;scrollbar-width:none}
+  nav button{width:auto;flex:none;padding:7px 11px;font-size:12.5px;gap:6px}nav button .n{margin-left:2px}
+  nav button .icon{width:15px;height:15px}
+  .top{padding:10px 14px}.top select{max-width:none}
+  #themeToggle{width:36px;height:36px}
+  #close{position:fixed;right:12px;top:12px;z-index:5;background:#f3efe7;color:#151515;border:1.5px solid #151515;width:38px;height:38px}
+  :host([data-theme=dark]) #close{background:#262522;color:#f3efe7;border-color:#f3efe7}
+  main{padding:20px 16px 50px}
+  h1{font-size:23px}
+  .stubs{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cards{grid-template-columns:1fr}
+  .toolbar{flex-wrap:wrap}.search{max-width:none;flex:1 1 100%}.toolbar>span{display:none}.toolbar>.primary{flex:1}
+  .grid3,.grid2{grid-template-columns:1fr}
+  .extra-row{grid-template-columns:1fr auto}.extra-row textarea{grid-column:1/-1}
+  .paper{padding:16px}
+  .mobile-only{display:block!important}
+}
+.mobile-only{display:none}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+`;
+
+  // ------------------------------------------------------------------ mount
   const host = document.createElement('div');
   host.id = 'marinara-world-archive-root';
   const root = host.attachShadow({ mode: 'open' });
-  root.innerHTML = `<style>
-    :host{all:initial;font-family:system-ui,-apple-system,'Apple SD Gothic Neo','Pretendard','Noto Sans KR','Malgun Gothic',sans-serif;font-size:14px;--bg:#1d2030;--card:#262a3d;--line:#3b4160;--ink:#eef0f7;--sub:#a9afc6;--accent:#8fb4ff;--warn:#ffb4a8;color:var(--ink)}
-    @media (prefers-color-scheme: light){:host{--bg:#fbfaf7;--card:#ffffff;--line:#dedad0;--ink:#26262b;--sub:#6d6c73;--accent:#3a63c9;--warn:#b2402e}}
-    *{box-sizing:border-box} button,input,textarea,select,p,div,span,label,b{font-family:inherit;color:inherit} button,input,textarea,select{font-size:inherit}
-    button{cursor:pointer;border:1px solid var(--line);background:var(--card);border-radius:9px;padding:6px 11px}
-    button.primary{background:var(--accent);border-color:var(--accent);color:#fff} button.ghost{background:none;border-color:transparent;color:var(--sub)}
-    button.danger{color:var(--warn)} button:disabled{opacity:.5;cursor:default}
-    input,textarea,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg)}
-    textarea{min-height:72px;resize:vertical;line-height:1.5}
-    :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-    .launcher{position:fixed;right:16px;bottom:96px;z-index:2147483000;width:44px;height:44px;border-radius:50%;padding:0;display:grid;place-items:center;background:var(--card);box-shadow:0 4px 16px #0004}
-    .launcher svg{width:22px;height:22px;stroke:var(--accent);fill:none;stroke-width:1.7}
-    .panel{position:fixed;right:16px;bottom:150px;z-index:2147483000;width:min(440px,calc(100vw - 24px));max-height:min(78vh,760px);display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 44px #0006;overflow:hidden}
-    .panel[hidden]{display:none}
-    @media (max-width:600px){.panel{inset:auto 0 0 0;width:100vw;max-height:88vh;border-radius:16px 16px 0 0}}
-    header{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
-    header h2{flex:1;margin:0;font-size:16px;font-weight:650}
-    nav{display:flex;gap:4px;padding:8px 10px 0}
-    nav button{border:0;border-radius:8px 8px 0 0;background:none;color:var(--sub);padding:8px 12px}
-    nav button[aria-selected=true]{background:var(--card);color:var(--ink);font-weight:600}
-    main{overflow:auto;padding:14px;background:var(--card);flex:1}
-    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .row>*{flex:0 0 auto} .grow{flex:1 1 160px!important}
-    .sub{color:var(--sub);font-size:12.5px;line-height:1.5} .msg{color:var(--warn);font-size:13px;white-space:pre-wrap;margin:0 0 8px}
-    .msg.ok{color:var(--accent)}
-    label{display:block;font-size:12.5px;color:var(--sub);margin:10px 0 4px}
-    .box{border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 12px;background:var(--bg)}
-    .box h3{margin:0 0 8px;font-size:14px}
-    pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.55 ui-monospace,Menlo,monospace;margin:8px 0 0;max-height:260px;overflow:auto;background:var(--card);border-radius:8px;padding:10px}
-    .world{display:flex;gap:8px;align-items:center;padding:9px 4px;border-top:1px solid var(--line)} .world:first-child{border-top:0}
-    .world .name{flex:1;min-width:0;overflow-wrap:anywhere} .tag{font-size:11.5px;color:var(--accent);border:1px solid var(--accent);border-radius:99px;padding:0 7px}
-    .ent{border-top:1px solid var(--line);padding:9px 2px} .ent:first-of-type{border-top:0}
-    .ent .head{display:flex;gap:6px;align-items:center} .ent .head b{flex:1;min-width:0;overflow-wrap:anywhere}
-    .ent p{margin:4px 0 0;font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
-    .group{font-size:12px;color:var(--sub);margin:14px 0 2px;font-weight:600}
-    .check{display:flex;gap:6px;align-items:center;margin-top:10px;font-size:13px;color:var(--ink)} .check input{width:auto}
-  </style>
-  <button class="launcher" type="button" aria-label="세계관 설정집 열기" aria-expanded="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3Z"/></svg></button>
-  <section class="panel" hidden aria-label="세계관 설정집">
-    <header><h2>세계관 설정집</h2><button class="ghost close" type="button" aria-label="닫기">닫기</button></header>
-    <nav role="tablist"></nav>
-    <main></main>
-  </section>`;
+  root.innerHTML = `<style>${CSS}</style>
+    <button id="launch" type="button" aria-label="세계관 설정집 열기" aria-expanded="false">${LAUNCH_ICON}</button>
+    <div id="backdrop" hidden></div>
+    <section id="panel" role="dialog" aria-modal="true" aria-label="세계관 설정집" hidden>
+      <aside class="side"></aside>
+      <div class="work"><div class="top"></div><main></main></div>
+      <aside class="rail"></aside>
+    </section>`;
   (document.body || document.documentElement).append(host);
-
   const $ = (s) => root.querySelector(s);
-  const launcher = $('.launcher');
-  const panel = $('.panel');
-  const nav = $('nav');
-  const main = $('main');
-  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const el = { launch: $('#launch'), backdrop: $('#backdrop'), panel: $('#panel'), side: $('.side'), top: $('.top'), main: $('main'), rail: $('.rail') };
 
-  const state = {
-    tab: 'room',
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const store = {
+    get(k, d = '') { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+
+  const st = {
+    theme: store.get('world-archive-theme') || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+    fields: {},
     worlds: [],
-    room: null, // { roomId, worldId }
+    worldId: store.get('world-archive-world') || null,
+    entities: [],
+    room: null,
     roomName: '',
     preview: null,
-    worldId: null, // world being edited in the 세계관 tab
-    entities: [],
-    editing: null, // entityId being edited, or 'new'
-    message: '',
-    ok: false,
+    view: 'overview', // overview | <type> | world | new-world
+    detail: null, // entityId shown in full
+    editing: null, // entityId | 'new'
+    draft: null, // form values kept while switching kind in the form
+    ask: null, // which delete is waiting for a second press
+    query: '',
+    msg: '',
+    bad: false,
     busy: false,
+    loaded: false,
   };
 
-  const activeChatId = () => {
-    try {
-      return localStorage.getItem('marinara-active-chat-id') || '';
-    } catch {
-      return '';
-    }
-  };
+  const activeChatId = () => store.get('marinara-active-chat-id', '');
+  const world = () => st.worlds.find((w) => w.worldId === st.worldId) || null;
 
   async function api(method, path, body) {
     const init = { method, credentials: 'same-origin', cache: 'no-store', headers: { 'x-marinara-csrf': '1' } };
@@ -103,231 +270,429 @@
     }
     const text = await res.text();
     let data = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { error: text.slice(0, 200) };
-    }
-    if (res.status === 404 && path.startsWith('/status')) throw Error('서버에 World Archive 모듈이 없거나 꺼져 있어. 서버 쪽 설치부터 확인해 줘.');
+    try { data = text ? JSON.parse(text) : null; } catch { data = { error: text.slice(0, 200) }; }
+    if (res.status === 404 && path === '/status') throw Error('서버에 World Archive 모듈이 없거나 꺼져 있어. 서버 쪽 설치부터 확인해 줘.');
     if (res.status === 401) throw Error('마리나라 로그인이 끝났어. 페이지를 새로 고쳐 다시 로그인해 줘.');
     if (!res.ok) throw Error(data?.error || `서버 오류 (${res.status})`);
     return data;
   }
 
-  async function run(fn, okText) {
-    if (state.busy) return;
-    state.busy = true;
-    state.message = '';
+  async function run(fn, ok) {
+    if (st.busy) return;
+    st.busy = true;
+    st.msg = '';
     try {
       await fn();
-      if (okText) (state.message = okText), (state.ok = true);
+      if (ok) { st.msg = ok; st.bad = false; }
     } catch (e) {
-      state.message = e?.message || String(e);
-      state.ok = false;
+      st.msg = e?.message || String(e);
+      st.bad = true;
     } finally {
-      state.busy = false;
+      st.busy = false;
       render();
     }
   }
 
-  async function loadRoom() {
-    const id = activeChatId();
-    state.room = null;
-    state.preview = null;
-    state.roomName = '';
-    if (!id) return;
-    state.room = await api('GET', `/rooms/${encodeURIComponent(id)}`);
-    if (state.room.worldId) state.preview = await api('GET', `/rooms/${encodeURIComponent(id)}/preview`);
-    try {
-      const chat = await api('GET', `/api/chats/${encodeURIComponent(id)}`);
-      state.roomName = chat?.name || '';
-    } catch {}
-  }
+  // ------------------------------------------------------------------ loading
   async function loadWorlds() {
-    state.worlds = (await api('GET', '/worlds')).worlds || [];
-    if (state.worldId && !state.worlds.some((w) => w.worldId === state.worldId)) state.worldId = null;
+    st.worlds = (await api('GET', '/worlds')).worlds || [];
+    if (!world()) {
+      const linked = st.room?.worldId && st.worlds.some((w) => w.worldId === st.room.worldId) ? st.room.worldId : null;
+      st.worldId = linked || st.worlds[0]?.worldId || null;
+    }
+    if (st.worldId) store.set('world-archive-world', st.worldId);
   }
   async function loadEntities() {
-    state.entities = state.worldId ? (await api('GET', `/worlds/${state.worldId}/entities`)).entities || [] : [];
+    st.entities = st.worldId ? (await api('GET', `/worlds/${st.worldId}/entities`)).entities || [] : [];
+    if (st.detail && !st.entities.some((e) => e.entityId === st.detail)) st.detail = null;
   }
-  async function loadAll() {
-    await api('GET', '/status');
-    await loadWorlds();
-    await Promise.all([loadRoom(), loadEntities()]);
-  }
-
-  // ------------------------------------------------------------------ views
-
-  function viewRoom() {
+  async function loadRoom() {
     const id = activeChatId();
-    if (!id) return '<p class="sub">채팅방을 하나 열고 다시 눌러 줘.</p>';
-    const linked = state.room?.worldId;
-    const options = state.worlds
-      .map((w) => `<option value="${esc(w.worldId)}" ${w.worldId === linked ? 'selected' : ''}>${esc(w.name)}</option>`)
-      .join('');
-    const p = state.preview;
-    return `
-      <div class="box">
-        <h3>${esc(state.roomName || '지금 채팅방')}</h3>
-        ${state.worlds.length ? `
-        <label for="wa-link">이 방이 읽을 세계관</label>
-        <div class="row"><select id="wa-link" class="grow"><option value="">(연결 안 함)</option>${options}</select>
-        <button class="primary" data-act="link" type="button">저장</button></div>`
-        : '<p class="sub">아직 세계관이 없어. 「세계관」 탭에서 먼저 하나 만들어 줘.</p>'}
-        <p class="sub">프리셋에 <b>{{세계}}</b>(또는 {{world}})를 넣은 자리에 연결한 세계관 설정이 들어가.</p>
-      </div>
-      ${linked && p ? `
-      <div class="box">
-        <h3>이번 답변에 들어갈 내용</h3>
-        <p class="sub">${p.chars.toLocaleString()} / ${p.budget.toLocaleString()}자 · 설정 ${p.included.length}개${p.omitted.length ? ` · <b>길이 때문에 ${p.omitted.length}개 빠짐</b> (고정한 설정이 먼저 들어가)` : ''}</p>
-        <pre>${esc(p.text) || '(비어 있음)'}</pre>
-        <div class="row" style="margin-top:8px"><button data-act="edit-linked" type="button">이 세계관 고치기</button><button class="ghost" data-act="refresh" type="button">새로 보기</button></div>
-      </div>` : ''}`;
+    st.room = null; st.preview = null; st.roomName = '';
+    if (!id) return;
+    st.room = await api('GET', `/rooms/${encodeURIComponent(id)}`);
+    if (st.room.worldId) st.preview = await api('GET', `/rooms/${encodeURIComponent(id)}/preview`);
+    try { st.roomName = (await api('GET', `/api/chats/${encodeURIComponent(id)}`))?.name || ''; } catch {}
+  }
+  async function loadAll(followRoom) {
+    const status = await api('GET', '/status');
+    st.fields = status.fields || {};
+    await loadRoom();
+    if (followRoom && st.room?.worldId) st.worldId = st.room.worldId;
+    await loadWorlds();
+    await loadEntities();
+    st.loaded = true;
   }
 
-  function entityForm(e) {
-    const t = e?.type || 'person';
+  // ------------------------------------------------------------------ pieces
+  const defs = (type) => st.fields[type] || [];
+  const count = (type) => st.entities.filter((e) => e.type === type).length;
+  const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`; };
+  const shortId = (id) => String(id || '').slice(0, 4).toUpperCase();
+  const roomTitle = () => esc(st.roomName || (activeChatId() ? '지금 채팅방' : '열린 채팅방 없음'));
+
+  function sideHtml() {
+    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)])];
     return `
-      <div class="box" data-form="${esc(e?.entityId || 'new')}">
-        <h3>${e ? '설정 고치기' : '새 설정'}</h3>
-        <div class="row"><div class="grow"><label>종류</label><select name="type">${TYPES.map(([v, l]) => `<option value="${v}" ${v === t ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-        <div class="grow"><label>이름</label><input name="name" maxlength="120" value="${esc(e?.name || '')}"></div></div>
-        <label>다른 이름 (쉼표로 나눠)</label><input name="aliases" value="${esc((e?.aliases || []).join(', '))}">
-        <label>설명</label><textarea name="description" maxlength="4000">${esc(e?.description || '')}</textarea>
-        <label class="check"><input type="checkbox" name="pinned" ${e?.pinned ? 'checked' : ''}> 늘 먼저 넣기 (고정)</label>
-        <div class="row" style="margin-top:10px"><button class="primary" data-act="save-entity" type="button">저장</button><button class="ghost" data-act="cancel" type="button">취소</button></div>
+      <div class="brand">${BRAND}<div><b>세계관 설정집</b><small>WORLD ARCHIVE</small></div></div>
+      <div class="nav-label">YOUR WORLD</div>
+      <nav>${items.map(([v, label, ic, n]) => `<button type="button" data-act="go" data-view="${v}" class="${st.view === v ? 'on' : ''}" ${!st.worldId && v !== 'overview' ? 'disabled' : ''}>${icon(ic)}<span>${label}</span>${n == null || !st.worldId ? '' : `<span class="n">${n}</span>`}</button>`).join('')}</nav>
+      <div class="side-bottom">
+        ${st.worldId ? `<button type="button" data-act="go" data-view="world">${icon('world')}세계관 정보 고치기</button>` : ''}
+        <button type="button" data-act="go" data-view="new-world">${icon('star')}새 세계관 만들기</button>
+        <small>세계관 설정집 v${VERSION}</small>
       </div>`;
   }
 
-  function viewWorlds() {
-    const w = state.worlds.find((x) => x.worldId === state.worldId);
-    if (!w) {
-      const linked = state.room?.worldId;
-      return `
-        <div class="row" style="margin-bottom:10px"><span class="grow sub">세계관 ${state.worlds.length}개</span><button class="primary" data-act="new-world" type="button">새 세계관</button></div>
-        <div class="box">${state.worlds.length ? state.worlds.map((x) => `
-          <div class="world"><span class="name">${esc(x.name)}</span>${x.worldId === linked ? '<span class="tag">이 방</span>' : ''}<button data-act="open-world" data-id="${esc(x.worldId)}" type="button">열기</button></div>`).join('')
-          : '<p class="sub">아직 없어. 「새 세계관」으로 만들어 줘.</p>'}</div>`;
-    }
-    const groups = TYPES.map(([type, label]) => {
-      const list = state.entities.filter((e) => e.type === type);
-      if (!list.length) return '';
-      return `<div class="group">${label} ${list.length}</div>` + list.map((e) => state.editing === e.entityId ? entityForm(e) : `
-        <div class="ent"><div class="head"><b>${esc(e.name)}</b>${e.pinned ? '<span class="tag">고정</span>' : ''}
-        <button class="ghost" data-act="edit-entity" data-id="${esc(e.entityId)}" type="button">고치기</button>
-        <button class="ghost danger" data-act="delete-entity" data-id="${esc(e.entityId)}" type="button">지우기</button></div>
-        ${e.aliases.length ? `<div class="sub">다른 이름: ${esc(e.aliases.join(', '))}</div>` : ''}
-        ${e.description ? `<p>${esc(e.description)}</p>` : ''}</div>`).join('');
-    }).join('');
-    return `
-      <div class="row" style="margin-bottom:10px"><button class="ghost" data-act="back" type="button">‹ 목록</button></div>
-      <div class="box">
-        <h3>세계관</h3>
-        <label>이름</label><input id="wa-wname" maxlength="120" value="${esc(w.name)}">
-        <label>시대·배경 설명 (맨 앞에 들어가)</label><textarea id="wa-wdesc" maxlength="4000">${esc(w.description)}</textarea>
-        <label>프롬프트에 넣을 최대 글자 수</label><input id="wa-wbudget" type="number" min="300" max="20000" step="100" value="${w.injectChars}">
-        <div class="row" style="margin-top:10px"><button class="primary" data-act="save-world" type="button">저장</button><span class="grow"></span><button class="danger" data-act="delete-world" type="button">세계관 지우기</button></div>
-      </div>
-      <div class="row" style="margin:4px 0 6px"><span class="grow sub">설정 ${state.entities.length}개</span>${state.editing === 'new' ? '' : '<button class="primary" data-act="new-entity" type="button">새 설정</button>'}</div>
-      ${state.editing === 'new' ? entityForm(null) : ''}
-      <div>${groups || (state.editing === 'new' ? '' : '<p class="sub">아직 설정이 없어. 인물·장소·규칙 같은 걸 손으로 넣어 줘.</p>')}</div>`;
+  function topHtml() {
+    const opts = st.worlds.map((w) => `<option value="${esc(w.worldId)}" ${w.worldId === st.worldId ? 'selected' : ''}>${esc(w.name)}${w.worldId === st.room?.worldId ? '  · 이 방' : ''}</option>`).join('');
+    return `${st.worlds.length ? `<select id="worldSelect" aria-label="세계관 고르기">${opts}</select>` : '<span class="sub">아직 세계관이 없어</span>'}
+      <span class="grow"></span>
+      <button id="themeToggle" class="round" type="button" data-act="theme" aria-label="${st.theme === 'dark' ? '밝게' : '어둡게'}">${icon(st.theme === 'dark' ? 'sun' : 'moon')}</button>
+      <button id="close" class="round" type="button" data-act="close" aria-label="닫기">${icon('close')}</button>`;
   }
 
-  let lastView = '';
+  function chartSvg(ratio) {
+    const r = 62, c = 2 * Math.PI * r, fill = Math.max(0, Math.min(1, ratio));
+    return `<svg viewBox="0 0 150 150" aria-hidden="true">
+      <circle cx="75" cy="75" r="72" fill="none" stroke="currentColor" stroke-width=".8"/>
+      <circle cx="75" cy="75" r="${r}" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.5 3" opacity=".55"/>
+      <circle cx="75" cy="75" r="${r}" fill="none" stroke="currentColor" stroke-width="3.2" stroke-dasharray="${(c * fill).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 75 75)"/>
+      <circle cx="75" cy="75" r="46" fill="none" stroke="currentColor" stroke-width=".6" opacity=".5"/>
+      <path d="M75 0v18M75 132v18M0 75h18M132 75h18" stroke="currentColor" stroke-width=".7"/>
+      <circle cx="122" cy="30" r="1.4" fill="currentColor"/><circle cx="28" cy="118" r="1" fill="currentColor"/><circle cx="125" cy="117" r=".8" fill="currentColor"/></svg>`;
+  }
+
+  function roomState() {
+    if (!activeChatId()) return { kind: 'none' };
+    const linked = st.room?.worldId;
+    if (!linked) return { kind: 'unlinked' };
+    if (linked === st.worldId) return { kind: 'this' };
+    return { kind: 'other', name: st.worlds.find((w) => w.worldId === linked)?.name || '다른 세계관' };
+  }
+  function roomButtons() {
+    const s = roomState();
+    if (s.kind === 'none' || !st.worldId) return '';
+    if (s.kind === 'this') return `<button type="button" data-act="unlink">연결 끊기</button>`;
+    return `<button class="primary" type="button" data-act="link">이 세계관을 읽게 하기</button>`;
+  }
+  function roomLine() {
+    const s = roomState();
+    if (s.kind === 'none') return '채팅방을 하나 열면 여기서 연결할 수 있어.';
+    if (s.kind === 'unlinked') return '아직 어떤 세계관도 읽지 않아.';
+    if (s.kind === 'this') return '지금 이 세계관을 읽고 있어.';
+    return `지금은 「${esc(s.name)}」을(를) 읽고 있어.`;
+  }
+
+  function railHtml() {
+    const p = st.preview;
+    const s = roomState();
+    return `
+      <div class="rail-title">이 방</div>
+      <div class="room">${roomTitle()}</div>
+      <p>${roomLine()}</p>
+      <div class="row">${roomButtons()}</div>
+      ${(s.kind === 'this' || s.kind === 'other') && p ? `
+        <div class="chart">${chartSvg(p.chars / Math.max(1, p.budget))}<div class="num"><b>${p.chars.toLocaleString()}</b><small>/ ${p.budget.toLocaleString()}자</small></div></div>
+        <p>이번 답변에 설정 <b>${p.included.length}개</b>가 들어가.${p.omitted.length ? ` 글자 수 한도 때문에 <b>${p.omitted.length}개</b>가 빠졌어. 「늘 먼저 넣기」한 설정이 먼저 들어가.` : ''}</p>` : ''}
+      <hr>
+      <p>프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어가. 설정은 서버에 저장돼서 다른 기기에서도 같아.</p>`;
+  }
+
+  // ------------------------------------------------------------------ views
+  function overviewHtml() {
+    const w = world();
+    const stubs = [['person', '인물'], ['place', '장소'], ['group', '집단'], ['rule', '규칙·일정·기타']];
+    const n = (t) => (t === 'rule' ? count('rule') + count('schedule') + count('custom') : count(t));
+    const p = st.preview;
+    return `
+      <div class="eyebrow">WORLD ARCHIVE · V${VERSION}</div>
+      <h1>${esc(w.name)}</h1>
+      <p class="intro">${w.description ? esc(w.description) : '시대·배경 설명이 아직 없어. 「세계관 정보 고치기」에서 적어 두면 설정 맨 앞에 같이 들어가.'}</p>
+      <div class="stubs">${stubs.map(([t, label]) => `<button class="stub" type="button" data-act="go" data-view="${t}"><strong>${n(t)}</strong><small>${label}</small></button>`).join('')}</div>
+      <div class="paper">
+        <h2>이 방 · ${roomTitle()}</h2>
+        <p class="sub" style="margin:0 0 12px">${roomLine()}</p>
+        <div class="row">${roomButtons()}</div>
+      </div>
+      ${roomState().kind === 'this' && p ? `
+      <div class="paper">
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">이번 답변에 들어갈 내용</h2><span class="pill">${p.chars.toLocaleString()} / ${p.budget.toLocaleString()}자</span></div>
+        <p class="sub" style="margin:8px 0 0">설정 ${p.included.length}개${p.omitted.length ? ` · 글자 수 한도 때문에 ${p.omitted.length}개 빠짐` : ''}. 프리셋의 {{세계}} 자리에 이대로 들어가.</p>
+        <pre>${esc(p.text) || '(비어 있음)'}</pre>
+      </div>` : ''}
+      <div class="paper mobile-only"><p class="sub" style="margin:0">프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어가.</p></div>`;
+  }
+
+  function cardHtml(e) {
+    const d = defs(e.type);
+    const chips = d.filter((f) => f.kind === 'line' && e.fields?.[f.key]).map((f) => `<span class="chip" title="${esc(f.label)}">${esc(e.fields[f.key])}</span>`).join('');
+    const firstText = d.find((f) => f.kind === 'text' && f.key !== 'state' && e.fields?.[f.key]);
+    const snip = firstText ? e.fields[firstText.key] : e.description;
+    return `<button class="card" type="button" data-act="open" data-id="${esc(e.entityId)}" data-search="${esc([e.name, ...e.aliases].join(' ').toLowerCase())}">
+      ${e.pinned ? '<span class="pill pin">고정</span>' : ''}
+      <div class="nm">${esc(e.name)}</div>
+      ${e.aliases.length ? `<div class="al">${esc(e.aliases.join(' · '))}</div>` : ''}
+      ${chips ? `<div class="chips">${chips}</div>` : ''}
+      ${snip ? `<p class="snip">${esc(snip)}</p>` : ''}
+      <div class="foot"><span>${KIND[e.type].en} · ${shortId(e.entityId)}</span><span>${fmtDate(e.updatedAt)}</span></div>
+    </button>`;
+  }
+
+  function listHtml(type) {
+    const k = KIND[type];
+    const list = st.entities.filter((e) => e.type === type).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name, 'ko'));
+    return `
+      <div class="eyebrow">${k.en} · ${list.length}</div>
+      <h1>${k.label}</h1>
+      <p class="intro">${k.hint}</p>
+      <div class="toolbar">
+        ${list.length ? `<label class="search">${icon('search')}<input id="q" type="search" placeholder="이름이나 다른 이름으로 찾기" value="${esc(st.query)}" aria-label="찾기"></label>` : ''}
+        <span style="flex:1"></span>
+        <button class="primary" type="button" data-act="new" data-type="${type}">새 ${k.label}</button>
+      </div>
+      ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없어.</p>`
+        : `<div class="empty"><h2>아직 ${k.label} 설정이 없어</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 줘.</p></div>`}`;
+  }
+
+  function detailHtml(e) {
+    const k = KIND[e.type];
+    const d = defs(e.type);
+    const f = e.fields || {};
+    const facts = d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<div class="fact"><small>${esc(x.label)}</small><b>${esc(f[x.key])}</b></div>`).join('');
+    const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(f[x.key])}</p></div>`).join('');
+    const extra = (e.extra || []).filter((x) => x.value).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(x.value)}</p></div>`).join('');
+    const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}</small><p>${esc(e.description)}</p></div>` : '';
+    const empty = !facts && !secs && !extra && !memo && !f.state;
+    const askKey = `entity:${e.entityId}`;
+    return `
+      <button class="back" type="button" data-act="go" data-view="${e.type}">${icon('back')}${k.label} 목록</button>
+      <div class="paper">
+        <div class="sheet-head">
+          <div>
+            <div class="eyebrow">${k.en} · ${shortId(e.entityId)}</div>
+            <h1 style="margin-bottom:6px">${esc(e.name)}</h1>
+            ${e.aliases.length ? `<p class="al">다른 이름 · ${esc(e.aliases.join(', '))}</p>` : ''}
+          </div>
+          ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}
+        </div>
+        ${facts ? `<div class="facts">${facts}</div>` : ''}
+        ${secs}${extra}${memo}
+        ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것</small><p>${esc(f.state)}</p></div>` : ''}
+        ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없어. 「고치기」에서 채워 줘.</p>' : ''}
+        <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · 직접 입력</div>
+        <div class="actions">
+          <button class="primary" type="button" data-act="edit" data-id="${esc(e.entityId)}">고치기</button>
+          <button type="button" data-act="pin" data-id="${esc(e.entityId)}">${e.pinned ? '고정 풀기' : '늘 먼저 넣기'}</button>
+          <span class="grow"></span>
+          ${st.ask === askKey
+            ? `<span class="ask">정말 지울까? <button class="danger" type="button" data-act="delete" data-id="${esc(e.entityId)}">지우기</button><button class="quiet" type="button" data-act="ask" data-key="">아니</button></span>`
+            : `<button class="quiet" type="button" data-act="ask" data-key="${askKey}">지우기</button>`}
+        </div>
+      </div>`;
+  }
+
+  function fieldInput(x, value, hideLabel) {
+    const hint = x.hint ? `<em>${esc(x.hint)}</em>` : '';
+    const label = `<label class="f" for="fd-${x.key}" ${hideLabel ? 'hidden' : ''}>${esc(x.label)}${hint}</label>`;
+    return x.kind === 'line'
+      ? `<div>${label}<input id="fd-${x.key}" data-field="${x.key}" maxlength="200" value="${esc(value)}"></div>`
+      : `<div>${label}<textarea id="fd-${x.key}" data-field="${x.key}" maxlength="2000">${esc(value)}</textarea></div>`;
+  }
+
+  function extraRow(x = { label: '', value: '' }) {
+    return `<div class="extra-row" data-extra><input data-x="label" maxlength="40" placeholder="칸 이름 (예: 좋아하는 것)" value="${esc(x.label)}"><textarea data-x="value" maxlength="2000" rows="1" style="min-height:42px">${esc(x.value)}</textarea><button class="quiet" type="button" data-act="drop-extra">빼기</button></div>`;
+  }
+
+  /** e: the saved setting, or null for a new one. st.draft (if any) wins over e for what is shown. */
+  function formHtml(e, type) {
+    const isNew = st.editing === 'new';
+    const v = st.draft || e || {};
+    const k = KIND[type];
+    const d = defs(type);
+    const f = v.fields || {};
+    const lines = d.filter((x) => x.kind === 'line');
+    const texts = d.filter((x) => x.kind === 'text' && x.key !== 'state');
+    const state = d.find((x) => x.key === 'state');
+    return `
+      <button class="back" type="button" data-act="cancel">${icon('back')}${isNew ? `${k.label} 목록` : '돌아가기'}</button>
+      <div class="eyebrow">${k.en} · ${isNew ? '새로 만들기' : '고치기'}</div>
+      <h1>${isNew ? `새 ${k.label}` : esc(e?.name || '')}</h1>
+      <form class="paper" id="entityForm" onsubmit="return false">
+        <div class="grid2">
+          <div><label class="f" for="fd-name">이름</label><input id="fd-name" maxlength="120" value="${esc(v.name || '')}"></div>
+          <div><label class="f" for="fd-type">종류</label><select id="fd-type">${KINDS.map((x) => `<option value="${x.type}" ${x.type === type ? 'selected' : ''}>${x.label}</option>`).join('')}</select></div>
+        </div>
+        <label class="f" for="fd-aliases">다른 이름<em>애칭·영어 표기·직함. 쉼표로 나눠</em></label>
+        <input id="fd-aliases" value="${esc((v.aliases || []).join(', '))}">
+        ${lines.length ? `<div class="grid3">${lines.map((x) => fieldInput(x, f[x.key] || '')).join('')}</div>` : ''}
+        ${texts.map((x) => fieldInput(x, f[x.key] || '')).join('')}
+        ${state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것</small><p class="sub" style="margin:0 0 8px">${esc(state.hint || '')}</p>${fieldInput(state, f.state || '', true)}</div>` : ''}
+        <label class="f">추가 칸<em>이 항목에만 필요한 칸</em></label>
+        <div id="extras">${(v.extra || []).map(extraRow).join('')}</div>
+        <button type="button" data-act="add-extra" style="margin-top:8px">칸 추가</button>
+        <label class="f" for="fd-desc">${d.length ? '메모' : '내용'}</label>
+        <textarea id="fd-desc" maxlength="4000">${esc(v.description || '')}</textarea>
+        <label class="check"><input type="checkbox" id="fd-pinned" ${v.pinned ? 'checked' : ''}> 늘 먼저 넣기 (글자 수가 모자랄 때 이 설정부터 넣어)</label>
+        <div class="actions"><button class="primary" type="button" data-act="save">저장</button><button class="quiet" type="button" data-act="cancel">취소</button></div>
+      </form>`;
+  }
+
+  function newWorldHtml(first) {
+    return `
+      <div class="eyebrow">WORLD ARCHIVE · NEW</div>
+      <h1>${first ? '첫 세계관 만들기' : '새 세계관'}</h1>
+      <p class="intro">세계관 하나에 인물·장소·규칙 같은 설정을 모아 두고, 채팅방마다 어떤 세계관을 읽을지 골라. 여러 방이 같은 세계관을 같이 써도 돼.</p>
+      <form class="paper" onsubmit="return false">
+        <label class="f" for="nw-name">세계관 이름</label><input id="nw-name" maxlength="120" placeholder="예: 별빛 학원">
+        <label class="f" for="nw-desc">시대·배경<em>설정 맨 앞에 들어가</em></label><textarea id="nw-desc" maxlength="4000" placeholder="예: 1988년, 산 위의 기숙학교."></textarea>
+        <div class="actions"><button class="primary" type="button" data-act="create-world">만들기</button>${first ? '' : '<button class="quiet" type="button" data-act="go" data-view="overview">취소</button>'}</div>
+      </form>`;
+  }
+
+  function worldHtml() {
+    const w = world();
+    return `
+      <div class="eyebrow">WORLD · SETTINGS</div>
+      <h1>세계관 정보</h1>
+      <form class="paper" onsubmit="return false">
+        <label class="f" for="w-name">이름</label><input id="w-name" maxlength="120" value="${esc(w.name)}">
+        <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어가</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
+        <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정 안 한 설정부터 빠져</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
+        <div class="actions"><button class="primary" type="button" data-act="save-world">저장</button></div>
+      </form>
+      <div class="paper">
+        <h2>세계관 지우기</h2>
+        <p class="sub" style="margin:0 0 12px">설정 ${st.entities.length}개도 같이 지워지고, 이 세계관을 읽던 방들은 연결이 끊겨. 서버의 world-archive/trash 폴더에 사본이 남아.</p>
+        ${st.ask === 'world' ? `<span class="ask">정말 「${esc(w.name)}」을(를) 지울까? <button class="danger" type="button" data-act="delete-world">지우기</button><button class="quiet" type="button" data-act="ask" data-key="">아니</button></span>`
+          : '<button class="danger" type="button" data-act="ask" data-key="world">세계관 지우기</button>'}
+      </div>`;
+  }
+
+  function mainHtml() {
+    if (!st.loaded) return st.bad ? '' : '<p class="sub">불러오는 중…</p>';
+    if (st.view === 'new-world' || !world()) return newWorldHtml(!st.worlds.length);
+    if (st.view === 'world') return worldHtml();
+    if (KIND[st.view]) {
+      if (st.editing === 'new') return formHtml(null, st.view);
+      const e = st.entities.find((x) => x.entityId === (st.editing || st.detail));
+      if (e && st.editing) return formHtml(e, st.view);
+      if (e) return detailHtml(e);
+      return listHtml(st.view);
+    }
+    return overviewHtml();
+  }
+
+  let lastScreen = '';
   function render() {
-    nav.innerHTML = [['room', '이 방'], ['worlds', '세계관']]
-      .map(([k, l]) => `<button role="tab" type="button" data-tab="${k}" aria-selected="${state.tab === k}">${l}</button>`)
-      .join('');
-    const msg = state.message ? `<p class="msg ${state.ok ? 'ok' : ''}" role="status">${esc(state.message)}</p>` : '';
-    const view = `${state.tab}|${state.worldId}|${state.editing}`;
-    main.innerHTML = msg + (state.tab === 'room' ? viewRoom() : viewWorlds());
-    // A new screen (tab, world, form) starts at the top; the same screen keeps its scroll.
-    if (view !== lastView) main.scrollTop = 0;
-    lastView = view;
-    root.querySelectorAll('button').forEach((b) => (b.disabled = state.busy && !b.classList.contains('close')));
+    host.setAttribute('data-theme', st.theme);
+    el.side.innerHTML = sideHtml();
+    el.top.innerHTML = topHtml();
+    el.rail.innerHTML = railHtml();
+    const screen = `${st.view}|${st.worldId}|${st.detail}|${st.editing}`;
+    const keep = screen === lastScreen ? el.main.scrollTop : 0;
+    el.main.innerHTML = (st.msg ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + mainHtml();
+    el.main.scrollTop = keep;
+    lastScreen = screen;
+    if (st.query) filterCards();
+    if (st.busy) root.querySelectorAll('main button, .rail button').forEach((b) => { b.disabled = true; });
+  }
+
+  function filterCards() {
+    const q = st.query.trim().toLowerCase();
+    let shown = 0;
+    root.querySelectorAll('.card').forEach((c) => {
+      const hit = !q || c.dataset.search.includes(q);
+      c.hidden = !hit;
+      if (hit) shown++;
+    });
+    const none = $('#noHit');
+    if (none) none.hidden = shown > 0;
   }
 
   // ------------------------------------------------------------------ actions
+  const val = (id) => root.getElementById(id)?.value ?? '';
+  function readForm() {
+    const fields = {};
+    root.querySelectorAll('[data-field]').forEach((x) => { fields[x.dataset.field] = x.value; });
+    const extra = [...root.querySelectorAll('[data-extra]')].map((r) => ({ label: r.querySelector('[data-x=label]').value, value: r.querySelector('[data-x=value]').value }));
+    return {
+      name: val('fd-name'),
+      type: val('fd-type'),
+      aliases: val('fd-aliases').split(/[,，、]/).map((x) => x.trim()).filter(Boolean),
+      fields,
+      extra,
+      description: val('fd-desc'),
+      pinned: !!root.getElementById('fd-pinned')?.checked,
+    };
+  }
 
-  const formValue = (box) => ({
-    type: box.querySelector('[name=type]').value,
-    name: box.querySelector('[name=name]').value,
-    aliases: box.querySelector('[name=aliases]').value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean),
-    description: box.querySelector('[name=description]').value,
-    pinned: box.querySelector('[name=pinned]').checked,
-  });
+  const go = (view) => { st.view = view; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; };
 
   const actions = {
-    link: () => run(async () => {
-      const id = activeChatId();
-      const worldId = root.getElementById('wa-link').value || null;
-      await api('PUT', `/rooms/${encodeURIComponent(id)}`, { worldId });
+    go: (b) => { go(b.dataset.view); render(); },
+    theme: () => { st.theme = st.theme === 'dark' ? 'light' : 'dark'; store.set('world-archive-theme', st.theme); render(); },
+    close: () => toggle(false),
+    open: (b) => { st.detail = b.dataset.id; st.editing = null; st.ask = null; st.msg = ''; render(); },
+    new: (b) => { st.view = b.dataset.type; st.editing = 'new'; st.detail = null; st.draft = null; st.msg = ''; render(); },
+    edit: (b) => { st.editing = b.dataset.id; st.detail = b.dataset.id; st.draft = null; st.msg = ''; render(); },
+    cancel: () => { if (st.editing !== 'new') st.view = st.entities.find((x) => x.entityId === st.editing)?.type || st.view; st.editing = null; st.draft = null; st.msg = ''; render(); },
+    ask: (b) => { st.ask = b.dataset.key || null; render(); },
+    'add-extra': () => { root.getElementById('extras').insertAdjacentHTML('beforeend', extraRow()); root.querySelector('#extras [data-extra]:last-child input')?.focus(); },
+    'drop-extra': (b) => b.closest('[data-extra]').remove(),
+    save: () => run(async () => {
+      const v = readForm();
+      let e;
+      if (st.editing === 'new') e = await api('POST', `/worlds/${st.worldId}/entities`, v);
+      else {
+        const old = st.entities.find((x) => x.entityId === st.editing);
+        e = await api('PATCH', `/worlds/${st.worldId}/entities/${old.entityId}`, { ...v, revision: old.revision });
+      }
+      st.view = e.type; st.detail = e.entityId; st.editing = null; st.draft = null;
+      await loadEntities();
       await loadRoom();
     }, '저장했어.'),
-    refresh: () => run(loadAll),
-    'edit-linked': () => run(async () => {
-      state.tab = 'worlds';
-      state.worldId = state.room.worldId;
-      state.editing = null;
+    pin: (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, { pinned: !e.pinned, revision: e.revision });
       await loadEntities();
+      await loadRoom();
     }),
-    'new-world': () => run(async () => {
-      const name = prompt('새 세계관 이름');
-      if (!name) return;
-      const w = await api('POST', '/worlds', { name });
+    delete: (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      await api('DELETE', `/worlds/${st.worldId}/entities/${e.entityId}`, { revision: e.revision });
+      go(e.type);
+      await loadEntities();
+      await loadRoom();
+    }, '지웠어.'),
+    link: () => run(async () => {
+      await api('PUT', `/rooms/${encodeURIComponent(activeChatId())}`, { worldId: st.worldId });
+      await loadRoom();
+    }, '이 방이 이제 이 세계관을 읽어.'),
+    unlink: () => run(async () => {
+      await api('PUT', `/rooms/${encodeURIComponent(activeChatId())}`, { worldId: null });
+      await loadRoom();
+    }, '연결을 끊었어.'),
+    'create-world': () => run(async () => {
+      const w = await api('POST', '/worlds', { name: val('nw-name'), description: val('nw-desc') });
+      st.worldId = w.worldId;
+      store.set('world-archive-world', w.worldId);
+      go('overview');
       await loadWorlds();
-      state.worldId = w.worldId;
       await loadEntities();
-    }, '만들었어.'),
-    'open-world': (b) => run(async () => {
-      state.worldId = b.dataset.id;
-      state.editing = null;
-      await loadEntities();
-    }),
-    back: () => run(async () => {
-      state.worldId = null;
-      state.editing = null;
-      await loadWorlds();
-    }),
+    }, '세계관을 만들었어.'),
     'save-world': () => run(async () => {
-      const w = state.worlds.find((x) => x.worldId === state.worldId);
-      await api('PATCH', `/worlds/${w.worldId}`, {
-        name: root.getElementById('wa-wname').value,
-        description: root.getElementById('wa-wdesc').value,
-        injectChars: Number(root.getElementById('wa-wbudget').value),
-        revision: w.revision,
-      });
+      const w = world();
+      await api('PATCH', `/worlds/${w.worldId}`, { name: val('w-name'), description: val('w-desc'), injectChars: Number(val('w-budget')), revision: w.revision });
       await loadWorlds();
       await loadRoom();
     }, '저장했어.'),
     'delete-world': () => run(async () => {
-      const w = state.worlds.find((x) => x.worldId === state.worldId);
-      if (!confirm(`세계관 「${w.name}」과 그 안의 설정 ${state.entities.length}개를 지울까?\n연결된 방들은 연결이 끊겨. (서버의 trash 폴더에 사본이 남아)`)) return;
+      const w = world();
       await api('DELETE', `/worlds/${w.worldId}`, { revision: w.revision });
-      state.worldId = null;
+      st.worldId = null;
+      go('overview');
       await loadWorlds();
-      await loadRoom();
-    }, '지웠어.'),
-    'new-entity': () => ((state.editing = 'new'), (state.message = ''), render()),
-    'edit-entity': (b) => ((state.editing = b.dataset.id), (state.message = ''), render()),
-    cancel: () => ((state.editing = null), render()),
-    'save-entity': (b) => run(async () => {
-      const box = b.closest('[data-form]');
-      const id = box.dataset.form;
-      const v = formValue(box);
-      if (id === 'new') await api('POST', `/worlds/${state.worldId}/entities`, v);
-      else {
-        const e = state.entities.find((x) => x.entityId === id);
-        await api('PATCH', `/worlds/${state.worldId}/entities/${id}`, { ...v, revision: e.revision });
-      }
-      state.editing = null;
-      await loadEntities();
-      await loadRoom();
-    }, '저장했어.'),
-    'delete-entity': (b) => run(async () => {
-      const e = state.entities.find((x) => x.entityId === b.dataset.id);
-      if (!confirm(`「${e.name}」 설정을 지울까?`)) return;
-      await api('DELETE', `/worlds/${state.worldId}/entities/${e.entityId}`, { revision: e.revision });
       await loadEntities();
       await loadRoom();
     }, '지웠어.'),
@@ -336,32 +701,48 @@
   root.addEventListener('click', (ev) => {
     const b = ev.target.closest('button');
     if (!b || b.disabled) return;
-    if (b === launcher) return toggle();
-    if (b.classList.contains('close')) return toggle(false);
-    if (b.dataset.tab) {
-      state.tab = b.dataset.tab;
-      state.message = '';
-      return run(state.tab === 'room' ? loadRoom : loadWorlds);
-    }
-    actions[b.dataset.act]?.(b);
+    if (b === el.launch) return toggle();
+    const act = b.dataset.act;
+    if (act && actions[act]) actions[act](b);
   });
+  root.addEventListener('change', (ev) => {
+    if (ev.target.id === 'worldSelect') {
+      st.worldId = ev.target.value;
+      store.set('world-archive-world', st.worldId);
+      go(KIND[st.view] ? st.view : 'overview');
+      run(loadEntities);
+    } else if (ev.target.id === 'fd-type' && st.editing) {
+      // Switching kind in the form keeps everything typed; fields the new kind has keep their text.
+      const now = readForm();
+      // Fields the new kind lacks stay in the draft, so switching back brings them back. Saving sends only the
+      // fields on screen.
+      st.draft = { ...now, fields: { ...(st.draft?.fields || {}), ...now.fields } };
+      st.view = now.type;
+      render();
+    }
+  });
+  root.addEventListener('input', (ev) => {
+    if (ev.target.id === 'q') { st.query = ev.target.value; filterCards(); }
+  });
+  el.backdrop.addEventListener('click', () => toggle(false));
+  root.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !el.panel.hidden) toggle(false); });
 
-  let lastChat = '';
   let watch = null;
-  function toggle(open = panel.hidden) {
-    panel.hidden = !open;
-    launcher.setAttribute('aria-expanded', String(open));
+  let lastChat = '';
+  function toggle(open = el.panel.hidden) {
+    el.panel.hidden = !open;
+    el.backdrop.hidden = !open;
+    el.launch.hidden = open;
+    el.launch.setAttribute('aria-expanded', String(open));
     clearInterval(watch);
     if (!open) return;
     lastChat = activeChatId();
-    run(loadAll);
-    // Marinara keeps the open chat in localStorage; follow it while the panel is open.
+    render();
+    run(() => loadAll(true));
+    // Marinara keeps the open chat in localStorage; follow it while the window is open.
     watch = setInterval(() => {
       const now = activeChatId();
-      if (now !== lastChat && !state.busy) {
-        lastChat = now;
-        run(loadRoom);
-      }
+      if (now !== lastChat && !st.busy) { lastChat = now; run(loadRoom); }
     }, 1000);
   }
   render();

@@ -68,6 +68,40 @@ test('entities: validation, aliases, revisions, delete', (t) => {
   assert.throws(() => s.listEntities('not-an-id'), status(400));
 });
 
+test('fields per kind: validated, trimmed, empty ones dropped, kept across kind changes only when they fit', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const e = s.createEntity(w.worldId, {
+    type: 'person', name: '윤서하',
+    fields: { gender: ' 여 ', age: '', affiliation: '도서부\n  2학년', personality: '  조용함\n고집 셈  ' },
+    extra: [{ label: '좋아하는 것', value: '비' }, { label: '', value: '' }],
+  });
+  assert.deepEqual(e.fields, { gender: '여', affiliation: '도서부 2학년', personality: '조용함\n고집 셈' });
+  assert.deepEqual(e.extra, [{ label: '좋아하는 것', value: '비' }]);
+  assert.throws(() => s.createEntity(w.worldId, { type: 'place', name: 'x', fields: { gender: '여' } }), status(400));
+  assert.throws(() => s.createEntity(w.worldId, { type: 'person', name: 'x', fields: { age: 5 } }), status(400));
+  assert.throws(() => s.createEntity(w.worldId, { type: 'person', name: 'x', extra: [{ label: '', value: '값만' }] }), status(400));
+  assert.throws(() => s.createEntity(w.worldId, { type: 'person', name: 'x', fields: { appearance: 'ㄱ'.repeat(2001) } }), status(400));
+  const g = s.updateEntity(w.worldId, e.entityId, { type: 'group', revision: 1 });
+  assert.deepEqual(g.fields, {}, 'person fields do not fit a group');
+  const p = s.updateEntity(w.worldId, e.entityId, { fields: { kind: '동아리' }, revision: 2 });
+  assert.deepEqual(p.fields, { kind: '동아리' });
+});
+
+test('settings saved before fields existed still read and update', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const e = s.createEntity(w.worldId, { type: 'person', name: '옛 인물', description: '메모만' });
+  const raw = JSON.parse(fs.readFileSync(s.entityFile(w.worldId), 'utf8'));
+  delete raw.entities[0].fields;
+  delete raw.entities[0].extra;
+  fs.writeFileSync(s.entityFile(w.worldId), JSON.stringify(raw));
+  const [old] = s.listEntities(w.worldId);
+  assert.deepEqual(old.fields, {});
+  assert.deepEqual(old.extra, []);
+  assert.equal(s.updateEntity(w.worldId, e.entityId, { fields: { gender: '남' }, revision: 1 }).fields.gender, '남');
+});
+
 test('rooms: link, relink, unlink, branch inheritance', (t) => {
   const s = temp(t);
   const a = s.createWorld({ name: 'A' });

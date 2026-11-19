@@ -1,4 +1,5 @@
 'use strict';
+const { FIELDS } = require('./store.cjs');
 // What {{세계}} becomes. Pure functions: no files, no engine.
 // Budget handling follows the idea of the Memory Module's renderMemorySource (tlsiddl/marinara-memory-module
 // refactor/modular e873fd1): whole items only, most important first, never cut in the middle of a line.
@@ -20,10 +21,26 @@ function sanitize(text) {
     .replace(/\}\}/g, '}​}');
 }
 
+const oneLine = (t) => String(t).replace(/\s*\n+\s*/g, ' / ').trim();
+
+/**
+ * One setting as a block: the name line, then short fields together on one line, then each long field, extra field
+ * and the memo on a line of its own, indented under the name.
+ *   - 한여름 (다른 이름: 여름)
+ *     성별: 여 / 나이·생일: 17 / 소속: 천문부
+ *     성격: 규칙에 엄격하다
+ */
 function entityLine(e) {
   const aliases = e.aliases?.length ? ` (다른 이름: ${e.aliases.join(', ')})` : '';
-  const desc = e.description ? ` — ${e.description.replace(/\n+/g, ' / ')}` : '';
-  return sanitize(`- ${e.name}${aliases}${desc}`);
+  const lines = [`- ${e.name}${aliases}`];
+  const defs = FIELDS[e.type] || [];
+  const fields = e.fields || {};
+  const short = defs.filter((d) => d.kind === 'line' && fields[d.key]).map((d) => `${d.label}: ${oneLine(fields[d.key])}`);
+  if (short.length) lines.push('  ' + short.join(' / '));
+  for (const d of defs) if (d.kind === 'text' && fields[d.key]) lines.push(`  ${d.label}: ${oneLine(fields[d.key])}`);
+  for (const x of e.extra || []) if (x.value) lines.push(`  ${x.label}: ${oneLine(x.value)}`);
+  if (e.description) lines.push(`  ${defs.length ? '메모: ' : ''}${oneLine(e.description)}`);
+  return sanitize(lines.join('\n'));
 }
 
 /** Only confirmed settings go into the prompt. Pinned ones first, then by kind, then by name. */

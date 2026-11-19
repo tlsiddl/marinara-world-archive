@@ -20,6 +20,47 @@ const FILE_MAX = 8 * 1024 * 1024;
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROOM_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const TYPES = ['person', 'place', 'group', 'rule', 'schedule', 'custom'];
+const LINE_MAX = 200;
+const TEXT_MAX = 2000;
+const EXTRA_MAX = 20;
+const EXTRA_LABEL = 40;
+
+/**
+ * Fields of each kind (기획서 2.3). kind 'line' is a short one-line value, 'text' a paragraph.
+ * person.state is kept apart from the rest: it is what events changed (기획서 2단계 필수 설계 — 기본 정보와 사건으로
+ * 변한 상태 구분). 'description' (메모) and 'extra' (사용자 정의 칸) exist for every kind.
+ */
+const FIELDS = {
+  person: [
+    { key: 'gender', label: '성별', kind: 'line' },
+    { key: 'age', label: '나이·생일', kind: 'line' },
+    { key: 'affiliation', label: '소속', kind: 'line' },
+    { key: 'appearance', label: '외형', kind: 'text' },
+    { key: 'personality', label: '성격', kind: 'text' },
+    { key: 'background', label: '배경', kind: 'text' },
+    { key: 'family', label: '가족 관계', kind: 'text' },
+    { key: 'state', label: '지금 상태', kind: 'text', hint: '사건으로 바뀐 것 — 다침, 자리 이동, 관계 변화 같은 것' },
+  ],
+  place: [
+    { key: 'location', label: '위치·소속', kind: 'line' },
+    { key: 'use', label: '시설·용도', kind: 'line' },
+    { key: 'layout', label: '내부 구조', kind: 'text' },
+    { key: 'access', label: '출입구·연결', kind: 'text' },
+    { key: 'limits', label: '제약', kind: 'text' },
+  ],
+  group: [
+    { key: 'kind', label: '종류', kind: 'line', hint: '가문, 학교, 기숙사, 조직 같은 것' },
+    { key: 'members', label: '구성원', kind: 'text' },
+    { key: 'hierarchy', label: '위계·역할', kind: 'text' },
+  ],
+  rule: [{ key: 'category', label: '분류', kind: 'line', hint: '사회 제도, 세계 법칙, 능력 체계, 학교 규칙, 점수·계급 같은 것' }],
+  schedule: [
+    { key: 'when', label: '언제·주기', kind: 'line' },
+    { key: 'where', label: '어디서', kind: 'line' },
+    { key: 'who', label: '누가', kind: 'line' },
+  ],
+  custom: [],
+};
 const BUDGET_MIN = 300;
 const BUDGET_MAX = 20000;
 const BUDGET_DEFAULT = 3000;
@@ -62,6 +103,36 @@ function cleanAliases(v, name) {
     out.push(x);
   }
   if (out.length > ALIAS_MAX) throw new ArchiveError(400, `다른 이름은 ${ALIAS_MAX}개까지야.`);
+  return out;
+}
+
+function cleanFields(type, v) {
+  if (v === undefined || v === null) return {};
+  if (!isObject(v)) throw new ArchiveError(400, '칸 내용은 {칸: 내용} 모양으로 보내 줘.');
+  const out = {};
+  for (const [key, value] of Object.entries(v)) {
+    const def = FIELDS[type].find((f) => f.key === key);
+    if (!def) throw new ArchiveError(400, `'${key}'은(는) 이 종류에 없는 칸이야.`);
+    const x = def.kind === 'line' ? (value == null ? '' : cleanText(value, LINE_MAX, def.label).replace(/\s+/g, ' ')) : cleanText(value, TEXT_MAX, def.label);
+    if (x) out[key] = x;
+  }
+  return out;
+}
+
+function cleanExtra(v) {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw new ArchiveError(400, '추가 칸은 목록으로 보내 줘.');
+  const out = [];
+  for (const x of v) {
+    if (!isObject(x)) throw new ArchiveError(400, '추가 칸은 {label, value} 모양이야.');
+    const value = cleanText(x.value, TEXT_MAX, '추가 칸 내용');
+    const label = typeof x.label === 'string' ? x.label.normalize('NFC').trim().replace(/\s+/g, ' ') : '';
+    if (!label && !value) continue;
+    if (!label) throw new ArchiveError(400, '추가 칸에 이름을 붙여 줘.');
+    if (label.length > EXTRA_LABEL) throw new ArchiveError(400, `추가 칸 이름은 ${EXTRA_LABEL}자까지야.`);
+    out.push({ label, value });
+  }
+  if (out.length > EXTRA_MAX) throw new ArchiveError(400, `추가 칸은 ${EXTRA_MAX}개까지야.`);
   return out;
 }
 
@@ -115,6 +186,9 @@ function validEntity(e) {
     Array.isArray(e.aliases) &&
     e.aliases.every((a) => typeof a === 'string') &&
     typeof e.description === 'string' &&
+    (e.fields === undefined || (isObject(e.fields) && Object.values(e.fields).every((v) => typeof v === 'string'))) &&
+    (e.extra === undefined ||
+      (Array.isArray(e.extra) && e.extra.every((x) => isObject(x) && typeof x.label === 'string' && typeof x.value === 'string'))) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
     isObject(e.provenance) &&
@@ -202,7 +276,7 @@ class Archive {
     return path.join(this.entityDir, `${needId(worldId)}.json`);
   }
 
-  readEntities(worldId) {
+  readEntitiesRaw(worldId) {
     return this.readJson(
       this.entityFile(worldId),
       () => ({ schemaVersion: SCHEMA, worldId, entities: [] }),
@@ -217,6 +291,16 @@ class Archive {
       },
       '세계관 설정',
     );
+  }
+
+  readEntities(worldId) {
+    const doc = this.readEntitiesRaw(worldId);
+    // Settings saved before fields existed read as having none.
+    for (const e of doc.entities) {
+      if (e.fields === undefined) e.fields = {};
+      if (e.extra === undefined) e.extra = [];
+    }
+    return doc;
   }
 
   // ---------------------------------------------------------------- worlds
@@ -304,6 +388,13 @@ class Archive {
     return this.readEntities(worldId).entities;
   }
 
+  /** Counts per kind, for the overview. */
+  countEntities(worldId) {
+    const out = Object.fromEntries(TYPES.map((t) => [t, 0]));
+    for (const e of this.readEntities(worldId).entities) out[e.type]++;
+    return out;
+  }
+
   entityInput(body, base) {
     if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 줘.');
     const out = { ...base };
@@ -315,6 +406,13 @@ class Archive {
     if (body.aliases !== undefined || !base) out.aliases = cleanAliases(body.aliases, out.name);
     else if (body.name !== undefined) out.aliases = cleanAliases(out.aliases, out.name);
     if (body.description !== undefined || !base) out.description = cleanText(body.description, DESC_MAX, '설명');
+    if (body.fields !== undefined || !base) out.fields = cleanFields(out.type, body.fields);
+    else if (body.type !== undefined) {
+      // kind changed without new fields: keep only the fields the new kind also has
+      const keep = Object.fromEntries(Object.entries(out.fields || {}).filter(([k]) => FIELDS[out.type].some((f) => f.key === k)));
+      out.fields = keep;
+    }
+    if (body.extra !== undefined || !base) out.extra = cleanExtra(body.extra);
     if (body.pinned !== undefined || !base) {
       if (body.pinned !== undefined && typeof body.pinned !== 'boolean') throw new ArchiveError(400, 'pinned는 true/false야.');
       out.pinned = body.pinned === true;
@@ -421,6 +519,7 @@ module.exports = {
   ArchiveError,
   SCHEMA,
   TYPES,
+  FIELDS,
   BUDGET_DEFAULT,
   BUDGET_MIN,
   BUDGET_MAX,
