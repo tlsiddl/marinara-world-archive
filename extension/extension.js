@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -36,6 +36,7 @@
     moon: '<path d="M20 14.2A8 8 0 0 1 9.8 4 8 8 0 1 0 20 14.2z"/>',
     search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
     back: '<path d="M14.5 6 8.5 12l6 6"/>',
+    history: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/><path d="M3.5 12h2M18.5 12h2" opacity=".5"/>',
   };
   const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
@@ -182,6 +183,26 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
 .rail p{margin:0;font-size:12px;color:var(--muted);text-align:justify}
 .rail .row{display:flex;flex-wrap:wrap;gap:6px}
 
+/* automatic updates */
+.auto-line{display:flex;gap:8px;align-items:flex-start}.auto-line .dot{margin-top:6px}
+.dot{display:inline-block;flex:none;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--ink)}
+.dot.on{background:var(--ink)}
+.dot.run{background:var(--ink);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.25}}
+.err{color:#a3321f;font-size:12.5px}:host([data-theme=dark]) .err{color:#f0a18f}
+.toggle{display:flex;gap:10px;align-items:center;font-size:14px;cursor:pointer}
+.toggle input{appearance:none;-webkit-appearance:none;width:44px;height:24px;border-radius:999px;border:1.5px solid var(--ink);background:var(--field);position:relative;padding:0;flex:none;cursor:pointer}
+.toggle input:before{content:"";position:absolute;top:3px;left:3px;width:15px;height:15px;border-radius:50%;background:var(--ink);transition:transform .15s}
+.toggle input:checked{background:var(--ink)}.toggle input:checked:before{background:var(--paper);transform:translateX(20px)}
+.auto-tag{font:9.5px var(--mono);letter-spacing:1px;margin-left:6px;opacity:.7}
+.hist{list-style:none;margin:0;padding:0}
+.hist li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:12px 0;border-top:1px dashed var(--line)}
+.hist li:first-child{border-top:0}
+.hist .what{overflow-wrap:anywhere}.hist .what b{font-family:var(--serif)}
+.hist .ev{grid-column:1;font-size:12.5px;color:var(--muted);text-align:justify}
+.hist .when{font:10px var(--mono);letter-spacing:1px;color:var(--muted)}
+.hist li.undone .what{text-decoration:line-through;opacity:.55}
+.hist .side-act{grid-row:1/span 3;grid-column:2;align-self:center}
 @media(max-width:1080px){#panel{grid-template-columns:190px minmax(0,1fr)}.rail{display:none}}
 @media(max-width:720px){
   #panel{inset:0;left:0;top:0;transform:none;width:100vw;height:100dvh;border:0;border-radius:0;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
@@ -251,6 +272,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     bad: false,
     busy: false,
     loaded: false,
+    auto: null, // this room's automatic-update status
+    history: [],
+    connections: null,
   };
 
   const activeChatId = () => store.get('marinara-active-chat-id', '');
@@ -313,6 +337,34 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     st.room = await api('GET', `/rooms/${encodeURIComponent(id)}`);
     if (st.room.worldId) st.preview = await api('GET', `/rooms/${encodeURIComponent(id)}/preview`);
     try { st.roomName = (await api('GET', `/api/chats/${encodeURIComponent(id)}`))?.name || ''; } catch {}
+    st.auto = null;
+    if (st.room.worldId) { try { st.auto = await api('GET', `/rooms/${encodeURIComponent(id)}/auto`); } catch {} }
+    pollAuto();
+  }
+  async function loadHistory() {
+    st.history = st.worldId ? (await api('GET', `/worlds/${st.worldId}/history`)).changes || [] : [];
+  }
+  async function loadConnections() {
+    try { st.connections = (await api('GET', '/connections')).connections || []; } catch { st.connections = []; }
+  }
+  // While this room is being read, ask again every 1.5 s; when it ends, refresh the settings it wrote.
+  let pollTimer = null;
+  function pollAuto() {
+    clearTimeout(pollTimer);
+    if (st.auto?.job?.state !== 'running' || el.panel.hidden) return;
+    pollTimer = setTimeout(async () => {
+      try {
+        const id = activeChatId();
+        st.auto = await api('GET', `/rooms/${encodeURIComponent(id)}/auto`);
+        if (st.auto.job?.state !== 'running') {
+          await loadEntities();
+          st.preview = await api('GET', `/rooms/${encodeURIComponent(id)}/preview`);
+          if (st.view === 'history') await loadHistory();
+        }
+      } catch {}
+      if (!st.busy) render();
+      pollAuto();
+    }, 1500);
   }
   async function loadAll(followRoom) {
     const status = await api('GET', '/status');
@@ -332,7 +384,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   const roomTitle = () => esc(st.roomName || (activeChatId() ? '지금 채팅방' : '열린 채팅방 없음'));
 
   function sideHtml() {
-    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)])];
+    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)]), ['history', '기록', 'history', null]];
     return `
       <div class="brand">${BRAND}<div><b>세계관 설정집</b><small>WORLD ARCHIVE</small></div></div>
       <div class="nav-label">YOUR WORLD</div>
@@ -384,6 +436,24 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     return `지금은 「${esc(s.name)}」을(를) 읽고 있습니다.`;
   }
 
+  function autoHtml(compact) {
+    const s = roomState();
+    if (s.kind !== 'this') return '';
+    const w = world();
+    const a = st.auto;
+    const job = a?.job;
+    if (!w.auto?.enabled) return `<div class="auto-line"><span class="dot"></span><span class="sub">자동 반영이 꺼져 있습니다.</span>${compact ? '' : ' <button class="quiet" type="button" data-act="go" data-view="world">켜기</button>'}</div>`;
+    if (!w.auto.connectionId) return `<div class="auto-line"><span class="dot"></span><span class="sub">자동 반영에 쓸 연결을 골라 주세요.</span> <button class="quiet" type="button" data-act="go" data-view="world">고르기</button></div>`;
+    const running = job?.state === 'running';
+    const status = running
+      ? `${esc(job.stage || '읽는 중')}`
+      : `메시지 ${w.auto.every}개마다 읽습니다${a?.pending != null ? ` · 아직 안 읽은 메시지 ${a.pending}개` : ''}`;
+    const last = job && !running && job.state === 'done' ? `<div class="sub">지난번: 새 설정 ${job.added}개 · 바뀐 칸 ${job.changed}개${job.dropped ? ` · 근거가 없어 뺀 것 ${job.dropped}개` : ''}</div>` : '';
+    const err = job?.state === 'error' ? `<div class="err">${esc(job.error)}</div>` : '';
+    return `<div class="auto-line"><span class="dot ${running ? 'run' : 'on'}"></span><span class="sub">자동 반영 · ${status}</span></div>${last}${err}
+      ${running ? '' : `<div class="row" style="margin-top:8px"><button type="button" data-act="read-now" ${a?.pending === 0 ? 'disabled' : ''}>지금 읽기</button></div>`}`;
+  }
+
   function railHtml() {
     const p = st.preview;
     const s = roomState();
@@ -392,6 +462,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       <div class="room">${roomTitle()}</div>
       <p>${roomLine()}</p>
       <div class="row">${roomButtons()}</div>
+      ${autoHtml(true)}
       ${(s.kind === 'this' || s.kind === 'other') && p ? `
         <div class="chart">${chartSvg(p.chars / Math.max(1, p.budget))}<div class="num"><b>${p.chars.toLocaleString()}</b><small>/ ${p.budget.toLocaleString()}자</small></div></div>
         <p>이번 답변에 설정 <b>${p.included.length}개</b>가 들어갑니다.${p.omitted.length ? ` 글자 수 한도 때문에 <b>${p.omitted.length}개</b>가 빠졌습니다. 「늘 먼저 넣기」한 설정이 먼저 들어갑니다.` : ''}</p>` : ''}
@@ -414,6 +485,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <h2>이 방 · ${roomTitle()}</h2>
         <p class="sub" style="margin:0 0 12px">${roomLine()}</p>
         <div class="row">${roomButtons()}</div>
+        ${roomState().kind === 'this' ? `<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">${autoHtml(false)}</div>` : ''}
       </div>
       ${roomState().kind === 'this' && p ? `
       <div class="paper">
@@ -430,7 +502,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     const firstText = d.find((f) => f.kind === 'text' && f.key !== 'state' && e.fields?.[f.key]);
     const snip = firstText ? e.fields[firstText.key] : e.description;
     return `<button class="card" type="button" data-act="open" data-id="${esc(e.entityId)}" data-search="${esc([e.name, ...e.aliases].join(' ').toLowerCase())}">
-      ${e.pinned ? '<span class="pill pin">고정</span>' : ''}
+      ${e.pinned ? '<span class="pill pin">고정</span>' : e.provenance?.source === 'auto' ? '<span class="pill pin">자동</span>' : ''}
       <div class="nm">${esc(e.name)}</div>
       ${e.aliases.length ? `<div class="al">${esc(e.aliases.join(' · '))}</div>` : ''}
       ${chips ? `<div class="chips">${chips}</div>` : ''}
@@ -459,10 +531,12 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     const k = KIND[e.type];
     const d = defs(e.type);
     const f = e.fields || {};
-    const facts = d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<div class="fact"><small>${esc(x.label)}</small><b>${esc(f[x.key])}</b></div>`).join('');
-    const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(f[x.key])}</p></div>`).join('');
+    const src = e.sources || {};
+    const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '');
+    const facts = d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<div class="fact"><small>${esc(x.label)}${tag(x.key)}</small><b>${esc(f[x.key])}</b></div>`).join('');
+    const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}${tag(x.key)}</small><p>${esc(f[x.key])}</p></div>`).join('');
     const extra = (e.extra || []).filter((x) => x.value).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(x.value)}</p></div>`).join('');
-    const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}</small><p>${esc(e.description)}</p></div>` : '';
+    const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}${tag('description')}</small><p>${esc(e.description)}</p></div>` : '';
     const empty = !facts && !secs && !extra && !memo && !f.state;
     const askKey = `entity:${e.entityId}`;
     return `
@@ -478,9 +552,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
         ${secs}${extra}${memo}
-        ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것</small><p>${esc(f.state)}</p></div>` : ''}
+        ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p></div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
-        <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · 직접 입력</div>
+        <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
         <div class="actions">
           <button class="primary" type="button" data-act="edit" data-id="${esc(e.entityId)}">고치기</button>
           <button type="button" data-act="pin" data-id="${esc(e.entityId)}">${e.pinned ? '고정 풀기' : '늘 먼저 넣기'}</button>
@@ -518,6 +592,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       <button class="back" type="button" data-act="cancel">${icon('back')}${isNew ? `${k.label} 목록` : '돌아가기'}</button>
       <div class="eyebrow">${k.en} · ${isNew ? '새로 만들기' : '고치기'}</div>
       <h1>${isNew ? `새 ${k.label}` : esc(e?.name || '')}</h1>
+      <p class="intro">직접 고친 칸은 그 뒤로 자동 반영이 덮어쓰지 않습니다.</p>
       <form class="paper" id="entityForm" onsubmit="return false">
         <div class="grid2">
           <div><label class="f" for="fd-name">이름</label><input id="fd-name" maxlength="120" value="${esc(v.name || '')}"></div>
@@ -561,6 +636,17 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정하지 않은 설정부터 빠집니다</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
         <div class="actions"><button class="primary" type="button" data-act="save-world">저장</button></div>
       </form>
+      <form class="paper" onsubmit="return false">
+        <h2>자동 반영</h2>
+        <p class="sub" style="margin:0 0 4px">이 세계관을 읽는 방에서 답변이 오면, 아직 안 읽은 대화를 읽고 새 인물·장소·규칙과 새로 밝혀진 사실을 바로 설정에 넣습니다. 원문에 근거가 있는 것만 넣고, 직접 쓴 칸은 덮어쓰지 않습니다. 바뀐 내용은 「기록」에서 하나씩 되돌릴 수 있습니다. 가장 최근 메시지 두 개는 리롤될 수 있어 다음 차례에 읽습니다.</p>
+        <label class="toggle" style="margin-top:14px"><input type="checkbox" id="a-on" ${w.auto?.enabled ? 'checked' : ''}> 자동 반영 켜기</label>
+        <div class="grid2">
+          <div><label class="f" for="a-conn">읽을 때 쓸 연결<em>저렴하고 긴 글을 잘 읽는 모델</em></label>
+            <select id="a-conn"><option value="">${st.connections == null ? '불러오는 중…' : '(골라 주세요)'}</option>${(st.connections || []).map((c) => `<option value="${esc(c.id)}" ${c.id === w.auto?.connectionId ? 'selected' : ''}>${esc(c.name)}${c.model ? ` · ${esc(c.model)}` : ''}</option>`).join('')}</select></div>
+          <div><label class="f" for="a-every">몇 메시지마다 읽을까요<em>2~50</em></label><input id="a-every" type="number" min="2" max="50" value="${w.auto?.every ?? 6}" style="max-width:140px"></div>
+        </div>
+        <div class="actions"><button class="primary" type="button" data-act="save-auto">저장</button></div>
+      </form>
       <div class="paper">
         <h2>세계관 지우기</h2>
         <p class="sub" style="margin:0 0 12px">설정 ${st.entities.length}개도 함께 지워지고, 이 세계관을 읽던 방들은 연결이 끊깁니다. 서버의 world-archive/trash 폴더에 사본이 남습니다.</p>
@@ -569,10 +655,35 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       </div>`;
   }
 
+  const ACTION_TEXT = {
+    create: (c) => `새 ${KIND[c.type]?.label || '설정'} <b>${esc(c.name)}</b>`,
+    field: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
+    alias: (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.after)}」`,
+    memo: (c) => `<b>${esc(c.name)}</b> · 메모: ${esc(c.after)}`,
+  };
+  const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${fmtDate(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+  function historyHtml() {
+    const list = st.history;
+    return `
+      <div class="eyebrow">HISTORY · ${list.length}</div>
+      <h1>기록</h1>
+      <p class="intro">자동 반영이 바꾼 내용입니다. 잘못 들어간 건 「되돌리기」로 하나씩 되돌릴 수 있습니다. 그 뒤에 다시 바뀌었거나 직접 고친 설정은 되돌리지 않습니다.</p>
+      ${list.length ? `<div class="paper"><ul class="hist">${list.map((c) => `
+        <li class="${c.undoneAt ? 'undone' : ''}">
+          <div class="what">${(ACTION_TEXT[c.action] || (() => esc(c.action)))(c)}</div>
+          ${c.evidence ? `<div class="ev">“${esc(c.evidence)}”</div>` : ''}
+          <div class="when">${fmtTime(c.at)}${c.undoneAt ? ' · 되돌림' : ''}</div>
+          <div class="side-act">${c.undoneAt ? '' : `<button class="quiet" type="button" data-act="undo" data-id="${esc(c.id)}">되돌리기</button>`}</div>
+        </li>`).join('')}</ul></div>`
+        : '<div class="empty"><h2>아직 기록이 없습니다</h2><p>자동 반영을 켜면 대화에서 찾은 설정이 여기에 남습니다.</p></div>'}`;
+  }
+
   function mainHtml() {
     if (!st.loaded) return st.bad ? '' : '<p class="sub">불러오는 중…</p>';
     if (st.view === 'new-world' || !world()) return newWorldHtml(!st.worlds.length);
     if (st.view === 'world') return worldHtml();
+    if (st.view === 'history') return historyHtml();
     if (KIND[st.view]) {
       if (st.editing === 'new') return formHtml(null, st.view);
       const e = st.entities.find((x) => x.entityId === (st.editing || st.detail));
@@ -630,7 +741,32 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   const go = (view) => { st.view = view; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; };
 
   const actions = {
-    go: (b) => { go(b.dataset.view); render(); },
+    go: (b) => {
+      go(b.dataset.view);
+      if (b.dataset.view === 'history') return run(loadHistory);
+      if (b.dataset.view === 'world' && st.connections == null) { render(); return run(loadConnections); }
+      render();
+    },
+    'read-now': () => run(async () => {
+      st.auto = await api('POST', `/rooms/${encodeURIComponent(activeChatId())}/auto`, { all: true });
+      if (st.auto.job?.state !== 'running') { await loadEntities(); await loadRoom(); }
+      pollAuto();
+    }),
+    undo: (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/history/${b.dataset.id}/undo`, {});
+      await loadHistory();
+      await loadEntities();
+      await loadRoom();
+    }, '되돌렸습니다.'),
+    'save-auto': () => run(async () => {
+      const w = world();
+      const enabled = !!root.getElementById('a-on')?.checked;
+      const connectionId = val('a-conn') || null;
+      if (enabled && !connectionId) throw Error('자동 반영에 쓸 연결을 골라 주세요.');
+      await api('PATCH', `/worlds/${w.worldId}`, { auto: { enabled, connectionId, every: Number(val('a-every')) }, revision: w.revision });
+      await loadWorlds();
+      await loadRoom();
+    }, '저장했습니다.'),
     theme: () => { st.theme = st.theme === 'dark' ? 'light' : 'dark'; store.set('world-archive-theme', st.theme); render(); },
     close: () => toggle(false),
     open: (b) => { st.detail = b.dataset.id; st.editing = null; st.ask = null; st.msg = ''; render(); },
@@ -709,8 +845,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     if (ev.target.id === 'worldSelect') {
       st.worldId = ev.target.value;
       store.set('world-archive-world', st.worldId);
-      go(KIND[st.view] ? st.view : 'overview');
-      run(loadEntities);
+      const keep = KIND[st.view] || st.view === 'history' ? st.view : 'overview';
+      go(keep);
+      run(async () => { await loadEntities(); if (keep === 'history') await loadHistory(); });
     } else if (ev.target.id === 'fd-type' && st.editing) {
       // Switching kind in the form keeps everything typed; fields the new kind has keep their text.
       const now = readForm();
@@ -735,6 +872,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     el.launch.hidden = open;
     el.launch.setAttribute('aria-expanded', String(open));
     clearInterval(watch);
+    clearTimeout(pollTimer);
     if (!open) return;
     lastChat = activeChatId();
     render();

@@ -166,3 +166,74 @@ test('no temporary files are left behind', (t) => {
   const all = [...fs.readdirSync(s.dir), ...fs.readdirSync(s.entityDir)];
   assert.equal(all.filter((f) => f.endsWith('.tmp')).length, 0);
 });
+
+test('auto: creates, fills empty fields, replaces its own, never touches hand-written ones', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  assert.deepEqual(s.getWorld(w.worldId).auto, { enabled: false, connectionId: null, every: 6 });
+  const hand = s.createEntity(w.worldId, { type: 'person', name: '한여름', fields: { gender: '여' } });
+  assert.deepEqual(hand.sources, { gender: 'manual' });
+
+  const c1 = s.applyAuto(w.worldId, [
+    { type: 'person', name: '한여름', aliases: ['반장'], fields: { gender: '남', age: '17세' }, evidence: '반장은 열일곱이었다' },
+    { type: 'place', name: '옥상 정원', fields: { location: '본관 5층 위' }, memo: '열쇠는 사감실', evidence: '옥상 정원' },
+    { type: 'dragon', name: 'x' },
+    { type: 'person', name: '   ' },
+  ], { roomId: 'r1', messageIds: ['m1'] });
+  assert.deepEqual(c1.map((c) => c.action).sort(), ['alias', 'create', 'field']);
+  const [p] = s.listEntities(w.worldId).filter((e) => e.name === '한여름');
+  assert.equal(p.fields.gender, '여', 'hand-written field stays');
+  assert.equal(p.fields.age, '17세');
+  assert.deepEqual(p.aliases, ['반장']);
+  assert.deepEqual(p.sources, { gender: 'manual', age: 'auto' });
+  const place = s.listEntities(w.worldId).find((e) => e.name === '옥상 정원');
+  assert.equal(place.provenance.source, 'auto');
+  assert.equal(place.description, '열쇠는 사감실');
+
+  const c2 = s.applyAuto(w.worldId, [{ type: 'person', name: '여름', match: '한여름', fields: { age: '18세' } }]);
+  assert.equal(c2.length, 2, 'own field replaced, 여름 added as another name');
+  assert.equal(s.listEntities(w.worldId).find((e) => e.name === '한여름').fields.age, '18세');
+
+  // the person edits age by hand: from now on it is theirs
+  const cur = s.listEntities(w.worldId).find((e) => e.name === '한여름');
+  s.updateEntity(w.worldId, cur.entityId, { fields: { ...cur.fields, age: '열여덟' }, revision: cur.revision });
+  assert.equal(s.applyAuto(w.worldId, [{ type: 'person', name: '한여름', fields: { age: '19세' } }]).length, 0);
+
+  const hist = s.listHistory(w.worldId);
+  assert.equal(hist[0].roomId, null);
+  assert.equal(hist.at(-1).roomId, 'r1');
+});
+
+test('auto: undo one change at a time, only while it is still there', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const [create] = s.applyAuto(w.worldId, [{ type: 'group', name: '천문부', fields: { kind: '동아리' } }]);
+  const [field] = s.applyAuto(w.worldId, [{ type: 'group', name: '천문부', fields: { members: '네 명' } }]);
+  assert.equal(s.undoChange(w.worldId, field.id).undone, true);
+  assert.equal(s.listEntities(w.worldId)[0].fields.members, undefined);
+  assert.throws(() => s.undoChange(w.worldId, field.id), status(409), 'twice');
+  const [again] = s.applyAuto(w.worldId, [{ type: 'group', name: '천문부', fields: { members: '다섯 명' } }]);
+  s.applyAuto(w.worldId, [{ type: 'group', name: '천문부', fields: { members: '여섯 명' } }]);
+  assert.throws(() => s.undoChange(w.worldId, again.id), status(409), 'changed again since');
+  const e = s.listEntities(w.worldId)[0];
+  s.updateEntity(w.worldId, e.entityId, { description: '직접 쓴 메모', revision: e.revision });
+  assert.throws(() => s.undoChange(w.worldId, create.id), status(409), 'hand-edited setting is not removed');
+});
+
+test('auto settings and read progress', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const u = s.updateWorld(w.worldId, { auto: { enabled: true, connectionId: 'conn_1' }, revision: 1 });
+  assert.deepEqual(u.auto, { enabled: true, connectionId: 'conn_1', every: 6 });
+  assert.throws(() => s.updateWorld(w.worldId, { auto: { every: 1 }, revision: 2 }), status(400));
+  assert.throws(() => s.updateWorld(w.worldId, { auto: { connectionId: '../x' }, revision: 2 }), status(400));
+  s.linkRoom('r1', w.worldId);
+  s.setRoomRead('r1', { lastId: 'm9', count: 9 });
+  s.linkRoom('r1', w.worldId);
+  assert.equal(s.getRoom('r1').read.count, 9, 'relinking the same world keeps progress');
+  s.inheritRoom('r1', 'r2');
+  assert.deepEqual([s.getRoom('r2').read.lastId, s.getRoom('r2').read.count], [null, 9]);
+  const w2 = s.createWorld({ name: 'B' });
+  s.linkRoom('r1', w2.worldId);
+  assert.equal(s.getRoom('r1').read, null, 'another world starts from the beginning');
+});

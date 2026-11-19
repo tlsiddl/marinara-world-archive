@@ -3,7 +3,8 @@
 // Routes are registered with app.register at the app.js anchor, so Marinara's own access checks (login, IP allowlist,
 // CSRF, host validation) cover them exactly like the engine's routes. There is no separate token.
 const path = require('node:path');
-const { Archive, ArchiveError, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX } = require('./store.cjs');
+const { Archive, ArchiveError, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY } = require('./store.cjs');
+const X = require('./extract.cjs');
 const { assembleWorld } = require('./inject.cjs');
 
 const TAG = '[world-archive]';
@@ -34,6 +35,112 @@ function store() {
 }
 function useStore(s) {
   archive = s;
+}
+
+// ---------------------------------------------------------------- automatic updates
+// The engine side (reading chats, calling a model) is loaded only when a world has automatic updates on.
+let eng = null;
+const engineApi = () => (eng ??= require('./vendor/engine.cjs'));
+function useEngine(e) {
+  eng = e;
+}
+
+const AUTO_DELAY_MS = 4000; // after a reply: wait a little, so a quick reroll is not read first
+const AUTO_MAX_BATCHES = 4; // per reply; the rest is read after the next replies (or with 「지금 읽기」)
+const jobs = new Map(); // roomId -> job
+const timers = new Map();
+
+function autoReady(world) {
+  return !!(world?.auto?.enabled && world.auto.connectionId);
+}
+
+/**
+ * Reads what was not read yet in one room and writes what it finds into the room's world.
+ * all: read everything pending now (the 「지금 읽기」 button); otherwise only when at least `every` settled messages
+ * wait, and at most AUTO_MAX_BATCHES batches.
+ */
+async function runRoom(roomId, { all = false, reason = 'reply' } = {}) {
+  const running = jobs.get(roomId);
+  if (running?.state === 'running') return running;
+  const s = store();
+  const worldId = s.roomWorldId(roomId);
+  if (!worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
+  const world = s.getWorld(worldId);
+  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, dropped: 0, startedAt: new Date().toISOString() };
+  jobs.set(roomId, job);
+  try {
+    const api = engineApi();
+    const m = await api.model(world.auto.connectionId);
+    const { messages, cast } = await api.chatMessages(roomId);
+    const { start, pending, settled } = X.unread(messages, s.getRoom(roomId).read);
+    if (!pending.length || (!all && pending.length < world.auto.every)) {
+      job.state = 'idle';
+      job.stage = '';
+      job.pending = pending.length;
+      return job;
+    }
+    const parts = X.batches(settled, start);
+    const todo = all ? parts : parts.slice(0, AUTO_MAX_BATCHES);
+    job.total = todo.length;
+    for (const [i, part] of todo.entries()) {
+      job.stage = `${i + 1}/${todo.length}번째 묶음을 읽는 중`;
+      let parsed = null;
+      for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+        const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast));
+        parsed = api.parseJsonObject(reply.content);
+      }
+      if (!parsed) throw Error('모델 답을 읽지 못했습니다. 잠시 뒤 다시 해 보거나, 다른 연결을 골라 주세요.');
+      const { items, dropped } = X.checkItems(parsed, part, cast);
+      const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
+      job.added += changes.filter((c) => c.action === 'create').length;
+      job.changed += changes.filter((c) => c.action !== 'create').length;
+      job.dropped += dropped.length;
+      const last = part.batch.at(-1);
+      s.setRoomRead(roomId, { lastId: last.id, count: part.end });
+      job.done++;
+      if (dropped.length) log(`chat ${roomId}: left out ${dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
+    }
+    job.pending = settled.length - todo.at(-1).end;
+    job.state = 'done';
+    job.stage = '';
+    log(`chat ${roomId}: read ${todo.length} batch(es), ${job.added} new, ${job.changed} updated`);
+  } catch (error) {
+    job.state = 'error';
+    job.error = error?.message || String(error);
+    log(`chat ${roomId}: automatic update failed: ${job.error}`);
+  } finally {
+    job.finishedAt = new Date().toISOString();
+  }
+  return job;
+}
+
+/** After a reply in a linked room whose world reads automatically. Never throws. */
+function scheduleRoom(roomId) {
+  try {
+    const worldId = store().roomWorldId(roomId);
+    if (!worldId || !autoReady(store().getWorld(worldId))) return;
+    clearTimeout(timers.get(roomId));
+    timers.set(roomId, setTimeout(() => {
+      timers.delete(roomId);
+      runRoom(roomId).catch((e) => log(`chat ${roomId}: ${e?.message || e}`));
+    }, AUTO_DELAY_MS));
+  } catch (error) {
+    log(`chat ${roomId}: could not schedule: ${error?.message || error}`);
+  }
+}
+
+async function roomAuto(roomId) {
+  const s = store();
+  const room = s.getRoom(roomId);
+  const world = room.worldId ? s.getWorld(room.worldId) : null;
+  const out = { roomId, worldId: room.worldId, enabled: !!world?.auto.enabled, ready: autoReady(world), every: world?.auto.every ?? null, job: jobs.get(roomId) || null, pending: null, read: room.read };
+  if (world?.auto.connectionId) {
+    try {
+      const { messages } = await engineApi().chatMessages(roomId);
+      out.pending = X.unread(messages, room.read).pending.length;
+    } catch {}
+  }
+  return out;
 }
 
 /** What one room's {{세계}} would be right now. */
@@ -88,6 +195,7 @@ async function routes(r) {
     types: TYPES,
     fields: FIELDS,
     budget: { default: BUDGET_DEFAULT, min: BUDGET_MIN, max: BUDGET_MAX },
+    autoEvery: AUTO_EVERY,
   })));
 
   r.get('/worlds', handle(async () => ({ worlds: s().listWorlds() })));
@@ -103,6 +211,20 @@ async function routes(r) {
     s().deleteEntity(req.params.worldId, req.params.entityId, body(req).revision ?? Number(req.query?.revision))));
 
   r.get('/rooms/:roomId', handle(async (req) => s().getRoom(req.params.roomId)));
+  r.get('/rooms/:roomId/auto', handle(async (req) => roomAuto(req.params.roomId)));
+  r.post('/rooms/:roomId/auto', handle(async (req) => {
+    const room = s().getRoom(req.params.roomId);
+    if (!room.worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
+    const world = s().getWorld(room.worldId);
+    if (!world.auto.connectionId) throw new ArchiveError(400, '자동 반영에 쓸 연결을 먼저 골라 주세요 (세계관 정보).');
+    const p = runRoom(req.params.roomId, { all: body(req).all !== false, reason: 'button' });
+    // Reading can take minutes: answer at once, the screen asks again for progress.
+    await Promise.race([p, new Promise((r) => setTimeout(r, 300))]);
+    return roomAuto(req.params.roomId);
+  }));
+  r.get('/worlds/:worldId/history', handle(async (req) => ({ changes: s().listHistory(req.params.worldId, Math.min(Number(req.query?.limit) || 200, 1000)) })));
+  r.post('/worlds/:worldId/history/:changeId/undo', handle(async (req) => s().undoChange(req.params.worldId, req.params.changeId)));
+  r.get('/connections', handle(async () => ({ connections: await engineApi().listConnections() })));
   r.put('/rooms/:roomId', handle(async (req) => {
     const w = body(req).worldId;
     if (w !== null && typeof w !== 'string') throw new ArchiveError(400, 'worldId(연결을 끊을 때는 null)를 보내 주세요.');
@@ -144,7 +266,15 @@ function attach(app) {
     branchOnSend(req, reply, payload);
     done(null, payload);
   });
+  app.addHook('onResponse', async (req, reply) => {
+    try {
+      const url = String(req.raw?.url || '').split('?')[0];
+      if (req.method !== 'POST' || url !== '/api/generate' || reply.statusCode >= 400) return;
+      const chatId = req.body?.chatId;
+      if (typeof chatId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(chatId)) scheduleRoom(chatId);
+    } catch {}
+  });
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { render, attach, preview, routes, dataDir, _test: { useStore, branchOnSend } };
+module.exports = { render, attach, preview, routes, dataDir, runRoom, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs } };

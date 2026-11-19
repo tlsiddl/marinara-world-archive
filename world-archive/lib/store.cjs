@@ -64,6 +64,9 @@ const FIELDS = {
 const BUDGET_MIN = 300;
 const BUDGET_MAX = 20000;
 const BUDGET_DEFAULT = 3000;
+const AUTO_EVERY = { min: 2, max: 50, default: 6 };
+const HISTORY_MAX = 1000;
+const SOURCES = ['manual', 'auto'];
 
 class ArchiveError extends Error {
   constructor(status, message) {
@@ -136,6 +139,24 @@ function cleanExtra(v) {
   return out;
 }
 
+/** Sources after a hand edit: every field (and the memo) whose text the person changed is marked manual. */
+function markManual(sources, before, after) {
+  const out = { ...sources };
+  const keys = new Set([...Object.keys(before.fields || {}), ...Object.keys(after.fields || {})]);
+  for (const k of keys) {
+    const a = (after.fields || {})[k] || '';
+    if (a === ((before.fields || {})[k] || '')) continue;
+    if (a) out[k] = 'manual';
+    else delete out[k];
+  }
+  if ((after.description || '') !== (before.description || '')) {
+    if (after.description) out.description = 'manual';
+    else delete out.description;
+  }
+  for (const k of Object.keys(out)) if (k !== 'description' && !(after.fields || {})[k]) delete out[k];
+  return out;
+}
+
 function cleanBudget(v) {
   if (v === undefined || v === null) return BUDGET_DEFAULT;
   if (!Number.isSafeInteger(v) || v < BUDGET_MIN || v > BUDGET_MAX) {
@@ -143,6 +164,30 @@ function cleanBudget(v) {
   }
   return v;
 }
+
+/** A world's automatic-update settings. connectionId is a Marinara connection id; null means none chosen yet. */
+function cleanAuto(v, base = defaultAuto()) {
+  if (!isObject(v)) throw new ArchiveError(400, '자동 반영 설정을 {enabled, connectionId, every} 모양으로 보내 주세요.');
+  const out = { ...base };
+  if (v.enabled !== undefined) {
+    if (typeof v.enabled !== 'boolean') throw new ArchiveError(400, 'enabled는 true 또는 false입니다.');
+    out.enabled = v.enabled;
+  }
+  if (v.connectionId !== undefined) {
+    if (v.connectionId !== null && (typeof v.connectionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(v.connectionId))) {
+      throw new ArchiveError(400, '연결 ID가 올바르지 않습니다.');
+    }
+    out.connectionId = v.connectionId;
+  }
+  if (v.every !== undefined) {
+    if (!Number.isSafeInteger(v.every) || v.every < AUTO_EVERY.min || v.every > AUTO_EVERY.max) {
+      throw new ArchiveError(400, `읽는 간격은 메시지 ${AUTO_EVERY.min}~${AUTO_EVERY.max}개입니다.`);
+    }
+    out.every = v.every;
+  }
+  return out;
+}
+const defaultAuto = () => ({ enabled: false, connectionId: null, every: AUTO_EVERY.default });
 
 function needId(id, what = '세계관') {
   if (typeof id !== 'string' || !ID_RE.test(id)) throw new ArchiveError(400, `${what} ID가 올바르지 않습니다.`);
@@ -169,6 +214,7 @@ function validWorld(w) {
     typeof w.name === 'string' &&
     typeof w.description === 'string' &&
     Number.isSafeInteger(w.injectChars) &&
+    (w.auto === undefined || isObject(w.auto)) &&
     typeof w.createdAt === 'string' &&
     typeof w.updatedAt === 'string' &&
     Number.isSafeInteger(w.revision) &&
@@ -189,6 +235,7 @@ function validEntity(e) {
     (e.fields === undefined || (isObject(e.fields) && Object.values(e.fields).every((v) => typeof v === 'string'))) &&
     (e.extra === undefined ||
       (Array.isArray(e.extra) && e.extra.every((x) => isObject(x) && typeof x.label === 'string' && typeof x.value === 'string'))) &&
+    (e.sources === undefined || (isObject(e.sources) && Object.values(e.sources).every((v) => SOURCES.includes(v)))) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
     isObject(e.provenance) &&
@@ -204,6 +251,7 @@ class Archive {
     this.roomsFile = path.join(this.dir, 'rooms.json');
     this.entityDir = path.join(this.dir, 'entities');
     this.trashDir = path.join(this.dir, 'trash');
+    this.historyDir = path.join(this.dir, 'history');
   }
 
   // ---------------------------------------------------------------- files
@@ -299,6 +347,7 @@ class Archive {
     for (const e of doc.entities) {
       if (e.fields === undefined) e.fields = {};
       if (e.extra === undefined) e.extra = [];
+      if (e.sources === undefined) e.sources = {};
     }
     return doc;
   }
@@ -306,12 +355,12 @@ class Archive {
   // ---------------------------------------------------------------- worlds
 
   listWorlds() {
-    return this.readWorlds().worlds;
+    return this.readWorlds().worlds.map((w) => ({ ...w, auto: { ...defaultAuto(), ...(w.auto || {}) } }));
   }
 
   getWorld(worldId) {
     needId(worldId);
-    const w = this.readWorlds().worlds.find((x) => x.worldId === worldId);
+    const w = this.listWorlds().find((x) => x.worldId === worldId);
     if (!w) throw new ArchiveError(404, '세계관을 찾지 못했습니다.');
     return w;
   }
@@ -323,7 +372,8 @@ class Archive {
     const injectChars = cleanBudget(body.injectChars);
     const doc = this.readWorlds();
     const t = now();
-    const world = { worldId: randomUUID(), name, description, injectChars, revision: 1, createdAt: t, updatedAt: t };
+    const auto = body.auto === undefined ? defaultAuto() : cleanAuto(body.auto);
+    const world = { worldId: randomUUID(), name, description, injectChars, auto, revision: 1, createdAt: t, updatedAt: t };
     doc.worlds.push(world);
     this.writeJson(this.worldsFile, doc);
     return world;
@@ -342,12 +392,13 @@ class Archive {
     if (body.name !== undefined) (next.name = cleanLine(body.name, NAME_MAX, '세계관 이름')), (changed = true);
     if (body.description !== undefined) (next.description = cleanText(body.description, DESC_MAX, '세계관 설명')), (changed = true);
     if (body.injectChars !== undefined) (next.injectChars = cleanBudget(body.injectChars)), (changed = true);
+    if (body.auto !== undefined) (next.auto = cleanAuto(body.auto, { ...defaultAuto(), ...(world.auto || {}) })), (changed = true);
     if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     next.revision++;
     next.updatedAt = now();
     Object.assign(world, next);
     this.writeJson(this.worldsFile, doc);
-    return world;
+    return this.getWorld(worldId);
   }
 
   /** The world, its settings and its room links go to trash/<worldId>-<time>/ — nothing is lost for good. */
@@ -429,6 +480,7 @@ class Archive {
     const entity = {
       entityId: randomUUID(),
       ...input,
+      sources: markManual({}, {}, input),
       status: 'confirmed',
       provenance: { source: 'manual' },
       revision: 1,
@@ -452,6 +504,8 @@ class Archive {
     const { revision: _r, ...rest } = body;
     if (!Object.keys(rest).length) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     const next = this.entityInput(rest, entity);
+    // What the person changed by hand becomes theirs: automatic updates never write over it again.
+    next.sources = markManual(entity.sources || {}, entity, next);
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
     this.writeJson(this.entityFile(worldId), doc);
     return entity;
@@ -470,6 +524,175 @@ class Archive {
     return { deleted: true, entityId };
   }
 
+  // ---------------------------------------------------------------- automatic updates
+
+  historyFile(worldId) {
+    return path.join(this.historyDir, `${needId(worldId)}.json`);
+  }
+
+  readHistory(worldId) {
+    return this.readJson(
+      this.historyFile(worldId),
+      () => ({ schemaVersion: SCHEMA, worldId, changes: [] }),
+      (d) => d.worldId === worldId && Array.isArray(d.changes) && d.changes.every((c) => isObject(c) && typeof c.id === 'string'),
+      '변경 기록',
+    );
+  }
+
+  listHistory(worldId, limit = 200) {
+    this.getWorld(worldId);
+    return this.readHistory(worldId).changes.slice(-limit).reverse();
+  }
+
+  /**
+   * Writes what the reader found. items: [{ type, name, aliases, fields, memo, evidence, match? }] already checked
+   * against the source text. meta: { roomId, messageIds }. Never writes over what the person typed:
+   *   - an unknown name becomes a new setting (source auto);
+   *   - an empty field is filled; a field the reader filled before is replaced by the newer statement;
+   *   - a field the person wrote (source manual) is left alone;
+   *   - new other names are added; the memo is written only while it is empty.
+   * Every change goes to the world's history so it can be undone one by one.
+   */
+  applyAuto(worldId, items, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const history = this.readHistory(worldId);
+    const t = now();
+    const changes = [];
+    const log = (c) => changes.push({ id: randomUUID(), at: t, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
+    const norm = (x) => String(x || '').normalize('NFC').trim().toLowerCase();
+    const findEntity = (item) => {
+      const keys = new Set([item.match, item.name, ...(item.aliases || [])].filter(Boolean).map(norm));
+      const hit = (e) => [e.name, ...e.aliases].some((n) => keys.has(norm(n)));
+      return doc.entities.find((e) => e.type === item.type && hit(e)) || doc.entities.find(hit) || null;
+    };
+    for (const raw of items) {
+      if (!isObject(raw) || !TYPES.includes(raw.type)) continue;
+      let name;
+      try {
+        name = cleanLine(raw.name, NAME_MAX, '이름');
+      } catch {
+        continue;
+      }
+      const item = { ...raw, name };
+      let fields = {};
+      try {
+        fields = cleanFields(item.type, Object.fromEntries(Object.entries(isObject(item.fields) ? item.fields : {}).filter(([k, v]) => FIELDS[item.type].some((f) => f.key === k) && typeof v === 'string')));
+      } catch {
+        fields = {};
+      }
+      let memo = '';
+      try {
+        memo = cleanText(typeof item.memo === 'string' ? item.memo : '', DESC_MAX, '메모');
+      } catch {}
+      let aliases = [];
+      try {
+        aliases = cleanAliases(Array.isArray(item.aliases) ? item.aliases.filter((a) => typeof a === 'string' && a.trim()).slice(0, ALIAS_MAX) : [], name);
+      } catch {}
+      const evidence = typeof item.evidence === 'string' ? item.evidence.slice(0, 300) : '';
+      const found = findEntity({ ...item, aliases });
+      if (!found) {
+        if (doc.entities.length >= ENTITY_MAX) continue;
+        const entity = {
+          entityId: randomUUID(),
+          type: item.type,
+          name,
+          aliases,
+          description: memo,
+          fields,
+          extra: [],
+          pinned: false,
+          sources: Object.fromEntries([...Object.keys(fields).map((k) => [k, 'auto']), ...(memo ? [['description', 'auto']] : [])]),
+          status: 'confirmed',
+          provenance: { source: 'auto', roomId: meta.roomId ?? null, evidence },
+          revision: 1,
+          createdAt: t,
+          updatedAt: t,
+        };
+        doc.entities.push(entity);
+        log({ entityId: entity.entityId, name, type: item.type, action: 'create', evidence });
+        continue;
+      }
+      const e = found;
+      e.sources = e.sources || {};
+      let touched = false;
+      for (const [key, value] of Object.entries(fields)) {
+        if (e.type !== item.type && !FIELDS[e.type].some((f) => f.key === key)) continue;
+        const before = e.fields[key] || '';
+        if (before === value || e.sources[key] === 'manual') continue;
+        if (before && !e.sources[key]) continue; // written before sources were kept: treat as the person's
+        e.fields[key] = value;
+        e.sources[key] = 'auto';
+        touched = true;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence });
+      }
+      const known = new Set([e.name, ...e.aliases].map(norm));
+      for (const a of [name, ...aliases]) {
+        if (known.has(norm(a)) || e.aliases.length >= ALIAS_MAX) continue;
+        e.aliases.push(a);
+        known.add(norm(a));
+        touched = true;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'alias', after: a, evidence });
+      }
+      if (memo && !e.description) {
+        e.description = memo;
+        e.sources.description = 'auto';
+        touched = true;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'memo', before: '', after: memo, evidence });
+      }
+      if (touched) {
+        e.revision++;
+        e.updatedAt = t;
+      }
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    history.changes.push(...changes);
+    if (history.changes.length > HISTORY_MAX) history.changes.splice(0, history.changes.length - HISTORY_MAX);
+    this.writeJson(this.historyFile(worldId), history);
+    return changes;
+  }
+
+  /** Undoes one automatic change, only while what it wrote is still there untouched. */
+  undoChange(worldId, changeId) {
+    this.getWorld(worldId);
+    const history = this.readHistory(worldId);
+    const c = history.changes.find((x) => x.id === changeId);
+    if (!c) throw new ArchiveError(404, '그 기록을 찾지 못했습니다.');
+    if (c.undoneAt) throw new ArchiveError(409, '이미 되돌린 기록입니다.');
+    const doc = this.readEntities(worldId);
+    const index = doc.entities.findIndex((e) => e.entityId === c.entityId);
+    const e = doc.entities[index];
+    const later = '그 뒤에 다시 바뀌어서 되돌리지 않았습니다. 설정에서 직접 고쳐 주세요.';
+    if (c.action === 'create') {
+      if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
+      if (Object.values(e.sources || {}).includes('manual')) throw new ArchiveError(409, '직접 고친 칸이 있는 설정이라 지우지 않았습니다. 지우려면 설정에서 지워 주세요.');
+      doc.entities.splice(index, 1);
+    } else {
+      if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
+      if (c.action === 'field' || c.action === 'memo') {
+        const key = c.action === 'memo' ? 'description' : c.key;
+        const current = key === 'description' ? e.description : e.fields[key] || '';
+        if (current !== c.after) throw new ArchiveError(409, later);
+        if (key === 'description') e.description = c.before || '';
+        else if (c.before) e.fields[key] = c.before;
+        else delete e.fields[key];
+        if (c.before) e.sources[key] = 'auto';
+        else delete e.sources[key];
+      } else if (c.action === 'alias') {
+        const i = e.aliases.indexOf(c.after);
+        if (i < 0) throw new ArchiveError(409, later);
+        e.aliases.splice(i, 1);
+      }
+      e.revision++;
+      e.updatedAt = now();
+    }
+    this.writeJson(this.entityFile(worldId), doc);
+    c.undoneAt = now();
+    this.writeJson(this.historyFile(worldId), history);
+    return { undone: true, changeId };
+  }
+
   // ---------------------------------------------------------------- rooms
 
   roomWorldId(roomId) {
@@ -482,7 +705,7 @@ class Archive {
     const link = this.readRooms().rooms[roomId];
     if (!link) return { roomId, worldId: null };
     const exists = this.readWorlds().worlds.some((w) => w.worldId === link.worldId);
-    return { roomId, worldId: exists ? link.worldId : null, linkedAt: link.linkedAt };
+    return { roomId, worldId: exists ? link.worldId : null, linkedAt: link.linkedAt, read: link.read || null };
   }
 
   /** worldId null unlinks the room. */
@@ -497,9 +720,19 @@ class Archive {
       return { roomId, worldId: null };
     }
     this.getWorld(worldId);
+    if (rooms.rooms[roomId]?.worldId === worldId) return this.getRoom(roomId); // same world: keep how far it was read
     rooms.rooms[roomId] = { worldId, linkedAt: now() };
     this.writeJson(this.roomsFile, rooms);
     return { roomId, worldId, linkedAt: rooms.rooms[roomId].linkedAt };
+  }
+
+  /** How far the automatic reader got in a room: { lastId, count } of the last message it read. */
+  setRoomRead(roomId, read) {
+    needRoom(roomId);
+    const rooms = this.readRooms();
+    if (!rooms.rooms[roomId]) return;
+    rooms.rooms[roomId].read = { lastId: read.lastId ?? null, count: read.count, at: now() };
+    this.writeJson(this.roomsFile, rooms);
   }
 
   /** A branch of a linked room reads the same world. Never replaces a link the new room already has. */
@@ -508,7 +741,13 @@ class Archive {
     const rooms = this.readRooms();
     const link = rooms.rooms[fromRoomId];
     if (!link || rooms.rooms[toRoomId]) return false;
-    rooms.rooms[toRoomId] = { worldId: link.worldId, linkedAt: now(), branchedFrom: fromRoomId };
+    rooms.rooms[toRoomId] = {
+      worldId: link.worldId,
+      linkedAt: now(),
+      branchedFrom: fromRoomId,
+      // a branch copies the messages up to its start under new ids: what was read is counted, not named
+      ...(link.read ? { read: { lastId: null, count: link.read.count, at: link.read.at } } : {}),
+    };
     this.writeJson(this.roomsFile, rooms);
     return true;
   }
@@ -524,4 +763,5 @@ module.exports = {
   BUDGET_MIN,
   BUDGET_MAX,
   ROOM_RE,
+  AUTO_EVERY,
 };

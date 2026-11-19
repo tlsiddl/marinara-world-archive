@@ -14,7 +14,7 @@ set -e
 REPO="tlsiddl/marinara-world-archive"
 REF="${WORLD_ARCHIVE_REF:-main}"
 ACTION="${1:-install}"
-FILES="world-archive/marinara-world-archive-runtime.cjs world-archive/lib/store.cjs world-archive/lib/inject.cjs world-archive/lib/service.cjs"
+FILES="world-archive/marinara-world-archive-runtime.cjs world-archive/lib/store.cjs world-archive/lib/inject.cjs world-archive/lib/service.cjs world-archive/lib/extract.cjs world-archive/lib/vendor/engine.cjs"
 RUNTIME_IN_DOCKER="/app/world-archive/marinara-world-archive-runtime.cjs"
 REQUIRE_OPT="--require=$RUNTIME_IN_DOCKER"
 VOLUME_LINE="./world-archive:/app/world-archive:ro"
@@ -45,7 +45,7 @@ download_module() { # download_module <marinara folder>
   W="$1/world-archive"
   NEW="$W/.incoming"
   rm -rf "$NEW"
-  mkdir -p "$NEW/lib"
+  mkdir -p "$NEW/lib/vendor"
   for f in $FILES; do
     rel="${f#world-archive/}"
     if ! fetch "$BASE/$f" "$NEW/$rel" || [ ! -s "$NEW/$rel" ]; then
@@ -57,10 +57,10 @@ download_module() { # download_module <marinara folder>
     for f in $FILES; do node --check "$NEW/${f#world-archive/}" >/dev/null 2>&1 || { rm -rf "$NEW"; fail "받은 파일($f)이 깨져 있어. 기존 파일은 그대로야."; }; done
   fi
   if [ -f "$W/marinara-world-archive-runtime.cjs" ]; then
-    rm -rf "$W/.prev"; mkdir -p "$W/.prev/lib"
+    rm -rf "$W/.prev"; mkdir -p "$W/.prev/lib/vendor"
     for f in $FILES; do rel="${f#world-archive/}"; [ -f "$W/$rel" ] && cp -p "$W/$rel" "$W/.prev/$rel"; done
   fi
-  mkdir -p "$W/lib"
+  mkdir -p "$W/lib/vendor"
   for f in $FILES; do rel="${f#world-archive/}"; mv -f "$NEW/$rel" "$W/$rel"; done
   rm -rf "$NEW"
   VER="$(sed -n "s/^const VERSION = '\([^']*\)'.*/\1/p" "$W/marinara-world-archive-runtime.cjs" | head -n 1)"
