@@ -263,3 +263,36 @@ test('auto settings and read progress', (t) => {
   assert.equal(s.getRoom('r1').read, null, '「처음부터 다시 읽기」 forgets the place');
   assert.equal(s.getRoom('r1').worldId, w2.worldId, 'and keeps the link');
 });
+
+test('injectMode: all by default, scene on request, anything else refused; old worlds read as all', (t) => {
+  const s = temp(t);
+  const a = s.createWorld({ name: 'A' });
+  assert.equal(a.injectMode, 'all');
+  assert.equal(s.createWorld({ name: 'B', injectMode: 'scene' }).injectMode, 'scene');
+  assert.throws(() => s.createWorld({ name: 'C', injectMode: 'some' }), status(400));
+  assert.throws(() => s.createWorld({ name: 'C', injectMode: null }), status(400));
+  assert.equal(s.listWorlds().length, 2, 'a refused world is not saved');
+  assert.equal(s.updateWorld(a.worldId, { injectMode: 'scene', revision: 1 }).injectMode, 'scene');
+  assert.throws(() => s.updateWorld(a.worldId, { injectMode: 'SCENE', revision: 2 }), status(400));
+  assert.equal(s.getWorld(a.worldId).injectMode, 'scene');
+  const raw = JSON.parse(fs.readFileSync(s.worldsFile, 'utf8'));
+  for (const w of raw.worlds) delete w.injectMode;
+  fs.writeFileSync(s.worldsFile, JSON.stringify(raw));
+  assert.deepEqual(s.listWorlds().map((w) => w.injectMode), ['all', 'all']);
+  assert.equal(s.updateWorld(a.worldId, { name: 'A2', revision: 2 }).injectMode, 'all', 'an old world updates without the field');
+  raw.worlds[0].injectMode = 'other';
+  fs.writeFileSync(s.worldsFile, JSON.stringify(raw));
+  assert.throws(() => s.listWorlds(), status(409), 'an unknown mode in the file is not guessed at');
+});
+
+test('auto: history records who wrote a change (reader by default, a module by name)', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const [a] = s.applyAuto(w.worldId, [{ type: 'place', name: '도서관' }]);
+  assert.equal(a.by, 'reader');
+  const [b] = s.applyAuto(w.worldId, [{ type: 'place', name: '도서관', fields: { use: '책' } }], { by: 'memory-module' });
+  assert.equal(b.by, 'memory-module');
+  const [c] = s.applyAuto(w.worldId, [{ type: 'place', name: '강당' }], { by: '../Bad Name' });
+  assert.equal(c.by, 'reader', 'a name that is not a plain id falls back to reader');
+  assert.equal(s.listEntities(w.worldId).find((e) => e.name === '도서관').provenance.by, 'reader');
+});

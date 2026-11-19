@@ -81,3 +81,33 @@ test('a world description larger than the budget is cut at a line break', () => 
 test('no world gives empty text', () => {
   assert.equal(assembleWorld(null, []).text, '');
 });
+
+test('scene order: pinned first, then settings named in the scene, then by kind', () => {
+  const rule = ent('rule', '통금', '밤 10시');
+  const a = ent('person', '가람');
+  const b = ent('person', '나래');
+  const pin = ent('place', '옥상', '', { pinned: true });
+  const out = assembleWorld(world, [rule, a, b, pin], 3000, { scene: new Set([b.entityId, rule.entityId]) });
+  assert.deepEqual(out.included, [pin.entityId, b.entityId, rule.entityId, a.entityId]);
+  assert.equal(out.skipped, 0, 'mode all: nothing is left out for the scene');
+  const tight = assembleWorld(world, [a, b], 42, { scene: new Set([b.entityId]) });
+  assert.deepEqual([tight.included, tight.omitted], [[b.entityId], [a.entityId]], 'short on space: the one in the scene wins');
+});
+
+test('scene mode: pinned and rules always, the rest only when named in the scene', () => {
+  const w = { ...world, injectMode: 'scene' };
+  const rule = ent('rule', '통금');
+  const pin = ent('person', '교장', '', { pinned: true });
+  const here = ent('person', '한여름');
+  const away = ent('place', '도서관');
+  const draft = ent('person', '후보', '', { status: 'pending' });
+  const all = [rule, pin, here, away, draft];
+  const out = assembleWorld(w, all, 3000, { scene: new Set([here.entityId]) });
+  assert.deepEqual(out.included.slice().sort(), [rule.entityId, pin.entityId, here.entityId].sort());
+  assert.equal(out.skipped, 1, 'only confirmed settings are counted');
+  assert.doesNotMatch(out.text, /도서관/);
+  const fresh = assembleWorld(w, all, 3000);
+  assert.equal(fresh.included.length, 4, 'no scene information yet: everything is a candidate');
+  assert.equal(fresh.skipped, 0);
+  assert.equal(assembleWorld(w, all, 3000, { scene: new Set() }).skipped, 2, 'an empty scene keeps only pinned and rules');
+});

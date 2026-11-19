@@ -155,14 +155,58 @@ async function roomAuto(roomId) {
   return out;
 }
 
+// ---------------------------------------------------------------- the current scene
+// Which settings are named in the latest messages of a room. Worked out (async) just before a reply or a prompt
+// preview is built, and read (sync) by {{세계}}. Without it, {{세계}} still works: everything is a candidate.
+const SCENE_MESSAGES = 12;
+const SCENE_TIMEOUT_MS = 1500;
+const scenes = new Map(); // roomId -> { ids: Set, at }
+
+function sceneIds(entities, texts) {
+  const text = X.squash(texts.join('\n'));
+  const ids = new Set();
+  for (const e of entities) {
+    if ([e.name, ...e.aliases].some((n) => { const k = X.squash(n); return k.length >= 2 && text.includes(k); })) ids.add(e.entityId);
+  }
+  return ids;
+}
+
+async function updateScene(roomId, extraText = '') {
+  const worldId = store().roomWorldId(roomId);
+  if (!worldId) return null;
+  const { messages } = await engineApi().chatMessages(roomId);
+  const texts = messages.slice(-SCENE_MESSAGES).map((m) => m.content);
+  if (extraText) texts.push(extraText);
+  const ids = sceneIds(store().readEntities(worldId).entities, texts);
+  scenes.set(roomId, { ids, worldId, at: Date.now() });
+  return ids;
+}
+
+/** Before a reply or a preview: refresh the scene, but never hold the reply up for long or fail it. */
+async function sceneBeforeReply(req) {
+  try {
+    const url = String(req.raw?.url || '').split('?')[0];
+    if (req.method !== 'POST' || (url !== '/api/generate' && url !== '/api/generate/dryRun')) return;
+    const chatId = req.body?.chatId;
+    if (typeof chatId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(chatId) || !store().roomWorldId(chatId)) return;
+    const extra = typeof req.body?.userMessage === 'string' ? req.body.userMessage : '';
+    await Promise.race([updateScene(chatId, extra), new Promise((r) => setTimeout(r, SCENE_TIMEOUT_MS))]);
+  } catch (error) {
+    log(`scene for ${req.body?.chatId}: ${error?.message || error}`);
+  }
+}
+
 /** What one room's {{세계}} would be right now. */
 function preview(roomId) {
   const s = store();
   const worldId = s.roomWorldId(roomId);
-  if (!worldId) return { roomId, worldId: null, text: '', chars: 0, budget: 0, included: [], omitted: [] };
+  if (!worldId) return { roomId, worldId: null, text: '', chars: 0, budget: 0, included: [], omitted: [], skipped: 0 };
   const world = s.listWorlds().find((w) => w.worldId === worldId);
-  if (!world) return { roomId, worldId: null, text: '', chars: 0, budget: 0, included: [], omitted: [] };
-  return { roomId, worldId, worldName: world.name, ...assembleWorld(world, s.readEntities(worldId).entities) };
+  if (!world) return { roomId, worldId: null, text: '', chars: 0, budget: 0, included: [], omitted: [], skipped: 0 };
+  // A scene worked out for another world (the room was relinked since) does not count.
+  const known = scenes.get(roomId);
+  const scene = known?.worldId === worldId ? known.ids : null;
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, ...assembleWorld(world, s.readEntities(worldId).entities, world.injectChars, { scene }) };
 }
 
 const reported = new Set();
@@ -176,7 +220,7 @@ function render(ctx) {
       reported.add(key);
       log(
         p.worldId
-          ? `{{세계}} for chat ${roomId}: ${p.included.length} settings (${p.chars}/${p.budget} chars)${p.omitted.length ? `, ${p.omitted.length} left out for length` : ''}`
+          ? `{{세계}} for chat ${roomId}: ${p.included.length} settings (${p.chars}/${p.budget} chars)${p.omitted.length ? `, ${p.omitted.length} left out for length` : ''}${p.skipped ? `, ${p.skipped} outside the scene` : ''}`
           : `{{세계}} for chat ${roomId || '(none)'}: no world linked`,
       );
     }
@@ -237,6 +281,13 @@ async function routes(r) {
   r.get('/worlds/:worldId/history', handle(async (req) => ({ changes: s().listHistory(req.params.worldId, Math.min(Number(req.query?.limit) || 200, 1000)) })));
   r.post('/worlds/:worldId/history/:changeId/undo', handle(async (req) => s().undoChange(req.params.worldId, req.params.changeId)));
   r.get('/connections', handle(async () => ({ connections: await engineApi().listConnections() })));
+  r.get('/rooms/:roomId/entities', handle(async (req) => { s().getRoom(req.params.roomId); return roomEntities(req.params.roomId); }));
+  r.get('/rooms/:roomId/lookup', handle(async (req) => { s().getRoom(req.params.roomId); return lookup(req.params.roomId, String(req.query?.name || '')); }));
+  r.post('/rooms/:roomId/suggest', handle(async (req) => {
+    s().getRoom(req.params.roomId);
+    const by = typeof body(req).by === 'string' ? body(req).by : 'module';
+    return suggest(req.params.roomId, body(req).items, by);
+  }));
   r.put('/rooms/:roomId', handle(async (req) => {
     const w = body(req).worldId;
     if (w !== null && typeof w !== 'string') throw new ArchiveError(400, 'worldId(연결을 끊을 때는 null)를 보내 주세요.');
@@ -244,8 +295,45 @@ async function routes(r) {
   }));
   r.get('/rooms/:roomId/preview', handle(async (req) => {
     s().getRoom(req.params.roomId); // validates the id
+    try { await Promise.race([updateScene(req.params.roomId), new Promise((r) => setTimeout(r, SCENE_TIMEOUT_MS))]); } catch {}
     return preview(req.params.roomId);
   }));
+}
+
+// ---------------------------------------------------------------- for other modules (기억 서재 and others)
+// Contract: docs/연동-계약.md. The same three things are offered in-process on globalThis.__marinaraWorldArchive.api
+// (no HTTP, for preloads in the same server) and over HTTP under /api/world-archive/rooms/:roomId/….
+const compact = (e) => ({ entityId: e.entityId, type: e.type, name: e.name, aliases: e.aliases, fields: e.fields, description: e.description, pinned: e.pinned, sources: e.sources, updatedAt: e.updatedAt });
+
+function roomEntities(roomId) {
+  const worldId = store().roomWorldId(roomId);
+  if (!worldId) return { worldId: null, entities: [] };
+  return { worldId, entities: store().readEntities(worldId).entities.map(compact) };
+}
+
+function lookup(roomId, name) {
+  const { worldId, entities } = roomEntities(roomId);
+  const key = X.squash(name);
+  if (!key) return { worldId, entity: null };
+  const hit = entities.find((e) => [e.name, ...e.aliases].some((n) => X.squash(n) === key)) || null;
+  return { worldId, entity: hit };
+}
+
+/**
+ * Settings another module found (same item shape as the reader's: type, name, aliases, match, fields, memo, evidence
+ * as text). Written like the reader's: never over what the person typed, logged with `by`, undoable. Only for a room
+ * whose world has automatic updates on — otherwise nothing is written and { written: false } comes back.
+ */
+function suggest(roomId, items, by = 'module') {
+  const worldId = store().roomWorldId(roomId);
+  if (!worldId) return { written: false, reason: 'no world', changes: [] };
+  const world = store().getWorld(worldId);
+  if (!world.auto.enabled) return { written: false, reason: 'automatic updates off', changes: [] };
+  const list = (Array.isArray(items) ? items : []).slice(0, 50).map((it) => ({ ...it, evidence: typeof it?.evidence === 'string' ? it.evidence.slice(0, 300) : '' }));
+  // `by` names the module in the history; a name that is not a plain id is recorded as 'module'.
+  const who = typeof by === 'string' && /^[a-z0-9-]{1,40}$/.test(by) ? by : 'module';
+  const changes = store().applyAuto(worldId, list, { roomId, by: who });
+  return { written: true, changes: changes.map((c) => ({ id: c.id, action: c.action, entityId: c.entityId, name: c.name, key: c.key })) };
 }
 
 /**
@@ -273,7 +361,9 @@ function branchOnSend(req, reply, payload) {
 }
 
 function attach(app) {
+  if (globalThis.__marinaraWorldArchive) globalThis.__marinaraWorldArchive.api = { version: 1, roomEntities, lookup, suggest };
   app.register(routes, { prefix: PREFIX });
+  app.addHook('preHandler', sceneBeforeReply);
   app.addHook('onSend', (req, reply, payload, done) => {
     branchOnSend(req, reply, payload);
     done(null, payload);
@@ -289,4 +379,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { render, attach, preview, routes, dataDir, runRoom, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs } };
+module.exports = { render, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes } };

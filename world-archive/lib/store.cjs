@@ -67,6 +67,12 @@ const BUDGET_DEFAULT = 3000;
 const AUTO_EVERY = { min: 2, max: 50, default: 6 };
 const HISTORY_MAX = 1000;
 const SOURCES = ['manual', 'auto'];
+const INJECT_MODES = ['all', 'scene'];
+function cleanMode(v) {
+  if (v === undefined) return 'all';
+  if (!INJECT_MODES.includes(v)) throw new ArchiveError(400, `넣는 방식은 ${INJECT_MODES.join(', ')} 중 하나입니다.`);
+  return v;
+}
 
 class ArchiveError extends Error {
   constructor(status, message) {
@@ -214,6 +220,7 @@ function validWorld(w) {
     typeof w.name === 'string' &&
     typeof w.description === 'string' &&
     Number.isSafeInteger(w.injectChars) &&
+    (w.injectMode === undefined || INJECT_MODES.includes(w.injectMode)) &&
     (w.auto === undefined || isObject(w.auto)) &&
     typeof w.createdAt === 'string' &&
     typeof w.updatedAt === 'string' &&
@@ -355,7 +362,7 @@ class Archive {
   // ---------------------------------------------------------------- worlds
 
   listWorlds() {
-    return this.readWorlds().worlds.map((w) => ({ ...w, auto: { ...defaultAuto(), ...(w.auto || {}) } }));
+    return this.readWorlds().worlds.map((w) => ({ ...w, injectMode: w.injectMode || 'all', auto: { ...defaultAuto(), ...(w.auto || {}) } }));
   }
 
   getWorld(worldId) {
@@ -373,7 +380,8 @@ class Archive {
     const doc = this.readWorlds();
     const t = now();
     const auto = body.auto === undefined ? defaultAuto() : cleanAuto(body.auto);
-    const world = { worldId: randomUUID(), name, description, injectChars, auto, revision: 1, createdAt: t, updatedAt: t };
+    const injectMode = cleanMode(body.injectMode);
+    const world = { worldId: randomUUID(), name, description, injectChars, injectMode, auto, revision: 1, createdAt: t, updatedAt: t };
     doc.worlds.push(world);
     this.writeJson(this.worldsFile, doc);
     return world;
@@ -392,6 +400,7 @@ class Archive {
     if (body.name !== undefined) (next.name = cleanLine(body.name, NAME_MAX, '세계관 이름')), (changed = true);
     if (body.description !== undefined) (next.description = cleanText(body.description, DESC_MAX, '세계관 설명')), (changed = true);
     if (body.injectChars !== undefined) (next.injectChars = cleanBudget(body.injectChars)), (changed = true);
+    if (body.injectMode !== undefined) (next.injectMode = cleanMode(body.injectMode)), (changed = true);
     if (body.auto !== undefined) (next.auto = cleanAuto(body.auto, { ...defaultAuto(), ...(world.auto || {}) })), (changed = true);
     if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     next.revision++;
@@ -559,7 +568,8 @@ class Archive {
     const history = this.readHistory(worldId);
     const t = now();
     const changes = [];
-    const log = (c) => changes.push({ id: randomUUID(), at: t, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
+    const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
+    const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
     const norm = (x) => String(x || '').normalize('NFC').trim().toLowerCase();
     const findEntity = (item) => {
       const keys = new Set([item.match, item.name, ...(item.aliases || [])].filter(Boolean).map(norm));
@@ -604,7 +614,7 @@ class Archive {
           pinned: false,
           sources: Object.fromEntries([...Object.keys(fields).map((k) => [k, 'auto']), ...(memo ? [['description', 'auto']] : [])]),
           status: 'confirmed',
-          provenance: { source: 'auto', roomId: meta.roomId ?? null, evidence },
+          provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence },
           revision: 1,
           createdAt: t,
           updatedAt: t,
