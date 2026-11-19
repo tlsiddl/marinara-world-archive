@@ -66,7 +66,7 @@ async function runRoom(roomId, { all = false, reason = 'reply' } = {}) {
   const worldId = s.roomWorldId(roomId);
   if (!worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
   const world = s.getWorld(worldId);
-  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, dropped: 0, startedAt: new Date().toISOString() };
+  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, dropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
   jobs.set(roomId, job);
   try {
     const api = engineApi();
@@ -87,6 +87,9 @@ async function runRoom(roomId, { all = false, reason = 'reply' } = {}) {
       let parsed = null;
       for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
         const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast));
+        job.calls++;
+        // Whatever token counts the provider reports (names differ between providers), summed for measuring.
+        for (const [k, v] of Object.entries(reply.usage || {})) if (typeof v === 'number') job.tokens[k] = (job.tokens[k] || 0) + v;
         parsed = api.parseJsonObject(reply.content);
       }
       if (!parsed) throw Error('모델 답을 읽지 못했습니다. 잠시 뒤 다시 해 보거나, 다른 연결을 골라 주세요.');
@@ -103,7 +106,8 @@ async function runRoom(roomId, { all = false, reason = 'reply' } = {}) {
     job.pending = settled.length - todo.at(-1).end;
     job.state = 'done';
     job.stage = '';
-    log(`chat ${roomId}: read ${todo.length} batch(es), ${job.added} new, ${job.changed} updated`);
+    const secs = ((Date.now() - Date.parse(job.startedAt)) / 1000).toFixed(1);
+    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.dropped} left out`);
   } catch (error) {
     job.state = 'error';
     job.error = error?.message || String(error);
