@@ -85,3 +85,25 @@ test('the plain-install launcher also starts the Memory Module when it is there'
   assert.match(text, /world-archive\/marinara-world-archive-runtime\.cjs/);
   execFileSync('bash', ['-n', path.join(dir, 'start-world-archive.sh')]);
 });
+
+test('requires_kept: every other preload must survive; World Archive present or absent as asked', () => {
+  const before = '--require=/app/a.cjs --require=/app/memory-module/marinara-memory-runtime.cjs';
+  const ok = `NODE_OPTIONS: ${before} --require=/app/world-archive/marinara-world-archive-runtime.cjs`;
+  const lost = 'NODE_OPTIONS: --require=/app/memory-module/marinara-memory-runtime.cjs --require=/app/world-archive/marinara-world-archive-runtime.cjs';
+  const code = (args) => Number(sh(`RC=0; requires_kept ${args} 2>/dev/null || RC=$?; printf %s "$RC"`));
+  assert.equal(code(`"${before}" "${ok}" with`), 0);
+  assert.equal(code(`"${before}" "${lost}" with`), 1, 'a.cjs would be lost');
+  assert.equal(code(`"${before}" "NODE_OPTIONS: ${before}" with`), 1, 'World Archive missing');
+  assert.equal(code(`"${before} --require=/app/world-archive/marinara-world-archive-runtime.cjs" "NODE_OPTIONS: ${before}" without`), 0);
+});
+
+test('options_file picks the last compose file that sets NODE_OPTIONS', (t) => {
+  const dir = path.dirname(tmp(t, ''));
+  const a = path.join(dir, 'a.yml'), b = path.join(dir, 'b.yml'), c = path.join(dir, 'c.yml');
+  fs.writeFileSync(a, 'x: 1\n');
+  fs.writeFileSync(b, '      NODE_OPTIONS: "--require=/b.cjs"\n');
+  fs.writeFileSync(c, '      NODE_OPTIONS: "--require=/c.cjs"\n');
+  assert.equal(sh(`options_file "${a},${b},${c}"`), c);
+  assert.equal(sh(`options_file "${a},${c},${b}"`), b);
+  assert.equal(sh(`options_file "${a}"`), '');
+});

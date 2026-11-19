@@ -102,8 +102,8 @@ merge_override() {
 unmerge_override() {
   F="$1"
   TMP="$F.world-archive.tmp"
-  awk -v opt=" $REQUIRE_OPT" -v vol="- $VOLUME_LINE" '
-    index($0, vol) { line = $0; sub(/^[[:space:]]*/, "", line); if (line == vol) next }
+  awk -v opt=" $REQUIRE_OPT" '
+    /^[[:space:]]*- [^ ]*:\/app\/world-archive:ro[[:space:]]*$/ { next }
     { i = index($0, opt); if (i) $0 = substr($0, 1, i - 1) substr($0, i + length(opt)); print }
   ' "$F" > "$TMP"
   mv -f "$TMP" "$F"
@@ -157,24 +157,59 @@ find_container() {
   return 1
 }
 
-compose_args() { # compose_args <config files, comma separated> <override path>
-  ARGS=""; HAS=0; OLDIFS="$IFS"; IFS=','
-  for f in $1; do [ -n "$f" ] || continue; ARGS="$ARGS -f $f"; [ "$f" = "$2" ] && HAS=1; done
+compose_args() { # compose_args <config files, comma separated> — ARGS: the same files, in the same order
+  ARGS=""; OLDIFS="$IFS"; IFS=','
+  for f in $1; do [ -n "$f" ] || continue; ARGS="$ARGS -f $f"; done
   IFS="$OLDIFS"
-  if [ -n "$ARGS" ] && [ "$HAS" = 0 ]; then ARGS="$ARGS -f $2"; fi
 }
 
-compose_dir() { # sets DIR SERVICE CONFIGS OVERRIDE for container $1
+# options_file <config files, comma separated>: the last compose file that sets NODE_OPTIONS. Its value wins whole
+# (compose does not join NODE_OPTIONS from several files), so that is the file the require must go into.
+options_file() {
+  LAST=""; OLDIFS="$IFS"; IFS=','
+  for f in $1; do [ -n "$f" ] && [ -f "$f" ] && grep -q 'NODE_OPTIONS' "$f" && LAST="$f"; done
+  IFS="$OLDIFS"; printf '%s' "$LAST"
+}
+
+# wa_file <config files>: the compose file that carries World Archive's require, if any.
+wa_file() {
+  FOUND_WA=""; OLDIFS="$IFS"; IFS=','
+  for f in $1; do [ -n "$f" ] && [ -f "$f" ] && grep -q 'marinara-world-archive-runtime' "$f" && FOUND_WA="$f"; done
+  IFS="$OLDIFS"; printf '%s' "$FOUND_WA"
+}
+
+requires_of() { printf '%s\n' "$1" | grep -o -- '--require=[^ "]*' | sort -u; }
+
+# requires_kept <NODE_OPTIONS before> <compose config after> <want: with|without>: every other preload that was
+# there before is still there, and World Archive is (with) or is not (without) among them.
+requires_kept() {
+  AFTER="$(requires_of "$2")"
+  for r in $(requires_of "$1"); do
+    case "$r" in *marinara-world-archive-runtime*) continue ;; esac
+    printf '%s\n' "$AFTER" | grep -qxF -- "$r" || { say "      빠질 뻔한 패치: $r" >&2; return 1; }
+  done
+  if [ "$3" = with ]; then printf '%s\n' "$AFTER" | grep -qF -- marinara-world-archive-runtime || return 1
+  else ! printf '%s\n' "$AFTER" | grep -qF -- marinara-world-archive-runtime || return 1; fi
+}
+
+compose_dir() { # sets DIR SERVICE CONFIGS ARGS OVERRIDE VOLUME_LINE for container $1
   DIR="$(label "$1" com.docker.compose.project.working_dir)"
   SERVICE="$(label "$1" com.docker.compose.service)"
   CONFIGS="$(label "$1" com.docker.compose.project.config_files)"
   [ -n "$DIR" ] && [ -d "$DIR" ] || fail "컨테이너 $1 은 docker compose로 켜지지 않았거나 compose 폴더를 못 찾았어."
   OVERRIDE="$DIR/docker-compose.override.yml"
-  compose_args "$CONFIGS" "$OVERRIDE"
+  VOLUME_LINE="$DIR/world-archive:/app/world-archive:ro"
+  compose_args "$CONFIGS"
 }
 
 compose_up() {
   (cd "$DIR" && docker compose $ARGS up -d) || return 1
+}
+
+# restore_and_fail <file> <backup> <why>
+restore_and_fail() {
+  cp -p "$2" "$1"
+  fail "$3 그래서 $1 을(를) 원래대로 되돌렸어. 마리나라는 다시 켜지 않았어. 아무것도 바뀌지 않았어."
 }
 
 install_docker() {
@@ -190,45 +225,63 @@ install_docker() {
       say "[3/3] 마리나라를 다시 켰어. 20초쯤 뒤에 접속해 줘."
       return ;;
   esac
-  if [ -f "$OVERRIDE" ]; then
-    cp -p "$OVERRIDE" "$OVERRIDE.before-world-archive"
-    RC=0; merge_override "$OVERRIDE" "$SERVICE" || RC=$?
+  TARGET="$(options_file "$CONFIGS")"
+  if [ -z "$TARGET" ]; then
+    # No compose file sets NODE_OPTIONS: use the override file (made here if missing), added to the file list.
+    TARGET="$OVERRIDE"
+    case ",$CONFIGS," in *",$OVERRIDE,"*) ;; *) [ -n "$CONFIGS" ] && ARGS="$ARGS -f $OVERRIDE" ;; esac
+  fi
+  STAMP="$(date +%Y%m%d-%H%M%S)"
+  BACKUP="$TARGET.before-world-archive-$STAMP"
+  if [ -f "$TARGET" ]; then
+    cp -p "$TARGET" "$BACKUP"
+    RC=0; merge_override "$TARGET" "$SERVICE" || RC=$?
     if [ "$RC" = 3 ]; then
+      rm -f "$BACKUP"
       say ""
-      say "[2/3] $OVERRIDE 모양이 예상과 달라서 건드리지 않았어. $SERVICE 서비스에 직접 넣어 줘:"
+      say "[2/3] $TARGET 모양이 예상과 달라서 건드리지 않았어. $SERVICE 서비스에 직접 넣어 줘:"
       say "      volumes:      - $VOLUME_LINE"
       say "      environment:  NODE_OPTIONS 끝에  $REQUIRE_OPT"
       say "      그다음: cd \"$DIR\" && docker compose$ARGS up -d"
-      rm -f "$OVERRIDE.before-world-archive"
       exit 0
     fi
-    say "[2/3] $OVERRIDE 에 World Archive를 넣었어 (원래 파일: docker-compose.override.yml.before-world-archive)."
-    if ! (cd "$DIR" && docker compose $ARGS config -q) 2>/dev/null; then
-      cp -p "$OVERRIDE.before-world-archive" "$OVERRIDE"
-      fail "고친 override 파일을 docker compose가 읽지 못해서 원래대로 되돌렸어. 아무것도 바뀌지 않았어."
-    fi
+    say "[2/3] $TARGET 에 World Archive 두 줄을 넣었어 (원래 파일: $BACKUP)."
   else
-    new_override "$OVERRIDE" "$SERVICE" "$OPTS"
-    say "[2/3] $OVERRIDE 를 만들었어."
+    new_override "$TARGET" "$SERVICE" "$OPTS"
+    BACKUP=""
+    say "[2/3] $TARGET 를 만들었어."
+  fi
+  CONFIG="$(cd "$DIR" && docker compose $ARGS config 2>/dev/null)" || CONFIG=""
+  if [ -z "$CONFIG" ] || ! requires_kept "$OPTS" "$CONFIG" with; then
+    if [ -n "$BACKUP" ]; then restore_and_fail "$TARGET" "$BACKUP" "고친 뒤 확인해 보니 원래 붙어 있던 패치가 빠지거나 World Archive가 안 붙어."
+    else rm -f "$TARGET"; fail "새로 만든 $TARGET 로는 원래 패치가 유지되지 않아서 지웠어. 아무것도 바뀌지 않았어."; fi
   fi
   if ! compose_up; then
-    [ -f "$OVERRIDE.before-world-archive" ] && cp -p "$OVERRIDE.before-world-archive" "$OVERRIDE" && compose_up || true
-    fail "docker compose up -d 가 실패해서 override 파일을 원래대로 돌려놨어. 위 오류를 봐 줘."
+    [ -n "$BACKUP" ] && cp -p "$BACKUP" "$TARGET" && compose_up || true
+    fail "docker compose up -d 가 실패해서 $TARGET 을(를) 원래대로 돌려놨어. 위 오류를 봐 줘."
   fi
   say "[3/3] 마리나라를 다시 켰어. 20초쯤 뒤에 접속해 줘."
+  say "      참고: $TARGET 을(를) 다른 도구가 통째로 바꾸면 World Archive 줄이 빠질 수 있어. 그러면 이 설치 명령을 다시 실행하면 돼."
 }
 
 uninstall_docker() {
   C="$1"
   compose_dir "$C"
-  [ -f "$OVERRIDE" ] || fail "$OVERRIDE 가 없어. 이미 꺼져 있는 것 같아."
-  if head -n 1 "$OVERRIDE" | grep -q "World Archive"; then
-    mv -f "$OVERRIDE" "$OVERRIDE.removed-world-archive"
-    say "[1/2] World Archive만 들어 있던 $OVERRIDE 를 치웠어 (.removed-world-archive로 남김)."
+  TARGET="$(wa_file "$CONFIGS")"
+  [ -z "$TARGET" ] && grep -q 'marinara-world-archive-runtime' "$OVERRIDE" 2>/dev/null && TARGET="$OVERRIDE" && ARGS="$ARGS -f $OVERRIDE"
+  [ -n "$TARGET" ] || fail "World Archive가 들어 있는 compose 파일을 못 찾았어. 이미 꺼져 있는 것 같아."
+  OPTS="$(container_env "$C" NODE_OPTIONS)"
+  BACKUP="$TARGET.before-world-archive-removal-$(date +%Y%m%d-%H%M%S)"
+  cp -p "$TARGET" "$BACKUP"
+  if head -n 1 "$TARGET" | grep -q "World Archive"; then
+    mv -f "$TARGET" "$TARGET.removed-world-archive"
+    ARGS="$(printf '%s' "$ARGS" | sed "s# -f $TARGET##")"
+    say "[1/2] World Archive만 들어 있던 $TARGET 를 치웠어 (.removed-world-archive로 남김)."
   else
-    cp -p "$OVERRIDE" "$OVERRIDE.before-world-archive-removal"
-    unmerge_override "$OVERRIDE"
-    say "[1/2] $OVERRIDE 에서 World Archive 두 줄만 뺐어."
+    unmerge_override "$TARGET"
+    CONFIG="$(cd "$DIR" && docker compose $ARGS config 2>/dev/null)" || CONFIG=""
+    if [ -z "$CONFIG" ] || ! requires_kept "$OPTS" "$CONFIG" without; then restore_and_fail "$TARGET" "$BACKUP" "빼고 나서 확인해 보니 다른 패치가 빠질 것 같아."; fi
+    say "[1/2] $TARGET 에서 World Archive 두 줄만 뺐어 (원래 파일: $BACKUP)."
   fi
   compose_up || fail "docker compose up -d 가 실패했어. 위 오류를 봐 줘."
   say "[2/2] 마리나라를 다시 켰어. 세계관 데이터는 데이터 폴더의 world-archive 에 그대로 있어."
@@ -259,7 +312,7 @@ EOF
 }
 
 install_local() {
-  DIR="$(find_folder)"
+  DIR="$(find_folder)" || true
   [ -n "$DIR" ] || fail "마리나라 폴더를 못 찾았어. 마리나라 폴더 안에서 실행하거나 MARINARA_DIR=/마리나라/폴더 를 붙여 줘."
   say "마리나라 폴더를 찾았어: $DIR"
   download_module "$DIR"
@@ -276,6 +329,7 @@ pick_container() {
     RC=0; C="$(find_container)" || RC=$?
     [ "$RC" = 2 ] && fail "어느 컨테이너인지 확실하지 않아서 아무것도 바꾸지 않았어."
   fi
+  return 0
 }
 
 say ""
@@ -289,7 +343,7 @@ case "$ACTION" in
     say "== World Archive 이전 버전으로 =="
     pick_container
     if [ -n "$C" ]; then compose_dir "$C"; restore_prev "$DIR"; docker restart "$C" >/dev/null; say "[2/2] 마리나라를 다시 켰어."
-    else DIR="$(find_folder)"; [ -n "$DIR" ] || fail "마리나라 폴더를 못 찾았어."; restore_prev "$DIR"; say "[2/2] 마리나라를 껐다가 start-world-archive.sh 로 다시 켜 줘."; fi ;;
+    else DIR="$(find_folder)" || true; [ -n "$DIR" ] || fail "마리나라 폴더를 못 찾았어."; restore_prev "$DIR"; say "[2/2] 마리나라를 껐다가 start-world-archive.sh 로 다시 켜 줘."; fi ;;
   uninstall)
     say "== World Archive 제거 (데이터는 남김) =="
     pick_container

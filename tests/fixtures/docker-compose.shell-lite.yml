@@ -1,0 +1,15 @@
+# 마리나라 셸 패치 — COMPOSE_FILE 목록의 맨 끝에 둔다.
+#  - shell-lite: 가벼운 목록 · 설정 · 그림 주소 (읽기만)
+#  - shell-translate: 답이 저장된 뒤 서버 자동 번역을 「번역 프리셋·단어장」과 같은 문단 번역으로 (2-5)
+# NODE_OPTIONS는 마지막 compose 파일의 값으로 통째로 바뀌므로(합쳐지지 않음),
+# docker-compose.persona-vision.yml 의 줄을 그대로 옮기고 맨 끝에 shell-lite · shell-translate만 더했다.
+services:
+  marinara:
+    volumes:
+      - /root/marinara-shell/server-patch/shell-lite.cjs:/app/shell-lite/shell-lite.cjs:ro
+      - /root/marinara-shell/server-patch/world-core.cjs:/app/shell-lite/world-core.cjs:ro
+      # 0.19.0 기록관 A · B: 이면 원본 memory-search · series-memory 묶음 (shell-lite가 쓸 때만 불러옴)
+      - /root/marinara-shell/server-patch/shell-sidememory.cjs:/app/shell-lite/shell-sidememory.cjs:ro
+      - /root/marinara-shell/server-patch/shell-translate.cjs:/app/shell-translate/shell-translate.cjs:ro
+    environment:
+      NODE_OPTIONS: "--require=/app/me-speedup.cjs --require=/app/gacha-ko-runtime.cjs --require=/app/gacha-cg-runtime.cjs --require=/app/novelai-gacha-delay.cjs --require=/app/gf-customizer-runtime.cjs --require=/app/gf-featured-runtime.cjs --require=/app/gacha-choice-runtime.cjs --require=/app/gacha-chapter-guard.cjs --require=/app/memory-module/marinara-memory-runtime.cjs --require=/app/persona-vision/persona-vision.cjs --require=/app/gacha-ko-1275-runtime.cjs --require=/app/gf-customizer-1275-runtime.cjs --require=/app/gf-featured-1275-runtime.cjs --require=/app/shell-lite/shell-lite.cjs --require=/app/shell-translate/shell-translate.cjs"
