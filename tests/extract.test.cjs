@@ -29,28 +29,24 @@ test('batches stay under the size limits and carry the two messages before them'
   assert.equal(parts.flatMap((p) => p.batch).length, 70);
 });
 
-test('checkItems keeps only what the text supports', () => {
-  const part = { batch: [msg(1, '사서 선생님인 "마르타"는 도서관 열쇠를 늘 목에 걸고 다닌다.'), msg(2, '서하가 웃었다.')] };
+test('checkItems keeps only what the text supports, and takes the evidence sentence from the text', () => {
+  const [part] = X.batches([msg(1, '사서 선생님인 "마르타"는 도서관 열쇠를 늘 목에 걸고 다닌다. 아무도 그 열쇠를 본 적이 없다.'), msg(2, '서하가 웃었다.')], 0);
   const { items, dropped } = X.checkItems({
     items: [
-      { type: 'person', name: '마르타', aliases: ['사서 선생님'], fields: { affiliation: '도서관' }, evidence: '도서관 열쇠를 늘 목에 걸고' },
-      { type: 'person', name: '서하', evidence: '서하가 웃었다' },
-      { type: 'person', name: '유령 교장', evidence: '교장은 유령이다' },
-      { type: 'place', name: '도서관', evidence: '지어낸 인용' },
-      { type: 'monster', name: '마르타', evidence: '마르타' },
+      { type: 'person', name: '마르타', aliases: ['사서 선생님'], fields: { affiliation: '도서관' }, evidence: [{ n: '1.1', q: '열쇠를 늘 목에' }] },
+      { type: 'place', name: '도서관', evidence: [{ n: '7.7', q: '그 열쇠를 본 적이' }] },
+      { type: 'person', name: '서하', evidence: [{ n: '2.1', q: '서하가 웃었다' }] },
+      { type: 'person', name: '유령 교장', evidence: [{ n: '1.1', q: '열쇠' }] },
+      { type: 'rule', name: '마르타', evidence: [{ n: '9.9', q: '지어낸 구절' }] },
+      { type: 'monster', name: '마르타', evidence: [{ n: '1.1' }] },
       'junk',
     ],
   }, part, ['서하', '나']);
-  assert.deepEqual(items.map((x) => x.name), ['마르타']);
-  assert.deepEqual(dropped.map((d) => d.why), ['card', 'name not in text', 'quote not in text', 'type']);
-});
-
-test('quoted: word for word, or mostly (a changed word ending), but not made up', () => {
-  const text = X.squash('"종탑 문은 자정에만 열린대요!" 하람이 말했다.');
-  assert.equal(X.quoted('종탑 문은 자정에만 열린대요', text), true);
-  assert.equal(X.quoted('종탑 문은 자정에만 열린다', text), true);
-  assert.equal(X.quoted('종탑은 낮에도 열려 있다', text), false);
-  assert.equal(X.quoted('문', text), false);
+  assert.deepEqual(items.map((x) => x.name), ['마르타', '도서관']);
+  assert.equal(items[0].evidence, '사서 선생님인 "마르타"는 도서관 열쇠를 늘 목에 걸고 다닌다.');
+  assert.equal(items[1].evidence, '아무도 그 열쇠를 본 적이 없다.', 'a wrong number is found again by its phrase');
+  assert.deepEqual(items[0].evidenceAt, [{ messageId: 'm1', sentence: 1 }]);
+  assert.deepEqual(dropped.map((d) => d.why), ['card', 'name not in text', 'no evidence sentence', 'type']);
 });
 
 test('buildPrompt names the cards to skip, the known settings near the text, and only the new messages to read', () => {
@@ -64,7 +60,7 @@ test('buildPrompt names the cards to skip, the known settings near the text, and
   assert.match(user.content, /- \(person\) 마르타 \[사서\] :: age=50대/);
   assert.match(user.content, /그 밖에 이미 있는 항목: 옥상\(place\)/);
   assert.match(user.content, /\[앞 내용 — 참고만[^\]]*\]\n\[나\] 앞 내용\n\[서하\] 앞 내용 2/);
-  assert.match(user.content, /\[새 대화 — 여기서만 뽑아\]\n\[나\] 마르타가 들어왔다\./);
+  assert.match(user.content, /\[새 대화 — 여기서만 뽑아[^\]]*\]\n#3 \[나\]\n3\.1 마르타가 들어왔다\./);
 });
 
 test('parseJsonObject reads fenced or thinking replies', () => {
@@ -94,8 +90,8 @@ function setup(t, messages, replies) {
 test('runRoom: waits for enough settled messages, then reads, writes, and remembers where it stopped', async (t) => {
   const messages = [msg(0, '안녕'), msg(1, '사서 마르타는 열쇠를 목에 건다.'), msg(2, '그래?'), msg(3, '응.')];
   const reply = JSON.stringify({ items: [
-    { type: 'person', name: '마르타', aliases: ['사서'], fields: { affiliation: '도서관' }, evidence: '사서 마르타는' },
-    { type: 'person', name: '지어낸 사람', evidence: '없는 문장' },
+    { type: 'person', name: '마르타', aliases: ['사서'], fields: { affiliation: '도서관' }, evidence: [{ n: '2.1', q: '사서 마르타는' }] },
+    { type: 'person', name: '지어낸 사람', evidence: [{ n: '2.1', q: '없는 문장' }] },
   ] });
   const { s, w, calls } = setup(t, messages, [reply]);
   let job = await service.runRoom('room');
