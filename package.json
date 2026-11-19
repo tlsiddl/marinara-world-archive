@@ -1,0 +1,14 @@
+{
+  "name": "marinara-world-archive",
+  "version": "0.1.0",
+  "private": true,
+  "description": "World Archive (세계관 설정집) — Marinara Engine world settings module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check world-archive/marinara-world-archive-runtime.cjs && node --check world-archive/lib/store.cjs && node --check world-archive/lib/inject.cjs && node --check world-archive/lib/service.cjs && node --check extension/extension.js && sh -n install.sh"
+  },
+  "engines": {
+    "node": ">=22.15"
+  }
+}
