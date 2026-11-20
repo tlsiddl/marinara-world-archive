@@ -14,6 +14,10 @@ const N = require('./names.cjs');
 
 const SCHEMA = 1;
 const BACKUP_FORMAT = 'marinara-world-archive-backup';
+/** 할 일 10: how many earlier values a field keeps (shown as 「이전: ○○」; never put in {{세계}}). */
+const PAST_MAX = 3;
+const validPast = (v) => isObject(v) && Object.values(v).every((list) => Array.isArray(list) && list.every((x) => isObject(x) && typeof x.value === 'string'));
+const validPending = (v) => isObject(v) && Object.values(v).every((x) => isObject(x) && typeof x.value === 'string');
 const NAME_MAX = 120;
 const DESC_MAX = 4000;
 const ALIAS_MAX = 20;
@@ -364,6 +368,8 @@ function validEntity(e) {
     (e.extra === undefined ||
       (Array.isArray(e.extra) && e.extra.every((x) => isObject(x) && typeof x.label === 'string' && typeof x.value === 'string'))) &&
     (e.sources === undefined || (isObject(e.sources) && Object.values(e.sources).every((v) => SOURCES.includes(v)))) &&
+    (e.past === undefined || validPast(e.past)) &&
+    (e.pending === undefined || validPending(e.pending)) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
     isObject(e.provenance) &&
@@ -648,6 +654,9 @@ class Archive {
       delete entity.glossaryName;
     }
     const before = structuredClone(entity);
+    if (entity.pending && next.fields) {
+      for (const k of Object.keys(entity.pending)) if ((next.fields[k] || '') !== (entity.fields?.[k] || '')) delete entity.pending[k];
+    }
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
     this.writeJson(this.entityFile(worldId), doc);
     const keys = [...new Set([...Object.keys(before.fields || {}), ...Object.keys(entity.fields || {})])].filter((k) => (before.fields || {})[k] !== (entity.fields || {})[k]);
@@ -719,6 +728,7 @@ class Archive {
     const t = now();
     const changes = [];
     const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
+    let anyTouched = false;
     const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
     const norm = (x) => String(x || '').normalize('NFC').trim().toLowerCase();
     const findEntity = (item) => {
@@ -779,12 +789,24 @@ class Archive {
       for (const [key, value] of Object.entries(fields)) {
         if (e.type !== item.type && !FIELDS[e.type].some((f) => f.key === key)) continue;
         const before = e.fields[key] || '';
-        if (before === value || e.sources[key] === 'manual') continue;
-        if (before && !e.sources[key]) continue; // written before sources were kept: treat as the person's
+        const said = isObject(item.fieldEvidence) && typeof item.fieldEvidence[key] === 'string' ? item.fieldEvidence[key].slice(0, 300) : evidence;
+        if (before === value) {
+          if (e.pending?.[key]) (delete e.pending[key], (touched = true)); // the story came back to what the person wrote
+          continue;
+        }
+        // The person's own field is never written over: the story's newer value waits as 「대화에서는 ○○가 됐어요 [적용]」.
+        if (e.sources[key] === 'manual' || (before && !e.sources[key])) {
+          if (e.pending?.[key]?.value !== value) {
+            e.pending = { ...(e.pending || {}), [key]: { value, evidence: said, at: t } };
+            touched = true;
+          }
+          continue;
+        }
+        // 실시간 반영: the newer value replaces the old one; the old one is kept below as 「이전: ○○」.
+        if (before) e.past = { ...(e.past || {}), [key]: [{ value: before, until: t, evidence: said }, ...((e.past || {})[key] || [])].slice(0, PAST_MAX) };
         e.fields[key] = value;
         e.sources[key] = 'auto';
         touched = true;
-        const said = isObject(item.fieldEvidence) && typeof item.fieldEvidence[key] === 'string' ? item.fieldEvidence[key].slice(0, 300) : evidence;
         log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said });
       }
       const known = new Set([e.name, ...e.aliases].map(norm));
@@ -802,11 +824,15 @@ class Archive {
         log({ entityId: e.entityId, name: e.name, type: e.type, action: 'memo', before: '', after: memo, evidence });
       }
       if (touched) {
+        anyTouched = true;
         e.revision++;
         e.updatedAt = t;
       }
     }
-    if (!changes.length) return [];
+    if (!changes.length) {
+      if (anyTouched) this.writeJson(this.entityFile(worldId), doc); // only waiting values (pending) changed
+      return [];
+    }
     this.writeJson(this.entityFile(worldId), doc);
     history.changes.push(...changes);
     if (history.changes.length > HISTORY_MAX) history.changes.splice(0, history.changes.length - HISTORY_MAX);
@@ -881,7 +907,11 @@ class Archive {
         if (key === 'description') e.description = c.before || '';
         else if (c.before) e.fields[key] = c.before;
         else delete e.fields[key];
-        if (c.before) e.sources[key] = 'auto';
+        if (key !== 'description' && e.past?.[key]?.[0]?.value === c.before) {
+          e.past[key] = e.past[key].slice(1);
+          if (!e.past[key].length) delete e.past[key];
+        }
+        if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
       } else if (c.action === 'alias') {
         const i = e.aliases.indexOf(c.after);
@@ -1353,6 +1383,40 @@ class Archive {
       if (!ids.has(r.from) || !ids.has(r.to)) throw new ArchiveError(409, '이을 설정이 지워져서 되돌리지 않았습니다.');
       doc.relations.push(structuredClone(r));
     }
+  }
+
+  // ---------------------------------------------------------------- 할 일 10 — 대화에서 바뀐 값 [적용]
+
+  /**
+   * 「대화에서는 ○○가 됐어요 [적용]」: the person takes the story's newer value for a field they wrote. The field
+   * becomes an automatic one again (later readings keep it current), their value is kept as 「이전」, and it is in
+   * the history ('field' by person) so 되돌리기 works. discard: true just drops the suggestion.
+   */
+  applyPending(worldId, entityId, key, revision, { discard = false } = {}) {
+    this.getWorld(worldId);
+    needId(entityId, '설정');
+    needRevision(revision);
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === entityId);
+    if (!e) throw new ArchiveError(404, '설정을 찾지 못했습니다.');
+    if (e.revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
+    const p = e.pending?.[key];
+    if (!p) throw new ArchiveError(404, '대화에서 바뀐 값이 없습니다.');
+    delete e.pending[key];
+    const t = now();
+    const changes = [];
+    if (!discard) {
+      const before = e.fields[key] || '';
+      if (before) e.past = { ...(e.past || {}), [key]: [{ value: before, until: t, evidence: '직접 쓴 값' }, ...((e.past || {})[key] || [])].slice(0, PAST_MAX) };
+      e.fields[key] = p.value;
+      e.sources[key] = 'auto';
+      changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId, name: e.name, type: e.type, action: 'field', key, before, after: p.value, evidence: p.evidence || '' });
+    }
+    e.revision++;
+    e.updatedAt = t;
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return e;
   }
 
   // ---------------------------------------------------------------- 할 일 7 — 백업 · 복원

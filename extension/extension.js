@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.3.15';
+  const VERSION = '0.3.16';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -142,6 +142,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0}
 .chip{font-size:11.5px;line-height:1.5;padding:2px 10px;border:1px solid var(--ink);border-radius:999px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip:nth-child(even){border-radius:2px}
+.fact .past,.sec .past,.state .past{display:block;margin-top:3px;font-size:11.5px;color:var(--muted)}.pending{display:block;margin-top:4px;font-size:12px}
 .card .hit{margin:8px 0 0;font-size:12.5px;color:var(--muted)}.card .hit mark{background:var(--accent-soft,#f3e2a8);color:inherit;padding:0 1px;border-radius:2px}
 .card .snip{margin:10px 0 12px;font-size:12.5px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:justify}
 .card .foot{margin-top:auto;margin-bottom:0;padding-top:8px;padding-top:8px;border-top:1px dashed var(--line);font:9.5px var(--mono);letter-spacing:1.5px;color:var(--muted);display:flex;justify-content:space-between}
@@ -553,8 +554,11 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     const f = e.fields || {};
     const src = e.sources || {};
     const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '');
-    const facts = d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<div class="fact"><small>${esc(x.label)}${tag(x.key)}</small><b>${esc(f[x.key])}</b></div>`).join('');
-    const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}${tag(x.key)}</small><p>${esc(f[x.key])}</p></div>`).join('');
+    // 할 일 10: the earlier value small under the field; a newer value from the story for a field the person wrote.
+    const was = (k) => (e.past?.[k]?.[0] ? `<small class="past">이전: ${esc(e.past[k][0].value)}</small>` : '');
+    const wait = (k) => (e.pending?.[k] ? `<small class="pending">대화에서는 「${esc(e.pending[k].value)}」${copula(e.pending[k].value)} <button class="quiet" type="button" data-act="pending" data-id="${esc(e.entityId)}" data-key="${esc(k)}">적용</button><button class="quiet" type="button" data-act="pending-drop" data-id="${esc(e.entityId)}" data-key="${esc(k)}">무시</button></small>` : '');
+    const facts = d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<div class="fact"><small>${esc(x.label)}${tag(x.key)}</small><b>${esc(f[x.key])}</b>${was(x.key)}${wait(x.key)}</div>`).join('');
+    const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}${tag(x.key)}</small><p>${esc(f[x.key])}</p>${was(x.key)}${wait(x.key)}</div>`).join('');
     const extra = (e.extra || []).filter((x) => x.value).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(x.value)}</p></div>`).join('');
     const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}${tag('description')}</small><p>${esc(e.description)}</p></div>` : '';
     // 관계: both directions; a chip opens the other setting.
@@ -580,7 +584,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
         ${secs}${extra}${memo}${relSec}
-        ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p></div>` : ''}
+        ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
         <div class="actions">
@@ -968,6 +972,16 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       await loadWorlds();
       await loadRoom();
     }, '저장했습니다.'),
+    pending: (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      await api('POST', `/worlds/${st.worldId}/entities/${e.entityId}/pending/${encodeURIComponent(b.dataset.key)}`, { revision: e.revision });
+      await loadEntities();
+    }, '대화의 값으로 바꿨습니다. 기록에서 되돌릴 수 있습니다.'),
+    'pending-drop': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      await api('POST', `/worlds/${st.worldId}/entities/${e.entityId}/pending/${encodeURIComponent(b.dataset.key)}`, { revision: e.revision, discard: true });
+      await loadEntities();
+    }),
     backup: () => run(async () => {
       const w = world();
       const file = await api('GET', `/worlds/${w.worldId}/export`);

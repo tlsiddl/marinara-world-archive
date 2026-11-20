@@ -389,6 +389,9 @@ async function routes(r) {
     return { q, results: Search.search(entities, q, { types, glossary, fields: FIELDS }) };
   }));
   r.get('/worlds/:worldId/relations', handle(async (req) => ({ relations: s().listRelations(req.params.worldId) })));
+  // 할 일 10: 「대화에서는 ○○가 됐어요」 — [적용] or 무시 ({ discard: true }).
+  r.post('/worlds/:worldId/entities/:entityId/pending/:key', handle(async (req) =>
+    s().applyPending(req.params.worldId, req.params.entityId, req.params.key, body(req).revision, { discard: body(req).discard === true })));
   // The current rules applied again by code to what was already read (no model): crowds become groups, misfit relations go.
   r.post('/worlds/:worldId/relations/recheck', handle(async (req) => {
     const retyped = s().convertGroups(req.params.worldId, null, { by: 'recheck' });

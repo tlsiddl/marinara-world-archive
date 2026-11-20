@@ -730,3 +730,42 @@ test('할 일 5: what the person does by hand is recorded and can be undone — 
   s.undoChange(w.worldId, s.listHistory(w.worldId)[0].id);
   assert.equal(s.listEntities(w.worldId).some((x) => x.entityId === s2.entityId), false, 'a hand-made setting can be undone even though its fields are the person\'s');
 });
+
+test('할 일 10: a newer value replaces the old one, which stays as 「이전」; a hand-written field gets 「대화에서는 ○○」 and [적용]', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '별빛 학원' });
+  // 지어낸 인물: 신입생 하람 — 기숙사 미정 → 배정
+  s.applyAuto(w.worldId, [{ type: 'person', name: '하람', fields: { affiliation: '기숙사 미정' } }]);
+  const [c] = s.applyAuto(w.worldId, [{ type: 'person', name: '하람', fields: { affiliation: '은사슴 기숙사' }, fieldEvidence: { affiliation: '모자가 은사슴을 외쳤다.' } }]);
+  let e = s.listEntities(w.worldId)[0];
+  assert.equal(e.fields.affiliation, '은사슴 기숙사', 'the field holds the current value only');
+  assert.deepEqual(e.past.affiliation.map((x) => x.value), ['기숙사 미정']);
+  s.undoChange(w.worldId, c.id);
+  e = s.listEntities(w.worldId)[0];
+  assert.deepEqual([e.fields.affiliation, e.past?.affiliation], ['기숙사 미정', undefined], 'undo takes the 「이전」 entry back too');
+  s.applyAuto(w.worldId, [{ type: 'person', name: '하람', fields: { affiliation: '은사슴 기숙사' } }]);
+  for (let i = 1; i <= 4; i++) s.applyAuto(w.worldId, [{ type: 'person', name: '하람', fields: { affiliation: `${i}학년 반장` } }]);
+  assert.equal(s.listEntities(w.worldId)[0].past.affiliation.length, 3, 'at most three earlier values');
+
+  // the person writes the field: later readings only suggest
+  e = s.listEntities(w.worldId)[0];
+  s.updateEntity(w.worldId, e.entityId, { fields: { ...e.fields, affiliation: '학생회장' }, revision: e.revision });
+  assert.deepEqual(s.applyAuto(w.worldId, [{ type: 'person', name: '하람', fields: { affiliation: '퇴학' } }]), []);
+  e = s.listEntities(w.worldId)[0];
+  assert.deepEqual([e.fields.affiliation, e.pending.affiliation.value], ['학생회장', '퇴학'], 'waits as 「대화에서는 퇴학이 됐어요」');
+  const applied = s.applyPending(w.worldId, e.entityId, 'affiliation', e.revision);
+  assert.deepEqual([applied.fields.affiliation, applied.sources.affiliation, applied.pending.affiliation, applied.past.affiliation[0].value], ['퇴학', 'auto', undefined, '학생회장']);
+  const h = s.listHistory(w.worldId)[0];
+  assert.deepEqual([h.action, h.by, h.before, h.after], ['field', 'person', '학생회장', '퇴학']);
+  s.undoChange(w.worldId, h.id);
+  assert.equal(s.listEntities(w.worldId)[0].fields.affiliation, '학생회장');
+
+  // 무시: the suggestion goes, nothing else changes
+  const m = s.listEntities(w.worldId)[0];
+  s.updateEntity(w.worldId, m.entityId, { fields: { ...m.fields, affiliation: '학생회장' }, revision: m.revision });
+  s.applyAuto(w.worldId, [{ type: 'person', name: '하람', fields: { affiliation: '휴학' } }]);
+  const p = s.listEntities(w.worldId)[0];
+  const d = s.applyPending(w.worldId, p.entityId, 'affiliation', p.revision, { discard: true });
+  assert.deepEqual([d.fields.affiliation, d.pending.affiliation], ['학생회장', undefined]);
+  assert.throws(() => s.applyPending(w.worldId, p.entityId, 'affiliation', d.revision), status(404));
+});
