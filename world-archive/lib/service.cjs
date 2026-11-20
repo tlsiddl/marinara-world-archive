@@ -139,6 +139,16 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
     const m = await api.model(world.auto.connectionId);
     const { messages, cast } = await api.chatMessages(roomId);
     s.markGoneScores(roomId, messages); // a rerolled or deleted message's points leave the totals
+    // v0.4.2: a room with no 「여기까지 읽음」 (linked before v0.4.2, or its link left none) is not read from its first
+    // message by itself: where the chat is now becomes the start. The past is read only by 「지난 대화도 읽기」 (restart).
+    if (!restart && !s.getRoom(roomId).read) {
+      readFromNow(roomId, messages, 'no read mark');
+      job.state = 'idle';
+      job.stage = '';
+      job.pending = 0;
+      job.baselined = true;
+      return job;
+    }
     const { start, pending, settled } = X.unread(messages, s.getRoom(roomId).read);
     if (!pending.length || (!all && pending.length < world.auto.every)) {
       job.state = 'idle';
@@ -256,6 +266,30 @@ function scheduleRoom(roomId) {
   }
 }
 
+/**
+ * 「여기까지 읽음」 set to where the chat is now (v0.4.2): a room just linked, or one with no mark, reads only what comes
+ * after. Logged; the past stays for 「지난 대화도 읽기」.
+ */
+function readFromNow(roomId, messages, why) {
+  const list = Array.isArray(messages) ? messages : [];
+  store().setRoomRead(roomId, { lastId: list.at(-1)?.id ?? null, count: list.length });
+  log(`chat ${roomId}: reading starts after message ${list.length} (${why}); the past is read only with 「지난 대화도 읽기」`);
+}
+
+/**
+ * About how much reading the messages before 「여기까지 읽음」 costs (for the 「지난 대화도 읽기」 button): the batches the
+ * reader would make, each with its prompt (rules about 3,500 tokens, the known settings up to KNOWN_CHARS) and its
+ * messages, and about 1,500 tokens of reply. A rough figure, not a promise.
+ */
+function pastCost(past, entities) {
+  if (!past.length) return { messages: 0, tokens: 0 };
+  const parts = X.batches(past, 0);
+  const chars = past.reduce((n, m) => n + String(m.content || '').length, 0);
+  const known = Math.min(6000, (entities || []).reduce((n, e) => n + String(e.name || '').length + 40, 0));
+  const tokens = Math.round(parts.length * (3500 + known / 2 + 1500) + chars / 2);
+  return { messages: past.length, tokens };
+}
+
 async function roomAuto(roomId) {
   const s = store();
   const room = s.getRoom(roomId);
@@ -264,7 +298,9 @@ async function roomAuto(roomId) {
   if (world?.auto.connectionId) {
     try {
       const { messages } = await engineApi().chatMessages(roomId);
-      out.pending = X.unread(messages, room.read).pending.length;
+      const u = X.unread(messages, room.read);
+      out.pending = u.pending.length;
+      out.past = pastCost(u.settled.slice(0, u.start), s.readEntities(room.worldId).entities);
     } catch {}
   }
   return out;
@@ -480,7 +516,12 @@ async function routes(r) {
   r.put('/rooms/:roomId', handle(async (req) => {
     const w = body(req).worldId;
     if (w !== null && typeof w !== 'string') throw new ArchiveError(400, 'worldId(연결을 끊을 때는 null)를 보내 주세요.');
-    return s().linkRoom(req.params.roomId, w);
+    const linked = s().linkRoom(req.params.roomId, w);
+    // v0.4.2: a newly linked room reads only what comes after now (the past only with 「지난 대화도 읽기」).
+    if (w !== null && !s().getRoom(req.params.roomId).read) {
+      try { readFromNow(req.params.roomId, (await engineApi().chatMessages(req.params.roomId)).messages, 'linked'); } catch (error) { log(`chat ${req.params.roomId}: linked; the read mark waits for the first reading (${error?.message || error})`); }
+    }
+    return { ...linked, ...s().getRoom(req.params.roomId) };
   }));
   r.get('/rooms/:roomId/preview', handle(async (req) => {
     s().getRoom(req.params.roomId); // validates the id
@@ -677,4 +718,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { fillSpecies, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
+module.exports = { readFromNow, pastCost, fillSpecies, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };

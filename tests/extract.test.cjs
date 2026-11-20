@@ -206,6 +206,7 @@ function setup(t, messages, replies) {
   service._test.jobs.clear();
   const w = s.createWorld({ name: '별빛 학원', auto: { enabled: true, connectionId: 'c1', every: 4 } });
   s.linkRoom('room', w.worldId);
+  s.setRoomRead('room', { lastId: null, count: 0 }); // linked while the chat was empty: read from its first message (v0.4.2)
   return { s, w, calls };
 }
 
@@ -255,7 +256,8 @@ test('runRoom: a broken reply is tried twice and then reported; nothing is marke
   assert.equal(job.state, 'error');
   assert.match(job.error, /모델 답을 읽지 못했습니다/);
   assert.equal(calls.length, 2);
-  assert.equal(s.getRoom('room').read, null);
+  const read = s.getRoom('room').read;
+  assert.deepEqual({ lastId: read.lastId, count: read.count }, { lastId: null, count: 0 }, 'still where it was: nothing marked read');
 });
 
 test('scheduleRoom does nothing for rooms that are not linked or not switched on', (t) => {
@@ -521,4 +523,56 @@ test('① an individual of that kind exists → the 종-only item is dropped; �
   ] }, one, []);
   assert.deepEqual(got.items.map((i) => i.name), ['스퀴디']);
   assert.deepEqual(got.dropped, [{ name: '거대 오징어', why: 'species name only' }]);
+});
+
+test('v0.4.2: a room with no 「여기까지 읽음」 is never read from its first message by itself; 「지난 대화도 읽기」 (restart) reads the past', async (t) => {
+  const messages = Array.from({ length: 12 }, (_, i) => msg(i, i === 3 ? '사서 마르타는 열쇠를 목에 건다.' : `글 ${i}`));
+  const reply = JSON.stringify({ items: [{ type: 'person', name: '마르타', evidence: [{ n: '4.1', q: '사서 마르타는' }] }] });
+  const { s, w, calls } = setup(t, messages, [reply]);
+  s.setRoomRead('room', null); // linked before v0.4.2, never read
+  for (const opts of [{}, { all: true }]) {
+    const job = await service.runRoom('room', opts);
+    assert.equal(job.state, 'idle');
+    assert.equal(calls.length, 0, 'no call: the past is not read by itself, nor by 「지금 읽기」');
+  }
+  assert.equal(s.getRoom('room').read.lastId, 'm11', 'where the chat is now became the start');
+  assert.equal(s.listEntities(w.worldId).length, 0);
+  // 「지난 대화도 읽기」: the past is read from its first message.
+  s.setRoomRead('room', { lastId: 'm11', count: 12 });
+  const job = await service.runRoom('room', { all: true, restart: true, reason: 'restart' });
+  assert.equal(job.state, 'done');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(s.listEntities(w.worldId).map((e) => e.name), ['마르타']);
+});
+
+test('v0.4.2: linking a room marks where its chat is now (what comes after is read; the past only by the button); the cost shown is about right', async (t) => {
+  const messages = Array.from({ length: 6 }, (_, i) => msg(i, `글 ${i} `.repeat(20)));
+  const { s, w } = setup(t, messages, []);
+  s.linkRoom('room', null);
+  const fake = (() => {
+    const table = [];
+    const make = (prefix) => { const add = (method) => (p, fn) => table.push({ method, parts: (prefix + p).split('/'), fn }); return { get: add('GET'), post: add('POST'), patch: add('PATCH'), put: add('PUT'), delete: add('DELETE') }; };
+    const pending = [];
+    service.attach({ register: (plugin, opts) => pending.push(plugin(make(opts.prefix))), addHook: () => {} });
+    return async (method, url, body) => {
+      await Promise.all(pending);
+      const parts = url.split('/');
+      for (const r of table) {
+        if (r.method !== method || r.parts.length !== parts.length) continue;
+        const params = {};
+        if (!r.parts.every((x, i) => (x.startsWith(':') ? ((params[x.slice(1)] = decodeURIComponent(parts[i])), true) : x === parts[i]))) continue;
+        return r.fn({ params, body, query: {} }, { statusCode: 200, code(n) { this.statusCode = n; return this; }, send(d) { return d; } });
+      }
+      throw Error('no route ' + url);
+    };
+  })();
+  const linked = await fake('PUT', '/api/world-archive/rooms/room', { worldId: w.worldId });
+  assert.equal(linked.read.lastId, 'm5', 'marked at the last message there is');
+  assert.equal(linked.read.count, 6);
+  messages.push(msg(6, '새 글'), msg(7, '또'), msg(8, '그리고'));
+  const auto = await fake('GET', '/api/world-archive/rooms/room/auto');
+  assert.equal(auto.pending, 1, 'only what came after (minus the two held back)');
+  assert.equal(auto.past.messages, 6, 'the past waits for the button');
+  assert.ok(auto.past.tokens >= 5000 && auto.past.tokens < 20000, `about one batch: ${auto.past.tokens}`);
+  assert.deepEqual(service.pastCost([], []), { messages: 0, tokens: 0 });
 });
