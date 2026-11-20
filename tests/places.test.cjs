@@ -124,3 +124,14 @@ test('base by hand is theirs; merging a place moves the 본거지 along', (t) =>
   assert.equal(s.listEntities(w.worldId).find((e) => e.name === '별시계 학원').base, keep.entityId);
   assert.throws(() => s.setBase(w.worldId, id('별시계 학원'), id('별시계 학원')), (e) => e.status === 400);
 });
+
+test('underground under a building is in it (「지하 선착장 · 성 기초 바로 아래」); under a bridge or a cliff is not', (t) => {
+  const { s, w, up } = world(t);
+  s.applyAuto(w.worldId, [
+    { type: 'place', name: '별시계 지하 선착장', fields: { location: '별시계 성 기초 바로 아래, 절벽 밑 수로 끝' } },
+    { type: 'place', name: '돌다리 밑 지하 동굴', fields: { location: '거울 호수 아래 절벽' } },
+  ]);
+  s.linkPlaces(w.worldId);
+  assert.deepEqual(up('별시계 지하 선착장'), ['별시계 성']);
+  assert.deepEqual(up('돌다리 밑 지하 동굴'), [], 'a lake is not a building');
+});

@@ -574,7 +574,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       </div>
       ${type === 'group' && st.groupSuggest?.length ? `<p class="sub" style="margin:-6px 0 14px">소속 칸에만 있는 이름 · ${st.groupSuggest.map((g) => `<button class="quiet" type="button" data-act="group-make" data-name="${esc(g.name)}" title="${esc(g.people.join(', '))}의 소속 칸${g.owner ? ` · 지금은 「${esc(g.owner)}」의 다른 이름` : ''}">${esc(g.name)} · 집단으로 만들기</button>`).join(' ')}</p>` : ''}
       ${type === 'schedule' && !st.readOnly ? `<p class="sub" style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="tt-gather" title="요일·시간이 정해진 수업·일과 일정을 그 집단·사람의 시간표 칸으로 옮깁니다. 코드로 먼저 하고, 안 되는 것만 작은 호출 한 번">시간표로 모으기</button></p>` : ''}
-      ${type === 'person' && st.pairs.length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">같은 사람일 수 있음 ${st.pairs.length}쌍</button></p>` : ''}
+      ${pairsOf(type).length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">${type === 'person' ? '같은 사람일 수 있음' : '같은 것일 수 있음'} ${pairsOf(type).length}쌍</button></p>` : ''}
       ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
         : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
   }
@@ -736,13 +736,17 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     </div>`;
   }
 
+  /** v0.5.0 F: 「같은 것일 수 있음」 for places, groups, rules … too (pairs carry their kind; old ones are people). */
+  const pairsOf = (type) => (st.pairs || []).filter((p) => (p.type || 'person') === type);
   function dupesHtml() {
     const byId = (id) => st.entities.find((e) => e.entityId === id);
-    const pairs = st.pairs.map((p) => ({ ...p, ea: byId(p.a), eb: byId(p.b) })).filter((p) => p.ea && p.eb);
+    const type = KIND[st.view] ? st.view : 'person';
+    const person = type === 'person';
+    const pairs = pairsOf(type).map((p) => ({ ...p, ea: byId(p.a), eb: byId(p.b) })).filter((p) => p.ea && p.eb);
     return `
-      <button class="back" type="button" data-act="go" data-view="person">${icon('back')}인물 목록</button>
-      <div class="eyebrow">PEOPLE · SAME PERSON? · ${pairs.length}</div>
-      <h1>같은 사람일 수 있음</h1>
+      <button class="back" type="button" data-act="go" data-view="${type}">${icon('back')}${KIND[type].label} 목록</button>
+      <div class="eyebrow">${person ? 'PEOPLE · SAME PERSON?' : 'SAME ONE?'} · ${pairs.length}</div>
+      <h1>${person ? '같은 사람일 수 있음' : '같은 것일 수 있음'}</h1>
       <p class="intro">이름이나 다른 이름이 겹치는 인물입니다. 같은 사람이면 「합치기」로 하나로 모을 수 있습니다. 자동으로 합치지는 않습니다. 합친 뒤에도 「기록」에서 되돌릴 수 있습니다.</p>
       ${pairs.length ? pairs.map(({ a, b, why, ea, eb }) => {
         const key = `merge:${a}:${b}`;
@@ -756,10 +760,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
                   <button class="danger" type="button" data-act="merge" data-keep="${esc(b)}" data-drop="${esc(a)}">「${esc(eb.name)}」 남기기</button>
                   <button class="quiet" type="button" data-act="ask" data-key="">취소</button></span>`
               : `<button class="primary" type="button" data-act="ask" data-key="${key}">합치기</button>
-                 <button type="button" data-act="dismiss" data-a="${esc(a)}" data-b="${esc(b)}">다른 사람이에요</button>`}
+                 <button type="button" data-act="dismiss" data-a="${esc(a)}" data-b="${esc(b)}">${person ? '다른 사람이에요' : '다른 것이에요'}</button>`}
           </div>
         </div>`;
-      }).join('') : '<div class="empty"><h2>같은 사람일 수 있는 인물이 없습니다</h2><p>이름이나 다른 이름이 겹치는 인물이 생기면 여기에 보입니다.</p></div>'}`;
+      }).join('') : `<div class="empty"><h2>${person ? '같은 사람일 수 있는 인물이' : '같은 것일 수 있는 설정이'} 없습니다</h2><p>이름이나 다른 이름이 겹치는 설정이 생기면 여기에 보입니다.</p></div>`}`;
   }
 
   function fieldInput(x, value, hideLabel) {
@@ -952,7 +956,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       const e = st.entities.find((x) => x.entityId === (st.editing || st.detail));
       if (e && st.editing) return formHtml(e, st.view);
       if (e) return detailHtml(e);
-      if (st.view === 'person' && st.dupes) return dupesHtml();
+      if (st.dupes) return dupesHtml();
       return listHtml(st.view);
     }
     return overviewHtml();

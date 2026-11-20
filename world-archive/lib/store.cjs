@@ -9,7 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { findPairs, describedPairs, speciesPairs } = require('./same.cjs');
+const { findPairs, describedPairs, speciesPairs, thingPairs } = require('./same.cjs');
 const { rosterOf, ROLE_WORDS } = require('./roster.cjs');
 const TT = require('./timetable.cjs');
 const N = require('./names.cjs');
@@ -158,6 +158,8 @@ const WORLD = 'world';
 const PLACE_ALIAS = /(성|궁|궁전|저택|본관|건물|캠퍼스|교정|castle|manor|palace|hall|campus|tower)$/i;
 /** Words after a place's name that say near it, not in it (「검은 호수 아래」 · 「리키 콜드런 뒷문 너머」). */
 const NOT_INSIDE = /(아래|밑|옆|근처|부근|너머|건너편|맞은편|바깥|밖|떨어진|가는 길|위쪽|아랫|기슭)/;
+/** A building: underground under it is still in it (v0.5.0 E). */
+const BUILDING = /(성|궁|궁전|저택|본관|건물|탑|별관|관|castle|manor|palace|hall|tower)$/i;
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -1009,7 +1011,9 @@ class Archive {
         const cell = e.timetable?.cells?.[c.key];
         if (cell?.pending?.value === c.after) delete cell.pending;
       } else if (c.action === 'alias-move') {
-        // the other name goes back to the setting it was taken from (the new group keeps its own name)
+        // the other name goes back to the setting it was taken from (and leaves the one it went to, when that one is not new)
+        const went = c.toId && doc.entities.find((x) => x.entityId === c.toId);
+        if (went) went.aliases = went.aliases.filter((x) => x !== c.alias);
         if (!e.aliases.includes(c.alias)) {
           if (e.aliases.length >= ALIAS_MAX) throw new ArchiveError(409, later);
           e.aliases.push(c.alias);
@@ -1128,7 +1132,11 @@ class Archive {
       if (!best) continue;
       // what comes after the name: 「아래 · 옆 · 너머 …」 is near it, not in it
       const after = seg.slice(seg.indexOf(best.name) >= 0 ? seg.indexOf(best.name) + best.name.length : 0);
-      if (NOT_INSIDE.test(after)) continue;
+      // under a building is still in it when the place is underground (「지하 선착장 · 성 아래」); under a bridge or a
+      // cliff is not (사령탑 E 덧붙임)
+      const underBuilding = /지하/.test(p.name + ' ' + p.fields.location) && /^\s*\S*\s*(바로\s*)?(아래|밑)/.test(after.replace(/^\s*기초/, ''))
+        && (best.o.type === 'group' || BUILDING.test(best.name));
+      if (NOT_INSIDE.test(after) && !underBuilding) continue;
       // 「호그와트 급행열차 3호차」 is not in 호그와트: the name with the next word names something else the world has
       const next = after.trim().split(/\s+/)[0];
       if (next && doc.entities.some((x) => x !== p && x !== best.o && squashName(x.name).startsWith(squashName(best.name + next)))) continue;
@@ -1388,6 +1396,31 @@ class Archive {
       e.updatedAt = t;
       dirty = true;
     }
+    // v0.5.0 F: an other name in Latin letters left on a rule or system (「Slytherin」 on 「호그와트는 네 기숙사로
+    // 나뉜다」) whose glossary pair's Korean names a group or place goes to that group or place ('alias-move', undoable).
+    {
+      const sq = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
+      for (const e of doc.entities) {
+        if (e.type !== 'rule' && e.type !== 'system') continue;
+        for (const a of [...(e.aliases || [])]) {
+          if (!/^[A-Za-z][A-Za-z '’.-]*$/.test(a)) continue;
+          const pair = pairs.find((p) => sq(p.from) === sq(a) || sq(p.to) === sq(a));
+          if (!pair) continue;
+          const ko = /[가-힣]/.test(pair.to) ? pair.to : pair.from;
+          const owners = doc.entities.filter((x) => (x.type === 'group' || x.type === 'place') && [x.name, ...(x.aliases || [])].some((n) => sq(n) === sq(ko)));
+          if (owners.length !== 1) continue;
+          const to = owners[0];
+          e.aliases = e.aliases.filter((x) => x !== a);
+          if (!to.aliases.some((x) => sq(x) === sq(a)) && to.aliases.length < ALIAS_MAX) to.aliases.push(a);
+          e.revision++;
+          e.updatedAt = t;
+          to.revision++;
+          to.updatedAt = t;
+          dirty = true;
+          log({ entityId: e.entityId, entityIds: [e.entityId, to.entityId], name: e.name, type: e.type, action: 'alias-move', alias: a, to: to.name, toId: to.entityId, evidence: `번역 단어장 「${pair.from} = ${pair.to}」` });
+        }
+      }
+    }
     if (!dirty) return [];
     this.writeJson(this.entityFile(worldId), doc);
     if (changes.length) {
@@ -1421,7 +1454,7 @@ class Archive {
     const doc = this.readEntities(worldId);
     const skip = (a, b) => gone.has(pairKey(a, b));
     const seen = new Set();
-    return [...findPairs(doc.entities, skip), ...describedPairs(doc.entities, doc.relations, skip), ...speciesPairs(doc.entities, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
+    return [...findPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...describedPairs(doc.entities, doc.relations, skip).map((x) => ({ ...x, type: 'person' })), ...speciesPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...thingPairs(doc.entities, doc.relations, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
   }
 
   /** 「다른 사람이에요」: the pair is not suggested again (by id, so renaming either does not bring it back). */

@@ -249,4 +249,49 @@ function speciesPairs(entities, skip = () => false) {
   return out;
 }
 
-module.exports = { words, forms, whySame, findPairs, describedPairs, speciesPairs, speciesName, TITLE_WORDS };
+/**
+ * Places, groups, rules, systems, schedules that may be one (v0.5.0 F — 「같은 것일 수 있음」, never merged by itself).
+ * Same kind; an other name the same, or one name's words all in the other's after a few same-meaning words are
+ * read alike (특급 · 급행, 여자 · 여학생, 침실 · 기숙사 …). Not two places one inside the other (위치), not two groups one
+ * in the other (소속), not two rules said to hold in different places. [{ a, b, why }], the fuller one first.
+ */
+const THING_TYPES = new Set(['place', 'group', 'rule', 'system', 'schedule', 'custom']);
+const SAME_WORD = new Map([['특급', '급행'], ['특급열차', '급행열차'], ['여자', '여학생'], ['남자', '남학생'], ['침실', '기숙사'], ['숙소', '기숙사'], ['기숙사방', '기숙사'], ['지하실', '지하'], ['지하감옥', '지하'], ['감옥', '지하'], ['express', '급행열차']]);
+const PLAIN_WORDS = new Set(['기숙사', '학교', '마법학교', '건물', '본관', '교실', '전용', '공용', '의']);
+const thingWords = (name) => String(name || '').normalize('NFC').toLowerCase().replace(/[()「」『』"'“”‘’·,.]/g, ' ').split(/\s+/).filter(Boolean).map((w) => SAME_WORD.get(w) || w);
+function thingPairs(entities, relations = [], skip = () => false) {
+  const linked = new Set((relations || []).filter((r) => r.type === '위치' || r.type === '소속').flatMap((r) => [r.from + '|' + r.to, r.to + '|' + r.from]));
+  const filled = (e) => Object.values(e.fields || {}).filter(Boolean).length + (e.description ? 1 : 0) + (e.aliases || []).length;
+  const key = (n) => String(n || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
+  // the words of the names of groups and places the world has
+  const known = new Set(entities.filter((e) => e.type === 'group' || e.type === 'place').flatMap((e) => [e.name, ...(e.aliases || [])]).filter((n) => !/\s/.test(String(n).trim())).map((n) => String(n).normalize('NFC').toLowerCase()));
+  const byType = new Map();
+  for (const e of entities) if (THING_TYPES.has(e.type)) byType.set(e.type, [...(byType.get(e.type) || []), e]);
+  const out = [];
+  for (const list of byType.values()) {
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const x = list[i], y = list[j];
+      if (skip(x.entityId, y.entityId) || linked.has(x.entityId + '|' + y.entityId)) continue;
+      if (x.appliesTo && y.appliesTo && x.appliesTo !== y.appliesTo) continue;
+      if (x.timetable || y.timetable) continue;
+      let why = null;
+      const kx = new Set([x.name, ...(x.aliases || [])].map(key).filter((k) => k.length >= 2));
+      const shared = [y.name, ...(y.aliases || [])].find((n) => kx.has(key(n)));
+      if (shared) why = `같은 이름 「${shared}」`;
+      else {
+        // the words only one name has must say nothing new: a common word (기숙사 · 교실 …) or a name the world has
+        // (호그와트 · 슬리데린) — 「호그와트 지하 선착장」 is a place in 「호그와트 지하」, not the same one
+        const wx = thingWords(x.name), wy = thingWords(y.name);
+        const [small, big] = wx.length <= wy.length ? [wx, wy] : [wy, wx];
+        const extra = big.filter((w) => !small.includes(w));
+        if (small.length >= 2 && small.every((w) => big.includes(w)) && extra.every((w) => PLAIN_WORDS.has(w) || known.has(w))) why = `이름 「${x.name}」 · 「${y.name}」`;
+      }
+      if (!why) continue;
+      const [a, b] = filled(y) > filled(x) ? [y, x] : [x, y];
+      out.push({ a: a.entityId, b: b.entityId, why, type: x.type });
+    }
+  }
+  return out;
+}
+
+module.exports = { thingPairs, words, forms, whySame, findPairs, describedPairs, speciesPairs, speciesName, TITLE_WORDS };
