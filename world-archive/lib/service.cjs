@@ -229,6 +229,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         // 소속 칸 changed in this batch (전학 · 배정): the earlier values, so relations to groups they no longer name go.
         const was = Object.fromEntries(changes.filter((c) => c.action === 'field' && c.key === 'affiliation').map((c) => [c.entityId, c.before || '']));
         const relChanges = [...s.applyRelations(worldId, resolved, meta), ...s.linkSubgroups(worldId, meta), ...s.linkAffiliations(worldId, null, { ...meta, was })];
+        // v0.5.0 A-2: groups the 소속 칸 of two people or more name but that are not there yet (by code)
+        relChanges.push(...s.fillGroups(worldId, meta).relations);
         job.relations += relChanges.filter((c) => c.action === 'relation-add').length;
         if (rel.dropped.length) log(`chat ${roomId}: left out relations ${rel.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
         if (world.scoreboard?.name) job.scores += s.addScores(roomId, X.checkScores(parsed, part)).length;
@@ -446,9 +448,20 @@ async function routes(r) {
   r.post('/worlds/:worldId/entities', handle(async (req) => {
     const e = s().createEntity(req.params.worldId, body(req));
     // v0.5.0: a new person's 소속 칸, or a new group someone's 소속 칸 already names (and the group in it by name).
-    if (e.type === 'person') s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation' });
+    if (e.type === 'person') { s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation' }); s().fillGroups(req.params.worldId); }
     if (e.type === 'group') { s().linkSubgroups(req.params.worldId); s().linkAffiliations(req.params.worldId, null, { by: 'affiliation' }); }
     return e;
+  }));
+  // v0.5.0 A-2: what the 소속 칸 name that is not a group yet — one person: only offered here (「집단으로 만들기」).
+  r.get('/worlds/:worldId/group-suggestions', handle(async (req) => {
+    const plan = s().planGroups(s().readEntities(req.params.worldId));
+    return { suggestions: plan.suggest.map((o) => ({ name: o.name, people: o.peopleNames, from: o.from, owner: o.ownerName || null })) };
+  }));
+  r.post('/worlds/:worldId/group-suggestions', handle(async (req) => {
+    const name = body(req).name;
+    if (typeof name !== 'string' || !name.trim()) throw new ArchiveError(400, 'name을 보내 주세요.');
+    const out = s().fillGroups(req.params.worldId, {}, name);
+    return { created: out.created, moved: out.moved };
   }));
   // v0.5.0 구성원 명단: gathered from 소속 by code. Adding / taking off = changing that person's 소속 칸.
   r.get('/worlds/:worldId/entities/:entityId/members', handle(async (req) => s().roster(req.params.worldId, req.params.entityId)));
@@ -461,7 +474,7 @@ async function routes(r) {
     const was = s().listEntities(req.params.worldId).find((x) => x.entityId === req.params.entityId)?.fields?.affiliation || '';
     const e = s().updateEntity(req.params.worldId, req.params.entityId, body(req));
     // 소속 칸이 설정집의 집단을 가리키면 소속 관계도 (코드로, 모델 없이). v0.5.0: 더는 안 가리키는 집단과의 소속은 끝남.
-    if (e.type === 'person') s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation', was: { [e.entityId]: was } });
+    if (e.type === 'person') { s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation', was: { [e.entityId]: was } }); s().fillGroups(req.params.worldId); }
     if (e.type === 'group') { s().linkSubgroups(req.params.worldId); s().linkAffiliations(req.params.worldId, null, { by: 'affiliation' }); }
     return e;
   }));
@@ -491,7 +504,11 @@ async function routes(r) {
   r.post('/worlds/:worldId/relations/recheck', handle(async (req) => {
     const retyped = s().convertGroups(req.params.worldId, null, { by: 'recheck' });
     const removed = s().recheckRelations(req.params.worldId, { by: 'recheck' });
-    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })) };
+    // v0.5.0 A-2: worlds read before — groups by name, the missing groups, the 소속 칸 again
+    s().linkSubgroups(req.params.worldId, { by: 'recheck' });
+    const filled = s().fillGroups(req.params.worldId, { by: 'recheck' });
+    s().linkAffiliations(req.params.worldId, null, { by: 'recheck' });
+    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created };
   }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));

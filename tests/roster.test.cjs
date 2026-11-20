@@ -117,3 +117,70 @@ test('the reader is told not to list names in 구성원 and to write the smalles
   assert.match(text, /members\(구성원\)에는 규모·구성/);
   assert.match(text, /가장 작은 집단까지/);
 });
+
+// v0.5.0 A-2 — groups the 소속 칸 name that are not there yet, by code.
+function houses(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-fill-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [
+    { type: 'group', name: '별시계 학원', aliases: ['별시계'] },
+    { type: 'rule', name: '별시계 학원은 세 기숙사로 나뉜다', aliases: ['은사슴 기숙사', '청매 기숙사', 'Silver Stag'] },
+    { type: 'place', name: '은사슴 1학년 남학생 기숙사' },
+    { type: 'person', name: '하윤', fields: { affiliation: '별시계 은사슴 1학년' } },
+    { type: 'person', name: '도겸', fields: { affiliation: '별시계 은사슴 1학년' } },
+    { type: 'person', name: '서림', fields: { affiliation: '은사슴 5학년 반장' } },
+    { type: 'person', name: '무진', fields: { affiliation: '은사슴 1학년 남학생 기숙사' } },
+    { type: 'person', name: '이안', fields: { affiliation: '은사슴 1학년 남학생 기숙사' } },
+    { type: 'person', name: '가람', fields: { affiliation: '청매 기숙사 3학년' } },
+  ]);
+  const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n)?.entityId;
+  return { s, w, id };
+}
+
+test('A-2: a group two 소속 칸 name is made — from a rule\'s other name (taken off the rule), and a piece that reads as a group', (t) => {
+  const { s, w, id } = houses(t);
+  const out = s.fillGroups(w.worldId);
+  assert.deepEqual(out.created.sort(), ['은사슴 1학년', '은사슴 기숙사']);
+  assert.deepEqual(out.moved, [{ from: '별시계 학원은 세 기숙사로 나뉜다', alias: '은사슴 기숙사' }]);
+  const rule = s.listEntities(w.worldId).find((e) => e.type === 'rule');
+  assert.deepEqual(rule.aliases, ['청매 기숙사', 'Silver Stag'], 'only the one made into a group leaves the rule; the rule stays');
+  const g = s.listEntities(w.worldId).find((e) => e.name === '은사슴 기숙사');
+  assert.deepEqual(g.aliases, ['은사슴']);
+  assert.equal(g.provenance.source, 'auto');
+  const up = (n) => s.listRelations(w.worldId).filter((r) => r.type === '소속' && r.from === id(n)).map((r) => s.listEntities(w.worldId).find((e) => e.entityId === r.to).name);
+  assert.deepEqual(up('은사슴 기숙사'), ['별시계 학원'], 'the bigger group the rule names');
+  assert.equal(s.listRelations(w.worldId).find((r) => r.from === id('은사슴 기숙사')).evidence, '별시계 학원은 세 기숙사로 나뉜다');
+  assert.deepEqual(up('은사슴 1학년'), ['은사슴 기숙사'], 'by its name');
+  assert.equal(id('은사슴 1학년 남학생 기숙사') && s.listEntities(w.worldId).find((e) => e.name === '은사슴 1학년 남학생 기숙사').type, 'place', 'a place stays a place');
+  const names = (n) => s.roster(w.worldId, id(n)).members.map((m) => m.name + (m.via ? '·' + m.via : ''));
+  assert.deepEqual(names('은사슴 기숙사'), ['서림', '도겸·은사슴 1학년', '무진·은사슴 1학년', '이안·은사슴 1학년', '하윤·은사슴 1학년'], 'the place 「은사슴 1학년 남학생 기숙사」 in their 소속 칸 names 은사슴 1학년');
+  assert.ok(names('별시계 학원').includes('서림·은사슴 기숙사'), 'the school list has the house people too');
+  // 청매: one person only → offered, not made
+  const plan = s.planGroups(s.readEntities(w.worldId));
+  assert.deepEqual(plan.suggest.map((o) => `${o.name}:${o.peopleNames.join(',')}`).sort(), ['청매 기숙사 3학년:가람', '청매 기숙사:가람'], 'not 「은사슴 5학년 반장」 (a role, not a group)');
+  assert.equal(id('청매 기숙사'), undefined);
+  // again: nothing new
+  assert.deepEqual(s.fillGroups(w.worldId).created, []);
+});
+
+test('A-2: 「집단으로 만들기」 makes the offered one (the person\'s); undo puts the other name back on the rule', (t) => {
+  const { s, w, id } = houses(t);
+  s.fillGroups(w.worldId);
+  const made = s.fillGroups(w.worldId, {}, '청매 기숙사');
+  assert.deepEqual(made.created, ['청매 기숙사']);
+  const g = s.listEntities(w.worldId).find((e) => e.name === '청매 기숙사');
+  assert.equal(g.provenance.source, 'manual');
+  assert.deepEqual(s.roster(w.worldId, g.entityId).members.map((m) => m.name), ['가람']);
+  assert.throws(() => s.fillGroups(w.worldId, {}, '없는 이름'), (e) => e.status === 404);
+  const mv = s.listHistory(w.worldId).find((c) => c.action === 'alias-move' && c.alias === '청매 기숙사');
+  s.undoChange(w.worldId, mv.id);
+  assert.ok(s.listEntities(w.worldId).find((e) => e.type === 'rule').aliases.includes('청매 기숙사'));
+  void id;
+});
+
+test('A-2: the reader is told to make the group a 소속 칸 names when it is not there', () => {
+  const text = fs.readFileSync(path.join(__dirname, '../world-archive/lib/extract.cjs'), 'utf8');
+  assert.match(text, /affiliation에 적은 집단이 \[이미 있는 항목\]에 없으면 그 집단도 집단 항목으로 같이 만든다/);
+});

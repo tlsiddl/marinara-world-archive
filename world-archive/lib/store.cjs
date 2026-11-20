@@ -130,13 +130,24 @@ const isDescriptiveName = (n) => /의\s/.test(String(n || ''));
 /** 「그리핀도르 1학년 무리」, 「학생들」: a crowd, not a person. */
 const isGroupName = (n) => /(무리|일행|들)$/.test(String(n || '').trim());
 const squashName = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
-/** Whether a 소속 text names a group (its name or other name, whole, without spaces). */
+/** What a longer group name may add and still be the same group, not one inside it (「슬리데린 기숙사」 is 「슬리데린」). */
+const SAME_GROUP_SUFFIX = new Set(['기숙사', '가문', '집안', '일가', '학교', '마법학교', '학원', '기사단', '조직', '무리', '일행', 'house', 'family', 'school']);
+/** A squashed group name without such an ending (「슬리데린기숙사」 → 「슬리데린」); itself when nothing of 2+ letters is left. */
+const groupCore = (k) => {
+  for (const suf of SAME_GROUP_SUFFIX) if (k.endsWith(suf) && k.length - suf.length >= 2) return k.slice(0, -suf.length);
+  return k;
+};
+const groupKeys = (g) => [...new Set([g.name, ...(g.aliases || [])].map(squashName).flatMap((k) => [k, groupCore(k)]))].filter((k) => k.length >= 2);
+/** Whether a 소속 text names a group: its name or other name, or that without 「기숙사」 · 「무리」…, whole, without spaces. */
 const namesGroup = (text, g) => {
   const t = squashName(text);
-  return Boolean(t && g?.name) && [g.name, ...(g.aliases || [])].some((n) => squashName(n).length >= 2 && t.includes(squashName(n)));
+  return Boolean(t && g?.name) && groupKeys(g).some((k) => t.includes(k));
 };
-/** What a longer group name may add and still be the same group, not one inside it (「슬리데린 기숙사」 is 「슬리데린」). */
-const SAME_GROUP_SUFFIX = new Set(['기숙사', '가', '가문', '집안', '일가', '학교', '마법학교', '학원', '기사단', '단', '회', '조직', 'house', 'family', 'school']);
+/** Two group names for the same group (「슬리데린」 · 「슬리데린 기숙사」 · 「그리핀도르 1학년 무리」 ~ 「그리핀도르 1학년」). */
+const sameGroupName = (name, g) => { const k = squashName(name); return groupKeys(g).some((x) => x === k || x === groupCore(k)); };
+/** A 소속 piece that reads as a group: a year, a house, a family, a club… (not 「교수」 · 「부교장」 · 「주인」). */
+const GROUPISH = /(학년|기숙사|가문|집안|반|동아리|클럽|길드|기사단|협회|조합|교단|무리|일행|여학생|남학생|학생회|연구회|부대|분대|소대)$/;
+const KEEP_AS_IS = new Set(['rule', 'system', 'schedule', 'history', 'custom']);
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -959,6 +970,12 @@ class Archive {
         }
         if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
+      } else if (c.action === 'alias-move') {
+        // the other name goes back to the setting it was taken from (the new group keeps its own name)
+        if (!e.aliases.includes(c.alias)) {
+          if (e.aliases.length >= ALIAS_MAX) throw new ArchiveError(409, later);
+          e.aliases.push(c.alias);
+        }
       } else if (c.action === 'alias') {
         const i = e.aliases.indexOf(c.after);
         if (i < 0) throw new ArchiveError(409, later);
@@ -1366,6 +1383,121 @@ class Archive {
       found.push({ from: a.entityId, to: best.b.entityId, type: '소속', note: '', evidence: '이름: ' + a.name });
     }
     return this.applyRelations(worldId, found, { ...meta, by: meta.by || 'subgroup' });
+  }
+
+  /**
+   * 없는 집단 채우기 (v0.5.0 A-2, by code, no model). What the 소속 칸 of people name that is not a group yet:
+   * - an other name of a rule · system · …(「호그와트는 네 기숙사로 나뉜다」's 「슬리데린 기숙사」) that people's 소속 칸 name;
+   * - a piece of the 소속 칸 that reads as a group (「슬리데린 1학년」, after a bigger group's name in front of another group's
+   *   name: 「호그와트 슬리데린 1학년」), not the name of another setting (a place 「… 남학생 기숙사」 stays a place).
+   * Two people or more: made (make). One: only offered (suggest — 「집단으로 만들기」).
+   */
+  planGroups(doc) {
+    const groups = doc.entities.filter((e) => e.type === 'group');
+    const people = doc.entities.filter((e) => e.type === 'person' && String(e.fields?.affiliation || '').trim());
+    const covered = (name) => groups.some((g) => sameGroupName(name, g));
+    const isOther = (name) => doc.entities.some((e) => e.type !== 'group' && [e.name, ...(e.aliases || [])].some((n) => squashName(n) === squashName(name)));
+    const out = [];
+    const taken = (name) => out.some((o) => sameGroupName(name, { name: o.name, aliases: o.aliases }));
+    // 1) other names of rules · systems · …
+    for (const x of doc.entities.filter((e) => KEEP_AS_IS.has(e.type))) {
+      for (const a of x.aliases || []) {
+        if (!/\p{Script=Hangul}/u.test(a) || squashName(a).length < 2 || covered(a) || taken(a)) continue;
+        const who = people.filter((p) => namesGroup(p.fields.affiliation, { name: a, aliases: [] }));
+        if (!who.length) continue;
+        const core = a.replace(/\s*(기숙사|가문|집안|일가|무리|일행)$/, '').trim();
+        const parents = groups.filter((gr) => namesGroup([x.name, ...Object.values(x.fields || {})].join(' '), gr));
+        out.push({ name: a, aliases: core.length >= 2 && core !== a ? [core] : [], people: who.map((p) => p.entityId), from: 'alias', ownerId: x.entityId, ownerName: x.name, parentId: parents.length === 1 ? parents[0].entityId : null, evidence: x.name });
+      }
+    }
+    // 2) pieces of the 소속 칸 that read as a group
+    const all = () => [...groups, ...out.map((o) => ({ name: o.name, aliases: o.aliases }))];
+    const isGroupWord = (w) => all().some((g) => groupKeys(g).includes(squashName(w)));
+    const pieces = new Map();
+    for (const p of people) {
+      for (const part of p.fields.affiliation.split(/[,，/·;]|\s및\s/)) {
+        let words = part.trim().split(/\s+/).filter(Boolean);
+        let prefix = null;
+        // 「호그와트 슬리데린 1학년」: the bigger group in front goes while another group's name follows it
+        while (words.length > 1) {
+          const k = [1, 2, 3].find((n) => n < words.length && isGroupWord(words.slice(0, n).join(' ')) && isGroupWord(words[n]));
+          if (!k) break;
+          prefix = all().find((g) => groupKeys(g).includes(squashName(words.slice(0, k).join(' '))));
+          words = words.slice(k);
+        }
+        const r = words.join(' ');
+        if (squashName(r).length < 2 || !GROUPISH.test(r) || !/\p{Script=Hangul}/u.test(r) || covered(r) || isOther(r)) continue;
+        const key = squashName(r);
+        const it = pieces.get(key) || { name: r, people: new Set(), prefixes: new Map() };
+        it.people.add(p.entityId);
+        if (prefix?.name) it.prefixes.set(prefix.name, (it.prefixes.get(prefix.name) || 0) + 1);
+        pieces.set(key, it);
+      }
+    }
+    for (const it of pieces.values()) {
+      if (taken(it.name)) continue;
+      const top = [...it.prefixes].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+      out.push({ name: it.name, aliases: [], people: [...it.people], from: 'affiliation', parentName: top, evidence: '' });
+    }
+    const names = (o) => o.people.map((id) => doc.entities.find((e) => e.entityId === id)?.name).filter(Boolean);
+    return {
+      make: out.filter((o) => o.people.length >= 2).map((o) => ({ ...o, peopleNames: names(o) })),
+      suggest: out.filter((o) => o.people.length === 1).map((o) => ({ ...o, peopleNames: names(o) })),
+    };
+  }
+
+  /**
+   * Carries out planGroups (only = one name: the person chose 「집단으로 만들기」). A new group is source auto (the
+   * person's: manual), in the history and undoable; an other name it came from leaves that setting ('alias-move',
+   * undoable). Then the groups are joined: by name (linkSubgroups), to the bigger group the rule names or the 소속 칸
+   * put in front, and the people by their 소속 칸.
+   */
+  fillGroups(worldId, meta = {}, only = null) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const plan = this.planGroups(doc);
+    const list = only ? [...plan.make, ...plan.suggest].filter((o) => squashName(o.name) === squashName(only)) : plan.make;
+    if (only && !list.length) throw new ArchiveError(404, '소속 칸에서 그 이름을 찾지 못했습니다.');
+    if (!list.length) return { created: [], moved: [], relations: [] };
+    const by = only ? 'person' : meta.by || 'fill-groups';
+    const t = now();
+    const changes = [];
+    const made = [];
+    for (const o of list) {
+      if (doc.entities.length >= ENTITY_MAX) break;
+      const entity = {
+        entityId: randomUUID(), type: 'group', name: o.name, aliases: o.aliases, description: '', fields: {}, extra: [], pinned: false,
+        sources: only ? { name: 'manual' } : {}, status: 'confirmed',
+        provenance: { source: only ? 'manual' : 'auto', by, roomId: meta.roomId ?? null, evidence: o.from === 'alias' ? '「' + o.ownerName + '」의 다른 이름' : '소속 칸 · ' + o.peopleNames.join(', ') },
+        revision: 1, createdAt: t, updatedAt: t,
+      };
+      doc.entities.push(entity);
+      made.push({ entity, o });
+      changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: [], entityId: entity.entityId, name: entity.name, type: 'group', action: 'create', evidence: entity.provenance.evidence });
+      const owner = o.ownerId && doc.entities.find((e) => e.entityId === o.ownerId);
+      if (owner && owner.aliases.includes(o.name)) {
+        owner.aliases = owner.aliases.filter((a) => a !== o.name);
+        owner.revision++;
+        owner.updatedAt = t;
+        changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: owner.entityId, entityIds: [owner.entityId, entity.entityId], name: owner.name, type: owner.type, action: 'alias-move', alias: o.name, to: entity.name });
+      }
+    }
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    const rels = [...this.linkSubgroups(worldId, { by })];
+    // the bigger group: what the rule names (네 기숙사 → 호그와트), or what the 소속 칸 put in front — unless joined by name
+    const after = this.readEntities(worldId);
+    const up = [];
+    for (const { entity, o } of made) {
+      if (after.relations.some((r) => r.type === '소속' && r.from === entity.entityId)) continue;
+      const parent = o.parentId ? after.entities.find((e) => e.entityId === o.parentId)
+        : o.parentName ? after.entities.find((e) => e.type === 'group' && e.name === o.parentName) : null;
+      if (!parent || parent.entityId === entity.entityId) continue;
+      const first = after.entities.find((e) => e.entityId === o.people[0]);
+      up.push({ from: entity.entityId, to: parent.entityId, type: '소속', note: '', evidence: o.from === 'alias' ? o.evidence : '소속: ' + (first?.fields?.affiliation || '') });
+    }
+    rels.push(...this.applyRelations(worldId, up, { ...meta, by }), ...this.linkAffiliations(worldId, null, { ...meta, by }));
+    return { created: made.map(({ entity }) => entity.name), moved: changes.filter((c) => c.action === 'alias-move').map((c) => ({ from: c.name, alias: c.alias })), relations: rels };
   }
 
   /** 구성원 명단 of a group (v0.5.0): gathered from the 소속 relations by code; see roster.cjs. */

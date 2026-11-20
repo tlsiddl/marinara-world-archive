@@ -414,3 +414,20 @@ test('v0.5.0 구성원 명단 over HTTP: a new group joins the people whose 소�
   assert.equal((await call('POST', `${A}/worlds/${id}/entities/${small.entityId}/members`, {})).status, 400);
   assert.equal((await call('GET', `${A}/worlds/${id}/entities/${p.entityId}/members`)).status, 404);
 });
+
+test('v0.5.0 A-2 over HTTP: two people with the same 소속 make the group on their own; one is offered and made on request', async (t) => {
+  const { call } = setup(t);
+  const id = (await call('POST', `${A}/worlds`, { name: '별시계 학원' })).data.worldId;
+  await call('POST', `${A}/worlds/${id}/entities`, { type: 'person', name: '하윤', fields: { affiliation: '은사슴 1학년' } });
+  let groups = async () => (await call('GET', `${A}/worlds/${id}/entities`)).data.entities.filter((e) => e.type === 'group').map((e) => e.name);
+  assert.deepEqual(await groups(), [], 'one person: not made');
+  assert.deepEqual((await call('GET', `${A}/worlds/${id}/group-suggestions`)).data.suggestions.map((g) => g.name), ['은사슴 1학년']);
+  await call('POST', `${A}/worlds/${id}/entities`, { type: 'person', name: '도겸', fields: { affiliation: '은사슴 1학년' } });
+  assert.deepEqual(await groups(), ['은사슴 1학년'], 'the second person: made');
+  await call('POST', `${A}/worlds/${id}/entities`, { type: 'person', name: '가람', fields: { affiliation: '청매 3학년' } });
+  const made = await call('POST', `${A}/worlds/${id}/group-suggestions`, { name: '청매 3학년' });
+  assert.deepEqual(made.data.created, ['청매 3학년']);
+  assert.equal((await call('POST', `${A}/worlds/${id}/group-suggestions`, {})).status, 400);
+  const rc = await call('POST', `${A}/worlds/${id}/relations/recheck`, {});
+  assert.deepEqual(rc.data.groups, []);
+});

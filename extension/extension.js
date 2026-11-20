@@ -356,6 +356,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     st.entities = st.worldId ? (await api('GET', `/worlds/${st.worldId}/entities`)).entities || [] : [];
     st.relations = st.worldId ? (await api('GET', `/worlds/${st.worldId}/relations`).catch(() => ({ relations: [] }))).relations || [] : [];
     try { st.pairs = st.worldId ? (await api('GET', `/worlds/${st.worldId}/duplicates`)).pairs || [] : []; } catch { st.pairs = []; }
+    try { st.groupSuggest = st.worldId ? (await api('GET', `/worlds/${st.worldId}/group-suggestions`)).suggestions || [] : []; } catch { st.groupSuggest = []; }
     if (st.detail && !st.entities.some((e) => e.entityId === st.detail)) st.detail = null;
   }
   async function loadRoom() {
@@ -569,6 +570,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
         <span style="flex:1"></span>
         <button class="primary" type="button" data-act="new" data-type="${type}">새 ${k.label}</button>
       </div>
+      ${type === 'group' && st.groupSuggest?.length ? `<p class="sub" style="margin:-6px 0 14px">소속 칸에만 있는 이름 · ${st.groupSuggest.map((g) => `<button class="quiet" type="button" data-act="group-make" data-name="${esc(g.name)}" title="${esc(g.people.join(', '))}의 소속 칸${g.owner ? ` · 지금은 「${esc(g.owner)}」의 다른 이름` : ''}">${esc(g.name)} · 집단으로 만들기</button>`).join(' ')}</p>` : ''}
       ${type === 'person' && st.pairs.length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">같은 사람일 수 있음 ${st.pairs.length}쌍</button></p>` : ''}
       ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
         : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
@@ -818,6 +820,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     'relation-note': (c) => `관계 <b>${esc(c.name)}</b> · ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
     'relation-flip': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 방향 바뀜`,
     'relation-remove': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 끝남`,
+    'alias-move': (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.alias)}」을(를) 새 집단 「${esc(c.to)}」(으)로 옮김`,
     delete: (c) => `<b>${esc(c.name)}</b> 지움${c.relations?.length ? ` · 관계 ${c.relations.length}개도 함께` : ''}`,
   };
   /** An evidence sentence in “ ”, without the quote marks it may already carry (the reader often keeps the line's own). */
@@ -1046,6 +1049,11 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await loadRoom();
     }, '번역 단어장의 이름으로 바꿨습니다.'),
     // v0.5.0 명단: adding / taking off changes that person's 소속 칸 (in 기록, undoable).
+    // v0.5.0 A-2: a name only one person's 소속 칸 has becomes a group when the person says so.
+    'group-make': (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/group-suggestions`, { name: b.dataset.name });
+      await loadEntities();
+    }, '집단으로 만들었습니다. 소속 칸이 그 이름을 가리키는 인물은 명단에 들어갑니다.'),
     'member-add': (b) => run(async () => {
       const personId = root.getElementById('rosterPick')?.value;
       if (!personId) return;
