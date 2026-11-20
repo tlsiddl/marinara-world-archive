@@ -184,3 +184,52 @@ test('relationFits: 위치 joins places, 소속 a person and a group, family kin
   assert.equal(f('기타', 'person', 'place'), false);
   assert.equal(f('기타', 'group', 'place'), true);
 });
+
+test('(라) a crowd read as a person becomes a group by code, misfit relations go with it, and undo brings both back', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  s.applyAuto(w.worldId, [{ type: 'person', name: '그리핀도르 1학년 무리', fields: { affiliation: '그리핀도르', appearance: '붉은 넥타이' } }, { type: 'group', name: '그리핀도르' }, { type: 'person', name: '해나' }]);
+  const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n).entityId;
+  s.applyRelations(w.worldId, [{ from: id('그리핀도르 1학년 무리'), to: id('그리핀도르'), type: '소속' }, { from: id('그리핀도르 1학년 무리'), to: id('해나'), type: '적대' }]);
+  const [c] = s.convertGroups(w.worldId);
+  const g = s.listEntities(w.worldId).find((e) => e.name === '그리핀도르 1학년 무리');
+  assert.deepEqual([c.action, g.type, Object.keys(g.fields)], ['retype', 'group', []]);
+  assert.deepEqual(s.listRelations(w.worldId).map((r) => r.type), ['적대'], '소속 between two groups no longer fits; 적대 still does');
+  s.undoChange(w.worldId, c.id);
+  const back = s.listEntities(w.worldId).find((e) => e.name === '그리핀도르 1학년 무리');
+  assert.deepEqual([back.type, back.fields.appearance], ['person', '붉은 넥타이']);
+  assert.deepEqual(s.listRelations(w.worldId).map((r) => r.type).sort(), ['소속', '적대']);
+  assert.equal(s.convertGroups(w.worldId).length, 1, 'still a crowd name: converted again on the next reading');
+});
+
+test('(나)(다) recheck by code: evidence naming neither, a person named by description, or a misfit kind; 소속 칸 and manual stay', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  s.applyAuto(w.worldId, [
+    { type: 'person', name: '세베루스 스네이프', aliases: ['Snape'] }, { type: 'group', name: '호그와트' }, { type: 'person', name: '가스파르 셀윈' },
+    { type: 'person', name: '가스파르의 5학년 누나' }, { type: 'person', name: '다프네 불스트로드', fields: { affiliation: '호그와트 슬리데린' } },
+  ]);
+  const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n).entityId;
+  s.applyRelations(w.worldId, [
+    { from: id('세베루스 스네이프'), to: id('호그와트'), type: '소속', evidence: 'The torn brim shouted the verdict.' }, // names neither
+    { from: id('가스파르의 5학년 누나'), to: id('다프네 불스트로드'), type: '가족', evidence: 'Daphne had a fifth-year sister.' }, // described
+    { from: id('세베루스 스네이프'), to: id('가스파르 셀윈'), type: '스승·제자', evidence: 'Snape looked at Gaspard.' }, // fine
+  ]);
+  s.linkAffiliations(w.worldId);
+  s.createRelation(w.worldId, { from: id('가스파르 셀윈'), to: id('다프네 불스트로드'), type: '친구' });
+  const gone = s.recheckRelations(w.worldId);
+  assert.deepEqual(gone.map((c) => c.why).sort(), ['described name', 'evidence names neither']);
+  assert.deepEqual(s.listRelations(w.worldId).map((r) => r.type).sort(), ['소속', '스승·제자', '친구']);
+  s.undoChange(w.worldId, gone[0].id);
+  assert.equal(s.listRelations(w.worldId).length, 4, 'each removal can be undone');
+});
+
+test('(다) a person named by description is suggested as possibly a named family member, never merged by itself', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  s.applyAuto(w.worldId, [{ type: 'person', name: '가스파르 셀윈' }, { type: 'person', name: '모웨나 셀윈' }, { type: 'person', name: '가스파르의 5학년 누나' }, { type: 'person', name: '해나 애벗' }]);
+  const name = (i) => s.listEntities(w.worldId).find((e) => e.entityId === i).name;
+  const pairs = s.listDuplicates(w.worldId).map((p) => [name(p.a), name(p.b), p.why]);
+  assert.deepEqual(pairs, [['모웨나 셀윈', '가스파르의 5학년 누나', '「가스파르의 5학년 누나」은(는) 이름 있는 인물일 수 있음 (가스파르 셀윈의 가족)']]);
+  assert.equal(s.listEntities(w.worldId).length, 4);
+});

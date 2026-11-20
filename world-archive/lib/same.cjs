@@ -191,4 +191,33 @@ function findPairs(entities, skip = () => false) {
   return out;
 }
 
-module.exports = { words, forms, whySame, findPairs, TITLE_WORDS };
+/**
+ * 「가스파르의 5학년 누나」: a person named by description. The person it is said about (X) is found by name or given
+ * name; named people who are X's family (a 가족 relation, or X's family name) are suggested as possibly the same.
+ * Never merged by itself. The named one comes first (the one more likely to stay).
+ */
+function describedPairs(entities, relations = [], skip = () => false) {
+  const people = entities.filter((e) => e.type === 'person');
+  const plain = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
+  const described = people.filter((e) => /의\s/.test(e.name));
+  const named = people.filter((e) => !/의\s/.test(e.name));
+  const out = [];
+  for (const d of described) {
+    const x = d.name.split(/의\s/)[0].trim();
+    const ref = named.find((p) => [p.name, ...(p.aliases || [])].some((n) => plain(n) === plain(x) || plain(String(n).split(/\s+/)[0]) === plain(x)));
+    if (!ref) continue;
+    const fam = String(ref.name).trim().split(/\s+/);
+    const surname = fam.length > 1 ? fam.at(-1) : null;
+    const kin = new Set(relations.filter((r) => r.type === '가족' && (r.from === ref.entityId || r.to === ref.entityId)).map((r) => (r.from === ref.entityId ? r.to : r.from)));
+    for (const p of named) {
+      if (p === ref || p === d) continue;
+      const sameFamily = surname && String(p.name).trim().split(/\s+/).length > 1 && String(p.name).trim().split(/\s+/).at(-1) === surname;
+      if (!kin.has(p.entityId) && !sameFamily) continue;
+      if (skip(p.entityId, d.entityId)) continue;
+      out.push({ a: p.entityId, b: d.entityId, why: `「${d.name}」은(는) 이름 있는 인물일 수 있음 (${ref.name}의 가족)` });
+    }
+  }
+  return out;
+}
+
+module.exports = { words, forms, whySame, findPairs, describedPairs, TITLE_WORDS };

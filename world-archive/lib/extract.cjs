@@ -4,7 +4,7 @@
 // The slicing follows the Memory Module's nextSlice idea (read only what comes after the last place read), and evidence
 // works the way it does there: the new messages are shown as numbered sentences, the model answers with sentence
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
-const { TYPES, FIELDS, REL_TYPES } = require('./store.cjs');
+const { TYPES, FIELDS, REL_TYPES, relationFits } = require('./store.cjs');
 const S = require('./vendor/sentences.cjs');
 const N = require('./names.cjs');
 
@@ -144,8 +144,8 @@ ${fieldGuide()}
 
 관계: 이름이 있는 두 항목(인물·장소·집단 — 이미 있는 항목이거나 이번 items에 적은 항목) 사이의 오래가는 관계를 relations에 적는다.
 {"from":"항목 이름","to":"항목 이름","type":"${REL_TYPES.join('|')}","note":"짧은 설명(예: 남매, 기숙사 사감)","was":"전에 있던 관계가 끝났으면 그 종류(예: 연인), 아니면 null","evidence":[{"n":"12.3","q":"핵심 구절"}]}
-- 두 항목 이름은 [이미 있는 항목]이나 items에 있는 이름 그대로 쓴다. 카드가 있는 인물과의 관계는 적지 않는다.
-- 위치는 장소가 다른 장소 안에 있을 때만, 소속은 인물이 집단에 속할 때만 쓴다. 인물이 어떤 장소에서 일하거나 사는 것은 관계가 아니라 그 인물의 소속·배경 칸에 쓴다. 가족·연인·스승·제자는 인물끼리만. 한 번 같이 있었던 것은 관계가 아니다.
+- 두 항목 이름은 [이미 있는 항목]이나 items에 있는 이름 그대로 쓴다. 근거 문장에는 두 항목 중 하나 이상의 이름이 나와야 한다. 「○○의 누나」처럼 이름 없이 설명으로만 불린 사람과의 관계는 적지 않는다. 카드가 있는 인물과의 관계는 적지 않는다.
+- 위치는 A(from)가 B(to) 안에 있을 때만(이어져 있거나 가깝거나 통로로 통하는 것은 위치가 아니다), 소속은 인물이 집단에 속할 때만 쓴다. 인물이 어떤 장소에서 일하거나 사는 것은 관계가 아니라 그 인물의 소속·배경 칸에 쓴다. 가족·연인·스승·제자는 인물끼리만. 한 번 같이 있었던 것은 관계가 아니다.
 - 관계가 바뀌었으면(헤어짐, 등 돌림) 지금 관계를 적고 was에 끝난 관계를 적는다.
 
 값은 원문의 언어 그대로, 짧고 사실만. 칸 값은 그 항목의 지금 시점 기준 전체 사실로 쓴다(예: 나이가 바뀌었으면 새 나이).
@@ -319,19 +319,6 @@ function checkItems(parsed, part, cast) {
   return { items, dropped, droppedFields };
 }
 
-/**
- * Which kinds of settings a relation may join (the reader's relations only; the person may link anything):
- * 위치 joins two places, 소속 a person and a group, the people kinds two people (or groups, for 적대·친구), 기타 any two
- * named settings. A person working or living at a place is not a relation (that goes in the person's own fields).
- */
-function relationFits(type, a, b) {
-  const both = (...k) => k.includes(a) && k.includes(b);
-  if (type === '위치') return a === 'place' && b === 'place';
-  if (type === '소속') return (a === 'person' && b === 'group') || (a === 'group' && b === 'person');
-  if (type === '적대' || type === '친구') return both('person', 'group');
-  if (type === '기타') return both('person', 'place', 'group') && !((a === 'person' && b === 'place') || (a === 'place' && b === 'person'));
-  return a === 'person' && b === 'person';
-}
 
 /**
  * The relations of a reply that hold up: a known kind, two names (not a card character), at least one evidence

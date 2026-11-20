@@ -9,7 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { findPairs } = require('./same.cjs');
+const { findPairs, describedPairs } = require('./same.cjs');
 const N = require('./names.cjs');
 
 const SCHEMA = 1;
@@ -89,6 +89,31 @@ const REL_TYPES = ['가족', '소속', '친구', '적대', '연인', '스승·�
 const REL_MAX = 5000;
 const REL_NOTE = 300;
 const relKey = (r) => [r.from, r.to].sort().join('|') + '|' + r.type;
+/** 「가스파르의 5학년 누나」: a person named by description (someone's relative), not by a name of their own. */
+const isDescriptiveName = (n) => /의\s/.test(String(n || ''));
+/** 「그리핀도르 1학년 무리」, 「학생들」: a crowd, not a person. */
+const isGroupName = (n) => /(무리|일행|들)$/.test(String(n || '').trim());
+const squashName = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
+/** Whether a text names a setting: its name, another name, or one of the name's words (2+ letters). */
+function mentions(text, e) {
+  const t = squashName(text);
+  if (!t || !e) return false;
+  const names = [e.name, ...(e.aliases || [])];
+  const parts = names.flatMap((n) => [n, ...String(n).split(/[\s.]+/)]).map(squashName).filter((k) => k.length >= 2);
+  return parts.some((k) => t.includes(k));
+}
+/**
+ * Which kinds of settings a relation from the reader may join: 위치 two places, 소속 a person and a group, the people
+ * kinds two people (적대·친구 also groups), 기타 any two named settings except a person and a place.
+ */
+function relationFits(type, a, b) {
+  const both = (...k) => k.includes(a) && k.includes(b);
+  if (type === '위치') return a === 'place' && b === 'place';
+  if (type === '소속') return (a === 'person' && b === 'group') || (a === 'group' && b === 'person');
+  if (type === '적대' || type === '친구') return both('person', 'group');
+  if (type === '기타') return both('person', 'place', 'group') && !((a === 'person' && b === 'place') || (a === 'place' && b === 'person'));
+  return a === 'person' && b === 'person';
+}
 function validRelation(r) {
   return (
     r !== null && typeof r === 'object' && typeof r.relationId === 'string' && ID_RE.test(r.from || '') && ID_RE.test(r.to || '') &&
@@ -795,6 +820,14 @@ class Archive {
         const touched = (r) => [r.from, r.to].some((x) => x === c.entityId || x === c.dropId);
         doc.relations = doc.relations.filter((r) => !touched(r)).concat(c.relationsBefore.filter(validRelation).map((r) => structuredClone(r)));
       }
+    } else if (c.action === 'retype') {
+      if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
+      if (e.revision !== c.afterRevision) throw new ArchiveError(409, later);
+      if (!validEntity(c.before)) throw broken('변경 기록');
+      doc.entities[index] = { ...structuredClone(c.before), revision: e.revision + 1, updatedAt: now() };
+      const have = new Set(doc.relations.map(relKey));
+      const ids = new Set(doc.entities.map((x) => x.entityId));
+      for (const r of c.relations || []) if (validRelation(r) && ids.has(r.from) && ids.has(r.to) && !have.has(relKey(r))) doc.relations.push(structuredClone(r));
     } else if (c.action === 'relation-add' || c.action === 'relation-note' || c.action === 'relation-remove') {
       this.undoRelation(doc, c, later);
     } else if (c.action === 'delete') {
@@ -952,7 +985,9 @@ class Archive {
   listDuplicates(worldId) {
     this.getWorld(worldId);
     const gone = new Set(this.readDismissed(worldId).pairs.map((p) => pairKey(p.a, p.b)));
-    return findPairs(this.readEntities(worldId).entities, (a, b) => gone.has(pairKey(a, b)));
+    const doc = this.readEntities(worldId);
+    const skip = (a, b) => gone.has(pairKey(a, b));
+    return [...findPairs(doc.entities, skip), ...describedPairs(doc.entities, doc.relations, skip)];
   }
 
   /** 「다른 사람이에요」: the pair is not suggested again (by id, so renaming either does not bring it back). */
@@ -1178,6 +1213,68 @@ class Archive {
     return this.applyRelations(worldId, found, { ...meta, by: meta.by || 'affiliation' });
   }
 
+  /**
+   * 무리를 인물로 잡은 것: a person whose name ends in 무리 · 일행 · ~들 becomes a group (by code). Fields a group does
+   * not have are dropped, relations that no longer fit go; all of it is in one 'retype' history entry for 되돌리기.
+   * A setting the person edited by hand is left alone. ids: only these (all when omitted).
+   */
+  convertGroups(worldId, ids = null, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const changes = [];
+    const t = now();
+    for (const e of doc.entities) {
+      if (e.type !== 'person' || (ids && !ids.includes(e.entityId)) || !isGroupName(e.name)) continue;
+      if (Object.values(e.sources || {}).includes('manual') || e.provenance?.source === 'manual') continue;
+      const before = structuredClone(e);
+      const keys = new Set(FIELDS.group.map((f) => f.key));
+      e.type = 'group';
+      e.fields = Object.fromEntries(Object.entries(e.fields || {}).filter(([k]) => keys.has(k)));
+      e.sources = Object.fromEntries(Object.entries(e.sources || {}).filter(([k]) => k === 'description' || keys.has(k)));
+      e.revision++;
+      e.updatedAt = t;
+      const typeOf = (id) => (id === e.entityId ? 'group' : doc.entities.find((x) => x.entityId === id)?.type);
+      const gone = doc.relations.filter((r) => (r.from === e.entityId || r.to === e.entityId) && r.source !== 'manual' && !relationFits(r.type, typeOf(r.from), typeOf(r.to)));
+      doc.relations = doc.relations.filter((r) => !gone.includes(r));
+      changes.push({ id: randomUUID(), at: t, by: meta.by || 'retype', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: e.entityId, name: e.name, type: 'group', action: 'retype', before, after: 'group', afterRevision: e.revision, relations: gone });
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * The reader's relations checked again by code (no model): a relation whose kind does not fit its two settings,
+   * that has a person named by description at either end, or whose evidence names neither setting, is removed
+   * ('relation-remove', undoable). Relations from the 소속 칸 and the person's own are left as they are.
+   */
+  recheckRelations(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+    const out = [];
+    const keep = [];
+    for (const r of doc.relations) {
+      const a = byId.get(r.from);
+      const b = byId.get(r.to);
+      const model = r.source === 'auto' && !String(r.evidence || '').startsWith('소속:');
+      const why = !model || !a || !b ? null
+        : !relationFits(r.type, a.type, b.type) ? 'kind'
+        : (a.type === 'person' && isDescriptiveName(a.name)) || (b.type === 'person' && isDescriptiveName(b.name)) ? 'described name'
+        : !mentions(r.evidence, a) && !mentions(r.evidence, b) ? 'evidence names neither'
+        : null;
+      if (why) out.push({ r, why });
+      else keep.push(r);
+    }
+    if (!out.length) return [];
+    doc.relations = keep;
+    this.writeJson(this.entityFile(worldId), doc);
+    const changes = out.map(({ r, why }) => ({ ...this.relationLog(doc, r, 'relation-remove', meta.by || 'recheck', meta), why }));
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
   undoRelation(doc, c, later) {
     const r = c.relation;
     if (!validRelation(r)) throw broken('변경 기록');
@@ -1287,4 +1384,8 @@ module.exports = {
   ROOM_RE,
   AUTO_EVERY,
   REL_TYPES,
+  relationFits,
+  mentions,
+  isDescriptiveName,
+  isGroupName,
 };

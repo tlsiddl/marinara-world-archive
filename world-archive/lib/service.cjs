@@ -3,7 +3,7 @@
 // Routes are registered with app.register at the app.js anchor, so Marinara's own access checks (login, IP allowlist,
 // CSRF, host validation) cover them exactly like the engine's routes. There is no separate token.
 const path = require('node:path');
-const { Archive, ArchiveError, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY } = require('./store.cjs');
+const { Archive, ArchiveError, mentions, isDescriptiveName, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY } = require('./store.cjs');
 const X = require('./extract.cjs');
 const N = require('./names.cjs');
 const G = require('./vendor/glossary.cjs');
@@ -190,6 +190,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         job.fieldsDropped += droppedFields.length;
         // Relations: both ends must be settings by now (existing, or made from this batch's items).
         const meta = { roomId, messageIds: part.batch.map((x) => x.id) };
+        s.convertGroups(worldId, null, meta); // 「○○ 무리」 · 「학생들」: a crowd is a group
         const rel = X.checkRelations(parsed, part, cast);
         const ents = s.readEntities(worldId).entities;
         const resolved = [];
@@ -198,6 +199,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           const to = s.findByName(ents, r.to);
           if (!from || !to || from.entityId === to.entityId) rel.dropped.push({ name: r.from + ' — ' + r.to, why: 'no such setting' });
           else if (!X.relationFits(r.type, from.type, to.type)) rel.dropped.push({ name: r.from + ' — ' + r.to, why: `${r.type} between ${from.type} and ${to.type}` });
+          else if ((from.type === 'person' && isDescriptiveName(from.name)) || (to.type === 'person' && isDescriptiveName(to.name))) rel.dropped.push({ name: r.from + ' — ' + r.to, why: 'described name' });
+          else if (!mentions(r.evidence, from) && !mentions(r.evidence, to)) rel.dropped.push({ name: r.from + ' — ' + r.to, why: 'evidence names neither' });
           else resolved.push({ ...r, from: from.entityId, to: to.entityId });
         }
         const relChanges = [...s.applyRelations(worldId, resolved, meta), ...s.linkAffiliations(worldId, null, meta)];
@@ -368,6 +371,12 @@ async function routes(r) {
     return e;
   }));
   r.get('/worlds/:worldId/relations', handle(async (req) => ({ relations: s().listRelations(req.params.worldId) })));
+  // The current rules applied again by code to what was already read (no model): crowds become groups, misfit relations go.
+  r.post('/worlds/:worldId/relations/recheck', handle(async (req) => {
+    const retyped = s().convertGroups(req.params.worldId, null, { by: 'recheck' });
+    const removed = s().recheckRelations(req.params.worldId, { by: 'recheck' });
+    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })) };
+  }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));
   r.delete('/worlds/:worldId/relations/:relationId', handle(async (req) => s().deleteRelation(req.params.worldId, req.params.relationId)));
