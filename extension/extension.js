@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.6.0';
+  const VERSION = '0.6.1';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -274,12 +274,12 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 .wt-rule span{color:var(--wa-ink);overflow-wrap:anywhere}.wt-rule small{color:var(--wa-muted)}
 .wt-empty{color:var(--wa-muted);font-size:12.5px;margin:6px 0}
 /* 시간표 (시안 E) */
-.wt-tt{width:100%;border-collapse:separate;border-spacing:6px;table-layout:fixed;margin:0 -6px}
+.wt-tt{width:100%;border-collapse:separate;border-spacing:6px 0;table-layout:fixed;margin:0 -6px}
 .wt-tt th{font:600 15px/1.2 var(--wt-gothic);padding:8px 0 10px;border-bottom:1.5px solid var(--wa-ink);text-align:center}
 .wt-tt th small{display:block;font:9px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted);margin-top:3px}
 .wt-tt th.today{background:var(--wt-cream);border-radius:10px 10px 0 0}.wt-tt th.blank{width:64px;border:0}
-.wt-tt td{vertical-align:top;padding:0}.wt-tt td.t{width:64px;text-align:right;padding:10px 6px 0 0;font-size:11px;color:var(--wa-muted)}.wt-tt td.t b{display:block;color:var(--wa-ink);font:600 12px var(--wt-gothic)}
-.wt-tt td.todaycol{background:var(--wt-cream);border-radius:0 0 10px 10px}
+.wt-tt td{vertical-align:top;padding:3px 0}.wt-tt td.t{width:64px;text-align:right;padding:10px 6px 0 0;font-size:11px;color:var(--wa-muted)}.wt-tt td.t b{display:block;color:var(--wa-ink);font:600 12px var(--wt-gothic)}
+.wt-tt td.todaycol{background:var(--wt-cream);padding:3px 4px}.wt-tt td.todaycol.end{border-radius:0 0 10px 10px;padding-bottom:7px}.wt-tt th.today{padding-left:4px;padding-right:4px}
 .wt-c{border-radius:12px;padding:10px 10px 9px;height:100%;min-height:58px;border:1px solid transparent;text-align:left;width:100%;display:block}
 .wt-c b{display:block;font:600 14px/1.25 var(--wt-gothic);overflow-wrap:anywhere}.wt-c small{display:block;font-size:10px;color:var(--wa-muted);margin-top:3px}
 .wt-c.s1{background:var(--wt-c1);border-color:var(--wt-c1-line)}.wt-c.s2{background:var(--wt-cream);border-color:var(--wt-cream-line)}.wt-c.s3{background:var(--wt-c3);border-color:var(--wt-c3-line)}
@@ -287,7 +287,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 .wt-c.changed{background:var(--wt-white);border-color:var(--wa-ink)}.wt-c.wide{opacity:.55}
 .wt-was{font-size:10px;color:var(--wt-blue);margin-top:4px}
 .wt-free{border:1px dashed var(--wa-line);border-radius:12px;min-height:58px}
-.wt-lunch td.l{text-align:center;font-size:11px;color:var(--wa-muted);letter-spacing:6px;padding:4px 0;border-top:1px dashed var(--wa-line);border-bottom:1px dashed var(--wa-line)}
+.wt-lunch td{padding:0}.wt-lunch td.l{text-align:center;font-size:11px;color:var(--wa-muted);letter-spacing:6px;padding:4px 0;border-top:1px dashed var(--wa-line);border-bottom:1px dashed var(--wa-line)}
 .wt-night{background:var(--wt-night);color:var(--wt-night-ink);border-radius:12px;padding:10px;position:relative;overflow:hidden;min-height:58px;border:1px solid var(--wt-night);text-align:left;width:100%;display:block}
 :host([data-theme=dark]) .wt-night{border-color:var(--wa-field-line)}
 .wt-night b{display:block;color:var(--wt-night-ink);font:600 14px/1.25 var(--wt-gothic)}.wt-night small{display:block;color:var(--wt-night-sub);font-size:10px;margin-top:3px}
@@ -308,7 +308,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 .wt-ev .n b{display:block;font:600 15px var(--wt-gothic);overflow-wrap:anywhere}.wt-ev .n small{color:var(--wa-muted);font-size:11px}
 .wt-ev .k{font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--wa-ink);white-space:nowrap}
 .wt-ev.past{opacity:.45}.wt-ev.c1{background:var(--wt-c1);border-color:var(--wt-c1-line)}.wt-ev.c2{background:var(--wt-cream);border-color:var(--wt-cream-line)}.wt-ev.c3{background:var(--wt-c3);border-color:var(--wt-c3-line)}
-.wt-ev.next{background:var(--wt-night);color:var(--wt-night-ink);border-color:var(--wt-night)}:host([data-theme=dark]) .wt-ev.next{border-color:var(--wa-field-line)}
+.wt-ev.next{background:var(--wt-night);color:var(--wt-night-ink);border-color:var(--wt-night)}:host([data-theme=dark]) .wt-ev.next{background:#2b2924;border-color:#e8dfc4}
 .wt-ev.next .n small,.wt-ev.next .d small{color:var(--wt-night-sub)}.wt-ev.next .k{border-color:var(--wt-night-ink)}
 .wt-ev.cancel .n b{text-decoration:line-through}.wt-ev.cancel .k{border-style:dashed;color:var(--wa-muted)}.wt-ev.noyear{border-style:dashed}
 .wt-today{display:flex;align-items:center;gap:8px;margin:12px 0;color:var(--wt-blue);font-size:11px;font-weight:700}
@@ -327,7 +327,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 @media(max-width:720px){
   .wt-tt{display:none}.wt-dtab{display:flex}.wt-day.on{display:block}
   .wt-rule{flex-direction:column;gap:2px}.wt-rule b,.wt-rule button{min-width:0}
-  .wt-ev{grid-template-columns:46px minmax(0,1fr);gap:10px}.wt-ev .k{grid-column:2;justify-self:start}
+  .wt-ev{grid-template-columns:46px minmax(0,1fr) auto;gap:8px;padding:8px 10px}.wt-ev .k{font-size:10px;padding:2px 7px}
   :host([data-embedded]) main{padding:16px 14px 40px}
 }
 `;
@@ -1208,7 +1208,9 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       if (!hit) return night(s) ? '' : '<div class="wt-free"></div>';
       const [k, c] = hit;
       const subj = c.subject || c.value;
-      const sub = [c.place, c.hours > 1 ? `${HOURS[c.hours] || c.hours} 시간` : '', c.value !== subj ? c.value : ''].filter(Boolean).join(' · ');
+      // the small line: place · how long · what the value adds to the subject (「천문 관측 23:00」 → 「23:00」), never the subject again
+      const extra = c.value !== subj ? (c.value.startsWith(subj) ? c.value.slice(subj.length).replace(/^[\s·,—–-]+/, '') : c.value) : '';
+      const sub = [c.place, c.hours > 1 ? `${HOURS[c.hours] || c.hours} 시간` : '', extra].filter(Boolean).join(' · ');
       const was = c.past?.[0] ? `<div class="wt-was">이전: ${esc(c.past[0].value)}</div>` : '';
       const wait = c.pending ? `<div class="wt-was">대화에서는 「${esc(c.pending.value)}」</div>` : '';
       const q = esc(`${c.value} ${c.place || ''}`.toLowerCase());
@@ -1218,7 +1220,16 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     };
     const morning = (s) => ttSlotRank(s) < 720;
     const lunchAt = slots.findIndex((s, i) => i > 0 && morning(slots[i - 1]) && !morning(s));
-    const rows = slots.map((s, i) => `${i === lunchAt ? `<tr class="wt-lunch"><td></td><td colspan="${days.length}" class="l">점 심</td></tr>` : ''}<tr><td class="t"><b>${esc(s)}</b></td>${days.map((d) => (covered.has(`${d}|${s}`) ? '' : `<td ${span.get(`${d}|${s}`) > 1 ? `rowspan="${span.get(`${d}|${s}`)}"` : ''} class="${d === today ? 'todaycol' : ''}">${box(d, s, span.get(`${d}|${s}`))}</td>`)).join('')}</tr>`).join('');
+    // v0.6.1: the story's weekday is one cream band from the head to the last row (every row's cell of that day, the
+    // 점심 line too, rounded at the bottom)
+    const mid = Math.floor((days.length - 1) / 2);
+    const lunchRow = `<tr class="wt-lunch"><td></td>${days.map((d, j) => `<td class="l${d === today ? ' todaycol' : ''}">${j === mid ? '점 심' : ''}</td>`).join('')}</tr>`;
+    const cellTd = (d, s, i) => {
+      const n = span.get(`${d}|${s}`) || 1;
+      const cls = d === today ? `todaycol${i + n - 1 === slots.length - 1 ? ' end' : ''}` : '';
+      return `<td ${n > 1 ? `rowspan="${n}"` : ''} class="${cls}">${box(d, s, n > 1 ? n : 0)}</td>`;
+    };
+    const rows = slots.map((s, i) => `${i === lunchAt ? lunchRow : ''}<tr><td class="t"><b>${esc(s)}</b></td>${days.map((d) => (covered.has(`${d}|${s}`) ? '' : cellTd(d, s, i))).join('')}</tr>`).join('');
     const table = `<table class="wt-tt"><thead><tr><th class="blank"></th>${days.map((d) => `<th class="${d === today ? 'today' : ''}">${d}<small>${DAY_EN[d]}</small></th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
     // phone: one day
     const pick = st.ttDay && days.includes(st.ttDay) ? st.ttDay : today && days.includes(today) ? today : days[0];
@@ -1294,7 +1305,9 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   function tabsHtml() {
     const m = worldMap();
     const keys = ['world', 'unknown', ...m.big.map((x) => x.key)];
-    const sel = keys.includes(st.tab) ? st.tab : m.big[0]?.key || 'world';
+    // first: the biggest place; with none, 「세계 전체」 when it has anything, else 「모름」
+    const lostN = m.lost.rules.length + m.lost.groups.length + m.lost.places.length + m.lost.sheets.length + m.lost.cals.length;
+    const sel = keys.includes(st.tab) ? st.tab : m.big[0]?.key || (m.everywhere.rules.length + m.everywhere.cals.length || !lostN ? 'world' : 'unknown');
     const today = storyToday();
     const todayLine = today ? ` · 이야기 속 오늘은 ${fmtKo(today.date)}(${today.weekday || dowOf(today.date)})` : '';
     const find = `<input class="wt-find" id="tabq" type="search" placeholder="이 탭에서 찾기" value="${esc(st.tabQuery || '')}" aria-label="이 탭에서 찾기">`;
