@@ -73,7 +73,13 @@ function rosterOf(entities, relations, groupId) {
   const rank = new Map(order.map((id, i) => [id, i]));
   const members = [...at].map(([pid, gid]) => {
     const p = byId.get(pid);
-    const aff = String(p.fields?.affiliation || '');
+    // v0.6.0: with more than one group in the 소속 칸 (「은사슴 기숙사생 사감, 하르트 가문」), only the piece that names this
+    // group (or the smaller one the person is listed under) says the role; the whole 칸 when no piece does
+    const whole = String(p.fields?.affiliation || '');
+    const sq = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
+    const keys = [byId.get(groupId), byId.get(gid)].filter(Boolean).flatMap((g) => [g.name, ...(g.aliases || [])]).map(sq).filter((k) => k.length >= 2);
+    const pieces = whole.split(/[,，、;/]/).filter((x) => keys.some((k) => sq(x).includes(k)));
+    const aff = pieces.length ? pieces.join(', ') : whole;
     const past = PAST_WORDS.test(aff) || (notes.get(pid) || []).some((n) => /과거에는/.test(n));
     const kind = past ? 'past' : ROLE_WORDS.test(aff) ? 'staff' : 'member';
     return { entityId: pid, name: p.name, via: gid === groupId ? null : byId.get(gid).name, viaId: gid === groupId ? null : gid, kind, unnamed: unnamed(p.name) };

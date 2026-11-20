@@ -62,6 +62,14 @@ test('events: one sheet per owner; a new date keeps 「이전」; cancelled is m
   // next year the same name is another event
   s.applyCalendar(w.worldId, [{ ownerId: id('별시계 학원'), name: '핼러윈 연회', date: '1892-10-31' }]);
   assert.equal(Object.keys(cal('별시계 학원').calendar.events).length, 2);
+  // v0.6.0: the same day in other school years is another event too (입학식 every 9월 1일), not a date moved
+  s.applyCalendar(w.worldId, [{ ownerId: id('별시계 학원'), name: '입학식', date: '1890-09-01' }, { ownerId: id('별시계 학원'), name: '입학식', date: '1891-09-01' }, { ownerId: id('별시계 학원'), name: '입학식', date: '1892-09-01' }]);
+  const entry = () => Object.values(cal('별시계 학원').calendar.events).filter((x) => x.name === '입학식');
+  assert.deepEqual(entry().map((x) => [x.date, x.past]).sort(), [['1890-09-01', undefined], ['1891-09-01', undefined], ['1892-09-01', undefined]]);
+  // a day without a year still finds the dated one (and the dated one the day without a year)
+  s.applyCalendar(w.worldId, [{ ownerId: id('별시계 학원'), name: '은사슴 축제', date: '--05-01' }]);
+  s.applyCalendar(w.worldId, [{ ownerId: id('별시계 학원'), name: '은사슴 축제', date: '1892-05-01' }]);
+  assert.equal(Object.values(cal('별시계 학원').calendar.events).filter((x) => x.name === '은사슴 축제').length, 1);
   // the person's event: the story only offers
   s.setEvent(w.worldId, { ownerId: id('은사슴 1학년'), name: '1학년 첫 시험', date: '1891-12-01' });
   s.applyCalendar(w.worldId, [{ ownerId: id('은사슴 1학년'), name: '1학년 첫 시험', date: '1891-12-08' }]);

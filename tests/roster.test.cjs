@@ -202,3 +202,12 @@ test('the list in three parts — 구성원 · 맡은 사람 · 지난 구성원
   assert.equal(r.counts.named, r.members.length - 2, 'a description is not a name known');
   assert.deepEqual(by('member').sort(), ['도겸', '도겸의 사촌', '쌍둥이 중 한 명', '하윤'].sort());
 });
+
+test('v0.6.0: with two groups in the 소속 칸, the role is the one said with this group (사감 there, a member here)', (t) => {
+  const { s, w, id } = world(t);
+  s.applyAuto(w.worldId, [{ type: 'group', name: '하르트 가문' }, { type: 'person', name: '벨로나 하르트', fields: { affiliation: '은사슴 기숙사 사감, 하르트 가문' } }]);
+  s.linkAffiliations(w.worldId);
+  const kind = (g) => s.roster(w.worldId, id(g)).members.find((m) => m.name === '벨로나 하르트')?.kind;
+  assert.equal(kind('은사슴 기숙사'), 'staff');
+  assert.equal(kind('하르트 가문'), 'member', 'the 사감 is of the other group');
+});
