@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.4.2';
+  const VERSION = '0.5.0';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -168,6 +168,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
 .sec{padding:16px 0 4px;border-top:1px dashed var(--wa-line);margin-top:14px}
 .sec small,.state small{display:block;font:10px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted);margin-bottom:6px}
 .sec p,.state p{margin:0;white-space:pre-wrap;text-align:justify;overflow-wrap:anywhere}
+.tt-wrap{overflow-x:auto;margin:4px 0 8px}.tt{border-collapse:collapse;font-size:13px;min-width:100%}.tt th,.tt td{border:1px solid var(--wa-line);padding:6px 8px;vertical-align:top;text-align:left}.tt thead th{font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}.tt td small{display:block}.tt td.wide{opacity:.5;font-style:italic}.tt-clash{border:1.5px dashed var(--wa-ink);border-radius:3px;padding:8px 10px;margin:4px 0 8px}.tt-clash p{margin:4px 0}.tt-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}.tt-form input{min-width:0;flex:1 1 120px}
+.roster-add{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.roster-add select{max-width:100%}
 .state{margin-top:18px;padding:14px 16px;border:1.5px dashed var(--wa-ink);border-radius:3px}
 .meta{margin-top:20px;font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}
 .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:20px}
@@ -354,7 +356,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   async function loadEntities() {
     st.entities = st.worldId ? (await api('GET', `/worlds/${st.worldId}/entities`)).entities || [] : [];
     st.relations = st.worldId ? (await api('GET', `/worlds/${st.worldId}/relations`).catch(() => ({ relations: [] }))).relations || [] : [];
+    st.rosters = {};
     try { st.pairs = st.worldId ? (await api('GET', `/worlds/${st.worldId}/duplicates`)).pairs || [] : []; } catch { st.pairs = []; }
+    try { st.groupSuggest = st.worldId ? (await api('GET', `/worlds/${st.worldId}/group-suggestions`)).suggestions || [] : []; } catch { st.groupSuggest = []; }
     if (st.detail && !st.entities.some((e) => e.entityId === st.detail)) st.detail = null;
   }
   async function loadRoom() {
@@ -568,7 +572,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
         <span style="flex:1"></span>
         <button class="primary" type="button" data-act="new" data-type="${type}">새 ${k.label}</button>
       </div>
-      ${type === 'person' && st.pairs.length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">같은 사람일 수 있음 ${st.pairs.length}쌍</button></p>` : ''}
+      ${type === 'group' && st.groupSuggest?.length ? `<p class="sub" style="margin:-6px 0 14px">소속 칸에만 있는 이름 · ${st.groupSuggest.map((g) => `<button class="quiet" type="button" data-act="group-make" data-name="${esc(g.name)}" title="${esc(g.people.join(', '))}의 소속 칸${g.owner ? ` · 지금은 「${esc(g.owner)}」의 다른 이름` : ''}">${esc(g.name)} · 집단으로 만들기</button>`).join(' ')}</p>` : ''}
+      ${type === 'schedule' && !st.readOnly ? `<p class="sub" style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="cal-gather" title="날짜가 정해진 한 번뿐인 행사 일정을 그 집단·장소의 학사일정으로 옮깁니다(코드로)">학사일정으로 모으기</button> <button class="quiet" type="button" data-act="tt-gather" title="요일·시간이 정해진 수업·일과 일정을 그 집단·사람의 시간표 칸으로 옮깁니다. 코드로 먼저 하고, 안 되는 것만 작은 호출 한 번">시간표로 모으기</button></p>` : ''}
+      ${pairsOf(type).length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">${type === 'person' ? '같은 사람일 수 있음' : '같은 것일 수 있음'} ${pairsOf(type).length}쌍</button></p>` : ''}
       ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
         : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
   }
@@ -579,12 +585,116 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     return c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 ? '이에요' : '예요';
   }
 
+  /**
+   * 구성원 명단 (v0.5.0) — from the server (world-archive/lib/roster.cjs), so the screen and {{세계}} agree. Three parts:
+   * 구성원 · 맡은 사람 · 지난 구성원; a name that is a description gets 「(이름 모름)」.
+   */
+  async function loadRoster(id) {
+    st.rosters = st.rosters || {};
+    if (st.rosters[id]) return;
+    st.rosters[id] = { loading: true };
+    try { st.rosters[id] = await api('GET', `/worlds/${st.worldId}/entities/${id}/members`); } catch { st.rosters[id] = { members: [], failed: true }; }
+    if (st.detail === id) render();
+  }
+  function rosterHtml(g) {
+    const r = st.rosters?.[g.entityId];
+    if (!r || r.loading) { if (!r) void loadRoster(g.entityId); return '<div class="sec"><small>구성원 명단</small><p class="sub">불러오는 중…</p></div>'; }
+    const list = r.members || [];
+    const inList = new Set(list.map((m) => m.entityId));
+    const chip = (m) => `<button class="quiet" type="button" data-act="open" data-id="${esc(m.entityId)}">${esc(m.name)}${m.unnamed ? ' <small>(이름 모름)</small>' : ''}${m.via ? ` <small>· ${esc(m.via)}</small>` : ''}</button><button class="quiet" type="button" data-act="member-off" data-group="${esc(m.viaId || g.entityId)}" data-id="${esc(m.entityId)}" title="${esc(m.via || g.name)}의 명단에서 빼기 — 그 인물의 소속 칸에서 이 이름을 지웁니다" aria-label="${esc(m.name)} 빼기">×</button>`;
+    const part = (kind, label) => {
+      const rows = list.filter((m) => m.kind === kind);
+      return rows.length ? `<p><small>${label} ${rows.length}</small><br>${rows.map(chip).join('')}</p>` : '';
+    };
+    const named = list.filter((m) => !m.unnamed).length;
+    const others = st.entities.filter((x) => x.type === 'person' && !inList.has(x.entityId)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    const add = others.length ? `<span class="roster-add"><select id="rosterPick" aria-label="명단에 더할 인물">${others.map((x) => `<option value="${esc(x.entityId)}">${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="member-add" data-group="${esc(g.entityId)}">명단에 더하기</button></span>` : '';
+    const body = list.length ? part('member', '구성원') + part('staff', '맡은 사람') + part('past', '지난 구성원') : '<p class="sub">아직 이 집단에 소속된 인물이 없습니다.</p>';
+    return `<div class="sec"><small>구성원 명단 · ${list.length}명${named !== list.length ? ` (이름 아는 사람 ${named}명)` : ''} · 인물마다 적힌 소속으로 모음</small>${body}${add}</div>`;
+  }
+
+  /**
+   * 시간표 (v0.5.0 B): weekday × time, one cell per lesson or round. The same order as world-archive/lib/timetable.cjs
+   * (월…일, 평일, 매일; 교시 by number, times by clock, words by the day). A cell from the story has 「· 자동」; one the person
+   * wrote is theirs, and a value the story gives for it waits with [적용] [무시].
+   */
+  const TT_DAYS = ['월', '화', '수', '목', '금', '토', '일', '평일', '매일'];
+  function ttSlotRank(s) {
+    const t = String(s);
+    let m = t.match(/^(\d+)\s*교시/);
+    if (m) return Number(m[1]) * 100;
+    m = t.match(/^(\d{1,2}):(\d{2})/);
+    if (m) return Number(m[1]) * 60 + Number(m[2]);
+    m = t.match(/^(\d{1,2})\s*시/);
+    if (m) return Number(m[1]) * 60;
+    const w = ['새벽', '아침', '오전', '점심', '오후', '저녁', '밤', '자정'].findIndex((x) => t.startsWith(x));
+    return w >= 0 ? [300, 420, 540, 720, 840, 1080, 1260, 1440][w] : 2000;
+  }
+  function timetableHtml(e) {
+    const cells = Object.entries(e.timetable?.cells || {});
+    const days = TT_DAYS.filter((d) => cells.some(([, c]) => c.day === d));
+    const slots = [...new Set(cells.map(([, c]) => c.slot))].sort((a, b) => ttSlotRank(a) - ttSlotRank(b) || a.localeCompare(b, 'ko'));
+    const cellHtml = (day, slot) => {
+      const key = `${day}|${slot}`;
+      const c = e.timetable.cells[key];
+      if (!c) return '<td></td>';
+      const past = c.past?.[0] ? `<small class="past">이전: ${esc(c.past[0].value)}</small>` : '';
+      const wait = c.pending ? `<small class="pending">대화에서는 「${esc(c.pending.value)}」${copula(c.pending.value)} <button class="quiet" type="button" data-act="cell-pending" data-id="${esc(e.entityId)}" data-key="${esc(key)}">적용</button><button class="quiet" type="button" data-act="cell-pending" data-id="${esc(e.entityId)}" data-key="${esc(key)}" data-discard="1">무시</button></small>` : '';
+      return `<td class="${(e.timetable.wide || []).includes(key) ? 'wide' : ''}" title="${esc(c.evidence || '')}${(e.timetable.wide || []).includes(key) ? ' — 이 시간 안에 더 자세한 칸이 있어 바탕으로만 보여 줍니다' : ''}">${esc(c.value)}${c.source === 'auto' ? '<span class="auto-tag">· 자동</span>' : ''}${past}${wait}</td>`;
+    };
+    const table = cells.length
+      ? `<div class="tt-wrap"><table class="tt"><thead><tr><th></th>${days.map((d) => `<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${slots.map((sl) => `<tr><th>${esc(sl)}</th>${days.map((d) => cellHtml(d, sl)).join('')}</tr>`).join('')}</tbody></table></div>`
+      : '<p class="sub">아직 칸이 없습니다.</p>';
+    // 「시간이 겹쳐요」: two cells of one day whose times cross — the person chooses (nothing is merged or taken away by code)
+    const label = (k) => { const c = e.timetable.cells[k]; return c ? `${c.day} ${c.slot} ${c.value}` : k; };
+    const clash = (e.timetable.overlaps || []).filter(([a, b]) => e.timetable.cells[a] && e.timetable.cells[b]);
+    const clashHtml = clash.length ? `<div class="tt-clash" role="status"><b>시간이 겹쳐요 ${clash.length}</b>${clash.map(([a, b]) => `<p>${[a, b].map((k) => `${esc(label(k))}${st.readOnly ? '' : ` <button class="quiet" type="button" data-act="cell-clear" data-id="${esc(e.entityId)}" data-key="${esc(k)}">이 칸 지우기</button>`}`).join(' ↔ ')}</p>`).join('')}</div>` : '';
+    const owner = st.entities.find((x) => x.entityId === e.timetable.ownerId);
+    const form = st.readOnly ? '' : `<div class="tt-form"><select id="ttDay" aria-label="요일">${TT_DAYS.map((d) => `<option>${d}</option>`).join('')}</select><input id="ttSlot" maxlength="24" placeholder="때(1교시 · 오전 · 09:00–10:30)" aria-label="때"><input id="ttValue" maxlength="80" placeholder="내용(비우면 그 칸을 지움)" aria-label="내용"><button class="quiet" type="button" data-act="cell-save" data-id="${esc(e.entityId)}">칸 저장</button></div>`;
+    return `<div class="sec"><small>시간표${owner ? ` · ${esc(owner.name)}` : ''} · 칸 ${cells.length}</small>${clashHtml}${table}${form}</div>`;
+  }
+
+  /** 적용되는 곳 (v0.5.0 C): a rule or system holds in one place or group, or in the whole world. */
+  function appliesHtml(e) {
+    const where = st.entities.find((x) => x.entityId === e.appliesTo);
+    const tag = e.sources?.appliesTo === 'auto' ? '<span class="auto-tag">· 자동</span>' : '';
+    const opts = st.entities.filter((x) => x.type === 'place' || x.type === 'group').sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, 'ko') : a.type === 'group' ? -1 : 1));
+    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="appliesPick" aria-label="적용되는 곳"><option value="" ${e.appliesTo ? '' : 'selected'}>모름</option><option value="world" ${e.appliesTo === 'world' ? 'selected' : ''}>세계 전체</option>${opts.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === e.appliesTo ? 'selected' : ''}>${esc(x.name)} · ${x.type === 'group' ? '집단' : '장소'}</option>`).join('')}</select><button class="quiet" type="button" data-act="applies-set" data-id="${esc(e.entityId)}">바꾸기</button></span>`;
+    const shown = where ? `<button class="quiet" type="button" data-act="open" data-id="${esc(where.entityId)}">${esc(where.name)}</button>` : e.appliesTo === 'world' ? '세계 전체' : '모름 <small>(장면 방식에서 맨 뒤에 넣음)</small>';
+    return `<div class="sec"><small>적용되는 곳${tag}</small><p>${shown}</p>${pick}</div>`;
+  }
+
+  /** 본거지 (v0.5.0 E): the place a group is at. */
+  function baseHtml(g) {
+    const at = st.entities.find((x) => x.entityId === g.base);
+    const tag = g.sources?.base === 'auto' ? '<span class="auto-tag">· 자동</span>' : '';
+    const places = st.entities.filter((x) => x.type === 'place').sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="basePick" aria-label="본거지"><option value="">없음</option>${places.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === g.base ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="base-set" data-id="${esc(g.entityId)}">바꾸기</button></span>`;
+    return `<div class="sec"><small>본거지${tag}</small><p>${at ? `<button class="quiet" type="button" data-act="open" data-id="${esc(at.entityId)}">${esc(at.name)}</button>` : '<span class="sub">없음</span>'}</p>${pick}</div>`;
+  }
+
+  /** 학사일정 (v0.5.0 K) — a plain list for now: by date, 「이전」, cancelled struck through, [적용] [무시]. */
+  function calendarHtml(e) {
+    const list = Object.values(e.calendar?.events || {}).sort((a, b) => String(a.date || '9999').replace(/^--/, '0000-').localeCompare(String(b.date || '9999').replace(/^--/, '0000-')));
+    const rows = list.map((x) => `<li class="${x.cancelled ? 'undone' : ''}"><b>${esc(x.date ? x.date.replace(/^--/, '연도 모름 ') : x.when || '')}${x.end ? ` ~ ${esc(x.end)}` : ''}</b> ${esc(x.name)}${x.place ? ` · ${esc(x.place)}` : ''}${x.who ? ` · ${esc(x.who)}` : ''}${x.cancelled ? ' · 취소' : ''}${x.source === 'auto' ? '<span class="auto-tag">· 자동</span>' : ''}${x.past?.[0] ? ` <small class="past">이전: ${esc(x.past[0].date)}</small>` : ''}${x.pending ? ` <small class="pending">대화에서는 ${esc(x.pending.date || '')}${x.pending.cancelled ? ' 취소' : ''} <button class="quiet" type="button" data-act="event-pending" data-id="${esc(e.entityId)}" data-event="${esc(x.id)}">적용</button><button class="quiet" type="button" data-act="event-pending" data-id="${esc(e.entityId)}" data-event="${esc(x.id)}" data-discard="1">무시</button></small>` : ''}</li>`).join('');
+    return `<div class="sec"><small>학사일정 · ${list.length}</small>${rows ? `<ul class="hist">${rows}</ul>` : '<p class="sub">아직 일정이 없습니다.</p>'}</div>`;
+  }
+
+  /** 「잡다한 설정 정리」 candidates (v0.5.0 P · Q): the person picks — 휴지통 (undoable) · 칸 비우기 · 남기기. */
+  function tidyHtml() {
+    const t = st.tidy;
+    if (!t || (!t.items.length && !t.fields.length)) return '';
+    const items = t.items.map((x) => `<li><b>${esc(x.name)}</b> <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-trash" data-id="${esc(x.entityId)}">휴지통으로</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}">남기기</button></li>`).join('');
+    const fields = t.fields.map((x) => `<li><b>${esc(x.name)}</b> · ${x.key === 'description' ? '메모' : '성격'}: ${esc(x.value)} <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-clear" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">칸 비우기</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">남기기</button></li>`).join('');
+    return `<div class="paper"><h2>잡다한 설정 정리 · 후보 ${t.items.length + t.fields.length}</h2><p class="hint">지우지 않았습니다. 고른 것만 휴지통으로 가고 기록에서 되돌릴 수 있습니다.</p>${items ? `<ul class="hist">${items}</ul>` : ''}${fields ? `<ul class="hist">${fields}</ul>` : ''}</div>`;
+  }
+
   function detailHtml(e) {
     const k = KIND[e.type];
     const d = defs(e.type);
     const f = e.fields || {};
     const src = e.sources || {};
-    const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '');
+    const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '') + (e.hidden?.[k] ? '<span class="auto-tag" title="프로필 블록에만 있고 이야기에는 아직 나오지 않았습니다">· 아직 드러나지 않음</span>' : '');
     // 할 일 10: the earlier value small under the field; a newer value from the story for a field the person wrote.
     const was = (k) => (e.past?.[k]?.[0] ? `<small class="past">이전: ${esc(e.past[k][0].value)} <button class="quiet" type="button" data-act="past-prompt" data-id="${esc(e.entityId)}" data-key="${esc(k)}" title="켜면 {{세계}}에 「(과거: …)」가 붙습니다">${e.pastInPrompt?.[k] ? '프롬프트에 넣는 중 · 끄기' : '프롬프트에도 넣기'}</button></small>` : '');
     const wait = (k) => (e.pending?.[k] ? `<small class="pending">대화에서는 「${esc(e.pending[k].value)}」${copula(e.pending[k].value)} <button class="quiet" type="button" data-act="pending" data-id="${esc(e.entityId)}" data-key="${esc(k)}">적용</button><button class="quiet" type="button" data-act="pending-drop" data-id="${esc(e.entityId)}" data-key="${esc(k)}">무시</button></small>` : '');
@@ -592,6 +702,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}${tag(x.key)}</small><p>${esc(f[x.key])}</p>${was(x.key)}${wait(x.key)}</div>`).join('');
     const extra = (e.extra || []).filter((x) => x.value).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(x.value)}</p></div>`).join('');
     const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}${tag('description')}</small><p>${esc(e.description)}</p></div>` : '';
+    // v0.5.0 L: 「확인 안 됨 · ○○의 말」
+    const rumors = Object.entries(e.rumors || {}).map(([k, r]) => `<div class="sec"><small>${esc(d.find((x) => x.key === k)?.label || k)} · 확인 안 됨 · ${esc(r.by || '소문')}의 말</small><p>${esc(r.value)}</p></div>`).join('');
     // 관계: both directions; a chip opens the other setting.
     const rels = (st.relations || []).filter((r) => r.from === e.entityId || r.to === e.entityId).map((r) => {
       const other = st.entities.find((x) => x.entityId === (r.from === e.entityId ? r.to : r.from));
@@ -611,10 +723,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
             ${e.aliases.length ? `<p class="al">다른 이름 · ${esc(e.aliases.join(', '))}</p>` : ''}
             ${e.glossaryName && e.glossaryName !== e.name ? `<p class="sub" style="margin:6px 0 0">번역 단어장에는 「${esc(e.glossaryName)}」${copula(e.glossaryName)} <button class="quiet" type="button" data-act="glossary-name" data-id="${esc(e.entityId)}">적용</button></p>` : ''}
           </div>
-          ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}
+          ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}${e.nameCheck ? `<span class="pill" title="근거 문장에는 「${esc(e.nameCheck.said)}」이(가) 나옵니다. 이름을 확인해 주세요(고치면 사라집니다).">이름 확인 필요</span>` : ''}
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
-        ${secs}${extra}${memo}${relSec}
+        ${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
         ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
@@ -642,13 +754,17 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     </div>`;
   }
 
+  /** v0.5.0 F: 「같은 것일 수 있음」 for places, groups, rules … too (pairs carry their kind; old ones are people). */
+  const pairsOf = (type) => (st.pairs || []).filter((p) => (p.type || 'person') === type);
   function dupesHtml() {
     const byId = (id) => st.entities.find((e) => e.entityId === id);
-    const pairs = st.pairs.map((p) => ({ ...p, ea: byId(p.a), eb: byId(p.b) })).filter((p) => p.ea && p.eb);
+    const type = KIND[st.view] ? st.view : 'person';
+    const person = type === 'person';
+    const pairs = pairsOf(type).map((p) => ({ ...p, ea: byId(p.a), eb: byId(p.b) })).filter((p) => p.ea && p.eb);
     return `
-      <button class="back" type="button" data-act="go" data-view="person">${icon('back')}인물 목록</button>
-      <div class="eyebrow">PEOPLE · SAME PERSON? · ${pairs.length}</div>
-      <h1>같은 사람일 수 있음</h1>
+      <button class="back" type="button" data-act="go" data-view="${type}">${icon('back')}${KIND[type].label} 목록</button>
+      <div class="eyebrow">${person ? 'PEOPLE · SAME PERSON?' : 'SAME ONE?'} · ${pairs.length}</div>
+      <h1>${person ? '같은 사람일 수 있음' : '같은 것일 수 있음'}</h1>
       <p class="intro">이름이나 다른 이름이 겹치는 인물입니다. 같은 사람이면 「합치기」로 하나로 모을 수 있습니다. 자동으로 합치지는 않습니다. 합친 뒤에도 「기록」에서 되돌릴 수 있습니다.</p>
       ${pairs.length ? pairs.map(({ a, b, why, ea, eb }) => {
         const key = `merge:${a}:${b}`;
@@ -662,10 +778,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
                   <button class="danger" type="button" data-act="merge" data-keep="${esc(b)}" data-drop="${esc(a)}">「${esc(eb.name)}」 남기기</button>
                   <button class="quiet" type="button" data-act="ask" data-key="">취소</button></span>`
               : `<button class="primary" type="button" data-act="ask" data-key="${key}">합치기</button>
-                 <button type="button" data-act="dismiss" data-a="${esc(a)}" data-b="${esc(b)}">다른 사람이에요</button>`}
+                 <button type="button" data-act="dismiss" data-a="${esc(a)}" data-b="${esc(b)}">${person ? '다른 사람이에요' : '다른 것이에요'}</button>`}
           </div>
         </div>`;
-      }).join('') : '<div class="empty"><h2>같은 사람일 수 있는 인물이 없습니다</h2><p>이름이나 다른 이름이 겹치는 인물이 생기면 여기에 보입니다.</p></div>'}`;
+      }).join('') : `<div class="empty"><h2>${person ? '같은 사람일 수 있는 인물이' : '같은 것일 수 있는 설정이'} 없습니다</h2><p>이름이나 다른 이름이 겹치는 설정이 생기면 여기에 보입니다.</p></div>`}`;
   }
 
   function fieldInput(x, value, hideLabel) {
@@ -737,6 +853,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
         <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
         <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정하지 않은 설정부터 빠집니다</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
         <label class="f" for="w-mode">넣는 방식<em>장면 방식은 최근 메시지 12개에 이름이 나온 설정만 넣습니다</em></label><select id="w-mode" style="max-width:360px"><option value="all" ${w.injectMode === 'scene' ? '' : 'selected'}>전부 넣기</option><option value="scene" ${w.injectMode === 'scene' ? 'selected' : ''}>장면에 나온 것만(고정·규칙·시스템은 늘)</option></select>
+        <label class="f" for="w-year">학년도 시작 달<em>시간표와 학사일정을 학년도로 나눕니다(이야기 속 날짜를 알 때)</em></label><select id="w-year" style="max-width:200px">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${(w.yearStart || 9) === i + 1 ? 'selected' : ''}>${i + 1}월</option>`).join('')}</select>
+        <label class="f" for="w-names">{{세계}} 이름 표기<em>자동: 영어로 진행하는 방에서는 「원래 표기(한국어)」</em></label><select id="w-names" style="max-width:360px">${[['auto', '자동'], ['ko', '한국어만'], ['original', '원래 표기(한국어)']].map(([v, l]) => `<option value="${v}" ${(w.nameStyle || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <div class="grid2">
           <div><label class="f" for="w-board">점수판 이름<em>비우면 점수를 찾지 않습니다 (예: 기숙사 점수)</em></label><input id="w-board" maxlength="40" value="${esc(w.scoreboard?.name || '')}"></div>
           <div><label class="f" for="w-unit">단위<em>예: 점</em></label><input id="w-unit" maxlength="10" value="${esc(w.scoreboard?.unit || '')}" style="max-width:140px"></div>
@@ -757,7 +875,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       <div class="paper">
         <h2>인물 종 채우기 <small>추가 기능</small></h2>
         <p class="sub" style="margin:0 0 12px">「종」 칸이 생기기 전에 읽은 인물은 종이 비어 있습니다. 누를 때만, 종이 빈 인물의 이름 · 다른 이름 · 외형 · 메모를 모아 100명씩 작은 호출로 묻고, 사람이 아닌 존재(반려동물 · 마법 생물 같은)에만 종을 적습니다. 직접 고친 칸은 건드리지 않고, 기록에서 하나씩 되돌릴 수 있습니다. 자동 반영 연결을 씁니다.</p>
-        <div class="row"><button type="button" data-act="species-fill">인물 종 채우기</button></div>
+        ${tidyHtml()}
+        <div class="row"><button type="button" data-act="tidy" title="한 번 스친 물건·주문 같은 규칙·시스템·일정과, 성격·메모에 섞인 사건을 후보로만 고릅니다(작은 호출). 지우지는 않습니다.">잡다한 설정 정리</button><button type="button" data-act="species-fill">인물 종 채우기</button><button type="button" data-act="applies-fill" title="적용되는 곳이 빈 규칙·시스템을 이름·분류·내용만으로 한 번에 묻습니다(작은 호출). 근거가 없으면 모름으로 둡니다.">규칙 적용되는 곳 채우기</button><button type="button" data-act="location-fill" title="아직 어느 장소 안에도 없는 장소를 위치 칸으로 먼저 잇고, 남은 것만 작은 호출로 묻습니다.">장소 위치 채우기</button></div>
       </div>
       <div class="paper">
         <h2>백업 · 복원</h2>
@@ -779,7 +898,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       const keys = (c.keys || []).map((k) => label[k] || (st.fields[c.type] || []).find((f) => f.key === k)?.label || k);
       return `<b>${esc(c.name)}</b> · 직접 고침${keys.length ? `: ${esc(keys.join(', '))}` : ''}`;
     },
-    field: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
+    field: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}${c.correction ? ' · 정정됨' : ''}`,
+    rumor: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: 확인 안 됨 「${esc(c.after)}」 · ${esc(c.by2 || '소문')}의 말`,
     alias: (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.after)}」`,
     memo: (c) => `<b>${esc(c.name)}</b> · 메모: ${esc(c.after)}`,
     merge: (c) => `<b>${esc(c.name)}</b> · 「${esc(c.dropName)}」와(과) 합침`,
@@ -788,6 +908,14 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     'relation-note': (c) => `관계 <b>${esc(c.name)}</b> · ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
     'relation-flip': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 방향 바뀜`,
     'relation-remove': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 끝남`,
+    cell: (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: ${c.before ? `${esc(c.before)} → ` : ''}${c.after ? esc(c.after) : '지움'}`,
+    event: (c) => `<b>${esc(c.name)}</b> · ${esc(c.after?.name || c.before?.name || '')}: ${c.before?.date && c.after?.date && c.before.date !== c.after.date ? `${esc(c.before.date)} → ` : ''}${esc(c.after?.date || c.after?.when || '')}${c.after?.cancelled && !c.before?.cancelled ? ' · 취소' : ''}${c.after ? '' : ' 지움'}`,
+    'cell-pending': (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: 대화에서는 「${esc(c.after)}」`,
+    base: (c) => `<b>${esc(c.name)}</b> · 본거지: ${esc(c.beforeName || '없음')} → ${esc(c.afterName || '없음')}`,
+    reveal: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: 이야기에 드러남`,
+    applies: (c) => `<b>${esc(c.name)}</b> · 적용되는 곳: ${esc(c.beforeName || '세계 전체')} → ${esc(c.afterName || '세계 전체')}`,
+    'alias-remove': (c) => `<b>${esc(c.name)}</b> · 이름이 아닌 다른 이름 「${esc(c.alias)}」 뗌`,
+    'alias-move': (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.alias)}」을(를) 새 집단 「${esc(c.to)}」(으)로 옮김`,
     delete: (c) => `<b>${esc(c.name)}</b> 지움${c.relations?.length ? ` · 관계 ${c.relations.length}개도 함께` : ''}`,
   };
   /** An evidence sentence in “ ”, without the quote marks it may already carry (the reader often keeps the line's own). */
@@ -853,7 +981,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       const e = st.entities.find((x) => x.entityId === (st.editing || st.detail));
       if (e && st.editing) return formHtml(e, st.view);
       if (e) return detailHtml(e);
-      if (st.view === 'person' && st.dupes) return dupesHtml();
+      if (st.dupes) return dupesHtml();
       return listHtml(st.view);
     }
     return overviewHtml();
@@ -1015,6 +1143,22 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await loadEntities();
       await loadRoom();
     }, '번역 단어장의 이름으로 바꿨습니다.'),
+    // v0.5.0 명단: adding / taking off changes that person's 소속 칸 (in 기록, undoable).
+    // v0.5.0 A-2: a name only one person's 소속 칸 has becomes a group when the person says so.
+    'group-make': (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/group-suggestions`, { name: b.dataset.name });
+      await loadEntities();
+    }, '집단으로 만들었습니다. 소속 칸이 그 이름을 가리키는 인물은 명단에 들어갑니다.'),
+    'member-add': (b) => run(async () => {
+      const personId = root.getElementById('rosterPick')?.value;
+      if (!personId) return;
+      await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.group}/members`, { personId, on: true });
+      await loadEntities();
+    }, '명단에 더했습니다. 그 인물의 소속 칸에도 적었습니다.'),
+    'member-off': (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.group}/members`, { personId: b.dataset.id, on: false });
+      await loadEntities();
+    }, '명단에서 뺐습니다. 그 인물의 소속 칸에서도 지웠습니다(기록에서 되돌릴 수 있습니다).'),
     pin: (b) => run(async () => {
       const e = st.entities.find((x) => x.entityId === b.dataset.id);
       await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, { pinned: !e.pinned, revision: e.revision });
@@ -1046,7 +1190,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     }, '세계관을 만들었습니다.'),
     'save-world': () => run(async () => {
       const w = world();
-      await api('PATCH', `/worlds/${w.worldId}`, { name: val('w-name'), description: val('w-desc'), injectChars: Number(val('w-budget')), injectMode: val('w-mode') === 'scene' ? 'scene' : 'all', scoreboard: { name: val('w-board'), unit: val('w-unit') }, revision: w.revision });
+      await api('PATCH', `/worlds/${w.worldId}`, { name: val('w-name'), description: val('w-desc'), injectChars: Number(val('w-budget')), injectMode: val('w-mode') === 'scene' ? 'scene' : 'all', scoreboard: { name: val('w-board'), unit: val('w-unit') }, yearStart: Number(val('w-year')) || 9, nameStyle: val('w-names') || 'auto', revision: w.revision });
       await loadWorlds();
       await loadRoom();
     }, '저장했습니다.'),
@@ -1079,6 +1223,85 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await api('POST', `/rooms/${encodeURIComponent(activeChatId())}/scores/${encodeURIComponent(b.dataset.id)}/undo`, { undo: b.dataset.undo === '1' });
       await loadScores();
       await loadRoom();
+    }),
+    // v0.5.0 B 시간표
+    'cell-save': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      await api('PUT', `/worlds/${st.worldId}/timetable/cell`, { entityId: e.entityId, revision: e.revision, day: root.getElementById('ttDay')?.value, slot: root.getElementById('ttSlot')?.value, value: root.getElementById('ttValue')?.value || '' });
+      await loadEntities();
+    }, '칸을 저장했습니다. 직접 쓴 칸은 대화가 덮어쓰지 않습니다.'),
+    // v0.5.0 C
+    'applies-set': (b) => run(async () => {
+      const v = root.getElementById('appliesPick')?.value || null;
+      await api('PUT', `/worlds/${st.worldId}/entities/${b.dataset.id}/applies-to`, { appliesTo: v });
+      await loadEntities();
+    }, '적용되는 곳을 바꿨습니다. 직접 정한 값은 대화가 덮어쓰지 않습니다.'),
+    'cell-clear': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      const [day, slot] = String(b.dataset.key).split('|');
+      await api('PUT', `/worlds/${st.worldId}/timetable/cell`, { entityId: e.entityId, revision: e.revision, day, slot, value: '' });
+      await loadEntities();
+    }, '그 칸을 지웠습니다. 기록에서 되돌릴 수 있습니다.'),
+    // v0.5.0 K
+    'event-pending': (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.id}/calendar/pending`, { eventId: b.dataset.event, discard: b.dataset.discard === '1' });
+      await loadEntities();
+    }),
+    'cal-gather': () => run(async () => {
+      const r = await api('POST', `/worlds/${st.worldId}/calendar-gather`, {});
+      await loadEntities();
+      st.bad = false;
+      st.msg = r.moved.length ? `학사일정으로 옮겼습니다(${r.moved.length}개): ${r.moved.map((m) => m.name).join(', ')}. 기록에서 되돌릴 수 있습니다.` : '옮길 날짜 일정이 없습니다.';
+    }),
+    'cell-pending': (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.id}/timetable/pending`, { key: b.dataset.key, discard: b.dataset.discard === '1' });
+      await loadEntities();
+    }),
+    'tt-gather': () => run(async () => {
+      const r = await api('POST', `/worlds/${st.worldId}/timetable-gather`, {});
+      await loadEntities();
+      st.bad = false;
+      st.msg = r.moved.length
+        ? `시간표로 옮겼습니다(${r.moved.length}개): ${r.moved.map((m) => m.name).join(', ')}${r.left.length ? ` · 못 옮긴 것 ${r.left.length}개: ${r.left.join(', ')}` : ''}. 기록에서 되돌릴 수 있습니다.`
+        : `옮길 수업·일과 일정이 없습니다${r.left.length ? `(요일·시간이나 주인을 모르는 것 ${r.left.length}개: ${r.left.join(', ')})` : ''}.`;
+    }),
+    // v0.5.0 E
+    'applies-fill': () => run(async () => {
+      const r = await api('POST', `/worlds/${st.worldId}/applies-fill`, {});
+      await loadEntities();
+      st.bad = false;
+      st.msg = `적용되는 곳이 빈 규칙·시스템 ${r.asked}개 가운데 ${r.filled.length}개를 채웠습니다(호출 ${r.calls}번). 나머지는 모름으로 둡니다. 기록에서 되돌릴 수 있습니다.`;
+    }),
+    'location-fill': () => run(async () => {
+      const r = await api('POST', `/worlds/${st.worldId}/location-fill`, {});
+      await loadEntities();
+      st.bad = false;
+      st.msg = `장소를 이었습니다 — 위치 칸으로 ${r.byCode.length}개, 모델로 ${r.byModel.length}개(호출 ${r.calls}번). 큰 장소 ${r.big}개. 기록에서 되돌릴 수 있습니다.`;
+    }),
+    'base-set': (b) => run(async () => {
+      await api('PUT', `/worlds/${st.worldId}/entities/${b.dataset.id}/base`, { base: root.getElementById('basePick')?.value || null });
+      await loadEntities();
+    }, '본거지를 바꿨습니다.'),
+    // v0.5.0 P · Q
+    tidy: () => run(async () => {
+      st.tidy = await api('POST', `/worlds/${st.worldId}/tidy`, {});
+      st.bad = false;
+      st.msg = `후보 ${st.tidy.items.length + st.tidy.fields.length}개를 골랐습니다(호출 ${st.tidy.calls}번). 아래에서 하나씩 고르세요. 지운 것은 없습니다.`;
+    }),
+    'tidy-trash': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      if (e) await api('DELETE', `/worlds/${st.worldId}/entities/${e.entityId}`, { revision: e.revision });
+      await loadEntities();
+      st.tidy = await api('GET', `/worlds/${st.worldId}/tidy`);
+    }, '휴지통으로 보냈습니다. 기록에서 되돌릴 수 있습니다.'),
+    'tidy-clear': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      if (e) await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, b.dataset.key === 'description' ? { description: '', revision: e.revision } : { fields: { ...e.fields, [b.dataset.key]: '' }, revision: e.revision });
+      await loadEntities();
+      st.tidy = await api('GET', `/worlds/${st.worldId}/tidy`);
+    }, '칸을 비웠습니다. 기록에서 되돌릴 수 있습니다.'),
+    'tidy-keep': (b) => run(async () => {
+      st.tidy = await api('POST', `/worlds/${st.worldId}/tidy/keep`, { entityId: b.dataset.id, key: b.dataset.key || null });
     }),
     'species-fill': () => run(async () => {
       const r = await api('POST', `/worlds/${st.worldId}/species-fill`);

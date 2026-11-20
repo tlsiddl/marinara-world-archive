@@ -270,7 +270,7 @@ test('scheduleRoom does nothing for rooms that are not linked or not switched on
 
 test('readReply keeps the whole items of a reply cut off at the length limit', () => {
   const full = '{"items":[{"type":"rule","name":"가","evidence":[{"n":"1.1"}]}]}';
-  assert.deepEqual(X.readReply(full, real.parseJsonObject), { items: [{ type: 'rule', name: '가', evidence: [{ n: '1.1' }] }], relations: [], scores: [], cut: false });
+  assert.deepEqual(X.readReply(full, real.parseJsonObject), { items: [{ type: 'rule', name: '가', evidence: [{ n: '1.1' }] }], relations: [], timetable: [], calendar: [], scores: [], cut: false });
   const cut = '```json\n{"items":[{"type":"person","name":"수위","fields":{"age":{"v":"사십 대","n":["1.2"]}},"evidence":[{"n":"1.2","q":"}{"}]},{"type":"rule","name":"문은 세 번","memo":"두 번은 안 \\"열\\"림"},{"type":"place","name":"등대","fields":{"use":{"v":"등';
   const got = X.readReply(cut, real.parseJsonObject);
   assert.equal(got.cut, true);
@@ -337,7 +337,7 @@ test('buildPrompt: only the glossary pairs named in the batch go in, with how to
   const part = X.batches([msg(0, 'Severus Snape가 들어왔다. 마거릿도 왔다.')], 0)[0];
   const pairs = [{ from: 'Severus Snape', to: '세베루스 스네이프' }, { from: 'Margaret', to: '마거릿' }, { from: 'Albus Dumbledore', to: '알버스 덤블도어' }];
   const [sys, user] = X.buildPrompt({ name: '호그와트', description: '' }, [], part, [], pairs);
-  assert.match(user.content, /\[번역 단어장 — [^\]]*name을 단어장의 한국어 표기 그대로[^\]]*aliases에 넣어\]\n- Severus Snape = 세베루스 스네이프\n- Margaret = 마거릿\n\n/);
+  assert.match(user.content, /\[번역 단어장 — [^\]]*name을 단어장의 한국어 표기 그대로[^\]]*aliases에 넣어[^\]]*과목[^\]]*\]\n- Severus Snape = 세베루스 스네이프\n- Margaret = 마거릿\n\n/);
   assert.doesNotMatch(user.content, /덤블도어/, 'a pair not in the batch stays out');
   const [sys0, plain] = X.buildPrompt({ name: '호그와트', description: '' }, [], part, []);
   assert.doesNotMatch(plain.content, /번역 단어장/, 'no glossary: no section');

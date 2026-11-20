@@ -9,7 +9,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { findPairs, describedPairs, speciesPairs } = require('./same.cjs');
+const { findPairs, describedPairs, speciesPairs, thingPairs } = require('./same.cjs');
+const { rosterOf, ROLE_WORDS } = require('./roster.cjs');
+const TT = require('./timetable.cjs');
+const CAL = require('./calendar.cjs');
 const N = require('./names.cjs');
 
 const SCHEMA = 1;
@@ -129,6 +132,35 @@ const isDescriptiveName = (n) => /의\s/.test(String(n || ''));
 /** 「그리핀도르 1학년 무리」, 「학생들」: a crowd, not a person. */
 const isGroupName = (n) => /(무리|일행|들)$/.test(String(n || '').trim());
 const squashName = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
+/** What a longer group name may add and still be the same group, not one inside it (「슬리데린 기숙사」 is 「슬리데린」). */
+const SAME_GROUP_SUFFIX = new Set(['기숙사', '가문', '집안', '일가', '학교', '마법학교', '학원', '기사단', '조직', '무리', '일행', 'house', 'family', 'school']);
+/** A squashed group name without such an ending (「슬리데린기숙사」 → 「슬리데린」); itself when nothing of 2+ letters is left. */
+const groupCore = (k) => {
+  for (const suf of SAME_GROUP_SUFFIX) if (k.endsWith(suf) && k.length - suf.length >= 2) return k.slice(0, -suf.length);
+  return k;
+};
+const groupKeys = (g) => [...new Set([g.name, ...(g.aliases || [])].map(squashName).flatMap((k) => [k, groupCore(k)]))].filter((k) => k.length >= 2);
+/** Whether a 소속 text names a group: its name or other name, or that without 「기숙사」 · 「무리」…, whole, without spaces. */
+const namesGroup = (text, g) => {
+  const t = squashName(text);
+  return Boolean(t && g?.name) && groupKeys(g).some((k) => t.includes(k));
+};
+/** Two group names for the same group (「슬리데린」 · 「슬리데린 기숙사」 · 「그리핀도르 1학년 무리」 ~ 「그리핀도르 1학년」). */
+const sameGroupName = (name, g) => { const k = squashName(name); return groupKeys(g).some((x) => x === k || x === groupCore(k)); };
+/** A 소속 piece that reads as a group: a year, a house, a family, a club… (not 「교수」 · 「부교장」 · 「주인」). */
+const GROUPISH = /(학년|기숙사|가문|집안|반|동아리|클럽|길드|기사단|협회|조합|교단|무리|일행|여학생|남학생|학생회|연구회|부대|분대|소대)$/;
+const KEEP_AS_IS = new Set(['rule', 'system', 'schedule', 'history', 'custom']);
+/** 적용되는 곳 (v0.5.0 C): rules and systems can hold in one place or group; empty is the whole world. */
+const APPLIES_TYPES = new Set(['rule', 'system']);
+const APPLIES_TO = new Set(['place', 'group']);
+/** 적용되는 곳 「세계 전체」 (v0.5.0 D); none at all is 「모름」. */
+const WORLD = 'world';
+/** An other name of a group that names a place: what its 본거지 can be made from (v0.5.0 E). */
+const PLACE_ALIAS = /(성|궁|궁전|저택|본관|건물|캠퍼스|교정|castle|manor|palace|hall|campus|tower)$/i;
+/** Words after a place's name that say near it, not in it (「검은 호수 아래」 · 「리키 콜드런 뒷문 너머」). */
+const NOT_INSIDE = /(아래|밑|옆|근처|부근|너머|건너편|맞은편|바깥|밖|떨어진|가는 길|위쪽|아랫|기슭)/;
+/** A building: underground under it is still in it (v0.5.0 E). */
+const BUILDING = /(성|궁|궁전|저택|본관|건물|탑|별관|관|castle|manor|palace|hall|tower)$/i;
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -194,6 +226,29 @@ function cleanText(v, max, what) {
   const x = v.normalize('NFC').replace(/\r\n?/g, '\n').trim();
   if (x.length > max) throw new ArchiveError(400, `${what}은(는) ${max}자까지입니다.`);
   return x;
+}
+
+/**
+ * Whether an other name is a name, not a piece of a sentence (v0.5.0 O): 「Professor Snape pulls the bolt back」 ·
+ * 「oil the pivot pin」 · 「Kneazles know when someone's lying」 are not; 「Hogwarts School of Witchcraft and Wizardry」 ·
+ * 「the dungeons」 · 「Madam Malkin's Robes for All Occasions」 are.
+ */
+const NAME_FUNC = new Set(['of', 'the', 'and', 'for', 'a', 'an', 'in', 'on', 'at', 'to', 'de', 'du', 'da', 'del', 'di', 'van', 'von', 'le', 'la', 'des', 'since', 'with', 'from', 'by', 'or']);
+function nameLike(alias) {
+  const a = String(alias || '').trim();
+  if (!a) return false;
+  if (/["“”「」『』]/.test(a)) return false;
+  const latin = /^[A-Za-z0-9]/.test(a) && !/[가-힣]/.test(a);
+  const words = a.split(/\s+/);
+  if (!latin) return words.length <= 5 && !/[.!?…。]$/.test(a);
+  if (/[!?…]$/.test(a) || (/\.$/.test(a) && !/(?:^|\s|\.)[A-Z]\.$/.test(a))) return false;
+  if (/,/.test(a)) return false;
+  const lower = words.filter((w) => /^[a-z]/.test(w) && !NAME_FUNC.has(w.toLowerCase()));
+  if (lower.length >= 3) return false;
+  // a verb before its object: 「pulls the bolt」 · 「register every litter」
+  if (/\b(?!of\b|in\b|on\b|at\b|to\b|for\b|with\b|from\b|by\b|into\b|under\b|over\b|and\b|or\b)[a-z]{2,}\s+(the|a|an|every|his|her|its|their|my|your|our)\s/.test(a + ' ') && !/^the\s/i.test(a)) return false;
+  if (words.length > 5 && lower.length >= 2) return false;
+  return true;
 }
 
 function cleanAliases(v, name) {
@@ -376,6 +431,8 @@ function validWorld(w) {
     (w.injectMode === undefined || INJECT_MODES.includes(w.injectMode)) &&
     (w.scoreboard === undefined || w.scoreboard === null || (isObject(w.scoreboard) && typeof w.scoreboard.name === 'string')) &&
     (w.auto === undefined || isObject(w.auto)) &&
+    (w.yearStart === undefined || (Number.isInteger(w.yearStart) && w.yearStart >= 1 && w.yearStart <= 12)) &&
+    (w.nameStyle === undefined || ['auto', 'ko', 'original'].includes(w.nameStyle)) &&
     typeof w.createdAt === 'string' &&
     typeof w.updatedAt === 'string' &&
     Number.isSafeInteger(w.revision) &&
@@ -399,6 +456,13 @@ function validEntity(e) {
     (e.sources === undefined || (isObject(e.sources) && Object.values(e.sources).every((v) => SOURCES.includes(v)))) &&
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
+    (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
+    (e.calendar === undefined || CAL.validCalendar(e.calendar)) &&
+    (e.nameCheck === undefined || isObject(e.nameCheck)) &&
+    (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
+    (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
+    (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
+    (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
@@ -565,6 +629,17 @@ class Archive {
     if (body.injectMode !== undefined) (next.injectMode = cleanMode(body.injectMode)), (changed = true);
     if (body.scoreboard !== undefined) (next.scoreboard = cleanBoard(body.scoreboard)), (changed = true);
     if (body.auto !== undefined) (next.auto = cleanAuto(body.auto, { ...defaultAuto(), ...(world.auto || {}) })), (changed = true);
+    // v0.5.0 K: the month a school year starts (학년도); 2) how names are written in {{세계}} (auto · ko · original)
+    if (body.yearStart !== undefined) {
+      if (!Number.isInteger(body.yearStart) || body.yearStart < 1 || body.yearStart > 12) throw new ArchiveError(400, '학년도 시작 달은 1~12입니다.');
+      next.yearStart = body.yearStart;
+      changed = true;
+    }
+    if (body.nameStyle !== undefined) {
+      if (!['auto', 'ko', 'original'].includes(body.nameStyle)) throw new ArchiveError(400, '이름 표기는 auto · ko · original 중 하나입니다.');
+      next.nameStyle = body.nameStyle;
+      changed = true;
+    }
     if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     next.revision++;
     next.updatedAt = now();
@@ -685,8 +760,11 @@ class Archive {
     const next = this.entityInput(rest, entity);
     // What the person changed by hand becomes theirs: automatic updates never write over it again.
     next.sources = markManual(entity.sources || {}, entity, next);
+    if (JSON.stringify(next.aliases) !== JSON.stringify(entity.aliases)) next.sources.aliases = 'manual'; // v0.5.0 O: kept by 「관계 다시 보기」
     // A name the person typed is theirs too: the glossary only suggests its own form from then on.
     if (next.name !== entity.name) {
+      delete next.nameCheck; // v0.5.0 R: the person named them
+      delete entity.nameCheck;
       next.sources.name = 'manual';
       delete next.glossaryName;
       delete entity.glossaryName;
@@ -696,6 +774,10 @@ class Archive {
       for (const k of Object.keys(entity.pending)) if ((next.fields[k] || '') !== (entity.fields?.[k] || '')) delete entity.pending[k];
     }
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
+    if (entity.hidden) {
+      for (const k of Object.keys(entity.hidden)) if ((before.fields || {})[k] !== (entity.fields || {})[k]) delete entity.hidden[k];
+      if (!Object.keys(entity.hidden).length) delete entity.hidden;
+    }
     this.writeJson(this.entityFile(worldId), doc);
     const keys = [...new Set([...Object.keys(before.fields || {}), ...Object.keys(entity.fields || {})])].filter((k) => (before.fields || {})[k] !== (entity.fields || {})[k]);
     for (const k of ['name', 'type', 'description', 'pinned']) if (JSON.stringify(before[k]) !== JSON.stringify(entity[k])) keys.push(k);
@@ -772,7 +854,9 @@ class Archive {
     const findEntity = (item) => {
       const keys = new Set([item.match, item.name, ...(item.aliases || [])].filter(Boolean).map(norm));
       const hit = (e) => [e.name, ...e.aliases].some((n) => keys.has(norm(n)));
-      return doc.entities.find((e) => e.type === item.type && hit(e)) || doc.entities.find(hit) || null;
+      // v0.5.0 C: the same name for a rule · system that holds in another place or group is another one
+      const sameWhere = (e) => !APPLIES_TYPES.has(item.type) || !item.appliesTo || !e.appliesTo || e.appliesTo === item.appliesTo;
+      return doc.entities.find((e) => e.type === item.type && hit(e) && sameWhere(e)) || (APPLIES_TYPES.has(item.type) && item.appliesTo ? null : doc.entities.find(hit)) || null;
     };
     for (const raw of items) {
       if (!isObject(raw) || !TYPES.includes(raw.type)) continue;
@@ -795,7 +879,7 @@ class Archive {
       } catch {}
       let aliases = [];
       try {
-        aliases = cleanAliases(Array.isArray(item.aliases) ? item.aliases.filter((a) => typeof a === 'string' && a.trim()).slice(0, ALIAS_MAX) : [], name);
+        aliases = cleanAliases(Array.isArray(item.aliases) ? item.aliases.filter((a) => typeof a === 'string' && a.trim() && nameLike(a)).slice(0, ALIAS_MAX) : [], name);
       } catch {}
       const evidence = typeof item.evidence === 'string' ? item.evidence.slice(0, 300) : '';
       const found = findEntity({ ...item, aliases });
@@ -817,6 +901,18 @@ class Archive {
           createdAt: t,
           updatedAt: t,
         };
+        // v0.5.0 R: a described name the sentence does not back
+        if (isObject(item.nameCheck) && typeof item.nameCheck.said === 'string') entity.nameCheck = { said: item.nameCheck.said.slice(0, 60) };
+        // v0.5.0 L: rumours of a new setting
+        const rum = isObject(item.rumors) ? Object.entries(item.rumors).filter(([k, r]) => isObject(r) && typeof r.value === 'string' && r.value.trim() && FIELDS[item.type].some((f) => f.key === k)) : [];
+        if (rum.length) entity.rumors = Object.fromEntries(rum.map(([k, r]) => [k, { value: r.value.slice(0, 300), by: String(r.by || '소문').slice(0, 40), evidence: String(r.evidence || '').slice(0, 300), at: t }]));
+        // v0.5.0 S: fields only a profile block says
+        const hid = isObject(item.hidden) ? Object.keys(item.hidden).filter((k) => item.hidden[k] === true && entity.fields[k]) : [];
+        if (hid.length) entity.hidden = Object.fromEntries(hid.map((k) => [k, true]));
+        if (APPLIES_TYPES.has(item.type) && item.appliesTo && (item.appliesTo === WORLD || doc.entities.some((x) => x.entityId === item.appliesTo && APPLIES_TO.has(x.type)))) {
+          entity.appliesTo = item.appliesTo;
+          entity.sources.appliesTo = 'auto';
+        }
         doc.entities.push(entity);
         log({ entityId: entity.entityId, name, type: item.type, action: 'create', evidence });
         continue;
@@ -828,6 +924,16 @@ class Archive {
         if (e.type !== item.type && !FIELDS[e.type].some((f) => f.key === key)) continue;
         const before = e.fields[key] || '';
         const said = isObject(item.fieldEvidence) && typeof item.fieldEvidence[key] === 'string' ? item.fieldEvidence[key].slice(0, 300) : evidence;
+        // v0.5.0 G · S: what only a profile block says fills an empty field only, marked 「아직 드러나지 않음」; the story
+        // saying it later takes the mark off (recorded)
+        const fromBlock = isObject(item.hidden) && item.hidden[key] === true;
+        if (fromBlock && before) continue;
+        if (!fromBlock && e.hidden?.[key]) {
+          delete e.hidden[key];
+          if (!Object.keys(e.hidden).length) delete e.hidden;
+          touched = true;
+          log({ entityId: e.entityId, name: e.name, type: e.type, action: 'reveal', key, before: '', after: before === value ? value : value, evidence: said });
+        }
         if (before === value) {
           if (e.pending?.[key]) (delete e.pending[key], (touched = true)); // the story came back to what the person wrote
           continue;
@@ -840,12 +946,26 @@ class Archive {
           }
           continue;
         }
-        // 실시간 반영: the newer value replaces the old one; the old one is kept below as 「이전: ○○」.
-        if (before) e.past = { ...(e.past || {}), [key]: [{ value: before, until: t, evidence: said }, ...((e.past || {})[key] || [])].slice(0, PAST_MAX) };
+        // 실시간 반영: the newer value replaces the old one; the old one is kept below as 「이전: ○○」 — not for a
+        // correction (v0.5.0 M: it was wrong, so it is not 「이전」; 기록 says 정정됨).
+        const corrected = isObject(item.corrections) && item.corrections[key] === true;
+        if (before && !corrected) e.past = { ...(e.past || {}), [key]: [{ value: before, until: t, evidence: said }, ...((e.past || {})[key] || [])].slice(0, PAST_MAX) };
         e.fields[key] = value;
         e.sources[key] = 'auto';
+        if (fromBlock) e.hidden = { ...(e.hidden || {}), [key]: true };
         touched = true;
-        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said });
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said, ...(fromBlock ? { hidden: true } : {}), ...(corrected && before ? { correction: true } : {}) });
+        // a rumour the story now says as a fact goes
+        if (e.rumors?.[key] && e.rumors[key].value === value) { delete e.rumors[key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
+      }
+      // v0.5.0 L: what someone says — 「확인 안 됨 · ○○의 말」, beside the fact, never over it
+      for (const [key, r] of Object.entries(isObject(item.rumors) ? item.rumors : {})) {
+        if (!isObject(r) || typeof r.value !== 'string' || !r.value.trim() || !FIELDS[e.type].some((f) => f.key === key)) continue;
+        if ((e.fields[key] || '') === r.value || e.rumors?.[key]?.value === r.value) continue;
+        const prev = e.rumors?.[key] || null;
+        e.rumors = { ...(e.rumors || {}), [key]: { value: r.value.slice(0, 300), by: String(r.by || '소문').slice(0, 40), evidence: String(r.evidence || '').slice(0, 300), at: t } };
+        touched = true;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'rumor', key, before: prev?.value || '', after: r.value, by2: r.by, prevRumor: prev, evidence: r.evidence || '' });
       }
       const known = new Set([e.name, ...e.aliases].map(norm));
       for (const a of [name, ...aliases]) {
@@ -951,6 +1071,51 @@ class Archive {
         }
         if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
+      } else if (c.action === 'rumor') {
+        if (e.rumors?.[c.key]?.value !== c.after) throw new ArchiveError(409, later);
+        if (c.prevRumor) e.rumors[c.key] = structuredClone(c.prevRumor);
+        else { delete e.rumors[c.key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
+      } else if (c.action === 'reveal') {
+        e.hidden = { ...(e.hidden || {}), [c.key]: true };
+      } else if (c.action === 'base') {
+        if ((e.base || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.base = c.before; else delete e.base;
+        if (c.by === 'person') delete e.sources?.base;
+      } else if (c.action === 'applies') {
+        if ((e.appliesTo || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.appliesTo = c.before; else delete e.appliesTo;
+        if (c.by === 'person') delete e.sources?.appliesTo;
+      } else if (c.action === 'event') {
+        const events = e.calendar?.events;
+        if (!events) throw new ArchiveError(409, later);
+        const cur = c.eventId ? events[c.eventId] || null : null;
+        if (JSON.stringify(cur) !== JSON.stringify(c.after)) throw new ArchiveError(409, later);
+        if (c.before) events[c.before.id] = structuredClone(c.before);
+        else if (c.eventId) delete events[c.eventId];
+      } else if (c.action === 'event-pending') {
+        const ev = e.calendar?.events?.[c.eventId];
+        if (ev?.pending) delete ev.pending;
+      } else if (c.action === 'cell') {
+        // a 시간표 cell back as it was, only while it still holds what this change wrote
+        const cells = e.timetable?.cells;
+        if (!cells) throw new ArchiveError(409, later);
+        if ((cells[c.key]?.value || '') !== (c.after || '')) throw new ArchiveError(409, later);
+        if (c.cellBefore) cells[c.key] = structuredClone(c.cellBefore);
+        else delete cells[c.key];
+        TT.refresh(e);
+      } else if (c.action === 'cell-pending') {
+        const cell = e.timetable?.cells?.[c.key];
+        if (cell?.pending?.value === c.after) delete cell.pending;
+      } else if (c.action === 'alias-remove') {
+        if (!e.aliases.includes(c.alias) && e.aliases.length < ALIAS_MAX) e.aliases.push(c.alias);
+      } else if (c.action === 'alias-move') {
+        // the other name goes back to the setting it was taken from (and leaves the one it went to, when that one is not new)
+        const went = c.toId && doc.entities.find((x) => x.entityId === c.toId);
+        if (went) went.aliases = went.aliases.filter((x) => x !== c.alias);
+        if (!e.aliases.includes(c.alias)) {
+          if (e.aliases.length >= ALIAS_MAX) throw new ArchiveError(409, later);
+          e.aliases.push(c.alias);
+        }
       } else if (c.action === 'alias') {
         const i = e.aliases.indexOf(c.after);
         if (i < 0) throw new ArchiveError(409, later);
@@ -973,6 +1138,478 @@ class Archive {
     c.undoneAt = now();
     this.writeJson(this.historyFile(worldId), history);
     return { undone: true, changeId };
+  }
+
+  // ---------------------------------------------------------------- 장소 위치 · 본거지 (v0.5.0 E)
+
+  /**
+   * A group's 본거지 (base): the place it is at (은사슴 기숙사 → 별시계탑 아래 기숙사 건물). Like 적용되는 곳: the
+   * reader's and the buttons' value never goes over the person's; recorded ('base', undoable). placeId null: none.
+   */
+  setBase(worldId, groupId, placeId, meta = {}, { force = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const g = doc.entities.find((x) => x.entityId === groupId && x.type === 'group');
+    if (!g) throw new ArchiveError(404, '집단을 찾지 못했습니다.');
+    if (placeId != null && !doc.entities.some((x) => x.entityId === placeId && x.type === 'place')) throw new ArchiveError(400, '본거지는 장소여야 합니다.');
+    if (!force && g.sources?.base === 'manual') return null;
+    const before = g.base || null;
+    const after = placeId || null;
+    if (before === after && !(force && g.sources?.base !== 'manual')) return null;
+    if (after) g.base = after; else delete g.base;
+    g.sources = { ...(g.sources || {}) };
+    if (force) g.sources.base = 'manual';
+    else if (after) g.sources.base = 'auto';
+    else delete g.sources.base;
+    g.revision++;
+    g.updatedAt = now();
+    this.writeJson(this.entityFile(worldId), doc);
+    const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
+    const c = { id: randomUUID(), at: g.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: groupId, entityIds: [groupId, after || before].filter(Boolean), name: g.name, type: 'group', action: 'base', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
+    this.pushHistory(worldId, [c]);
+    return c;
+  }
+
+  /**
+   * The place a group stands for, to put places in: its 본거지, or — when it has none — a place made from one of its
+   * other names that names a place (「호그와트 성」 · 「Hogwarts Castle」 of 「호그와트 마법학교」): that place is made
+   * (auto, recorded), those names move to it ('alias-move') and it becomes the 본거지. null when there is none.
+   */
+  basePlace(worldId, groupId, meta = {}) {
+    const doc = this.readEntities(worldId);
+    const g = doc.entities.find((x) => x.entityId === groupId && x.type === 'group');
+    if (!g) return null;
+    if (g.base && doc.entities.some((x) => x.entityId === g.base && x.type === 'place')) return g.base;
+    const placeish = (g.aliases || []).filter((a) => PLACE_ALIAS.test(String(a).trim()));
+    const ko = placeish.find((a) => /\p{Script=Hangul}/u.test(a)) || placeish[0];
+    if (!ko || doc.entities.length >= ENTITY_MAX) return null;
+    const t = now();
+    const by = meta.by || 'location-fill';
+    const place = {
+      entityId: randomUUID(), type: 'place', name: ko, aliases: placeish.filter((a) => a !== ko), description: '', fields: {}, extra: [], pinned: false,
+      sources: {}, status: 'confirmed', provenance: { source: 'auto', by, roomId: null, evidence: '「' + g.name + '」의 다른 이름' }, revision: 1, createdAt: t, updatedAt: t,
+    };
+    doc.entities.push(place);
+    g.aliases = g.aliases.filter((a) => !placeish.includes(a));
+    g.revision++;
+    g.updatedAt = t;
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, [
+      { id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: place.entityId, name: place.name, type: 'place', action: 'create', evidence: place.provenance.evidence },
+      ...placeish.map((a) => ({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: g.entityId, entityIds: [g.entityId, place.entityId], name: g.name, type: 'group', action: 'alias-move', alias: a, to: place.name })),
+    ]);
+    this.setBase(worldId, g.entityId, place.entityId, { by, evidence: place.provenance.evidence });
+    return place.entityId;
+  }
+
+  /**
+   * 장소 위치, by code (no model): a place with no place around it yet whose 「위치·소속」 칸 begins with another
+   * place's name (or a group's — then the group's 본거지) is in that place (「호그와트 지하, 옛 회랑 너머」 → 호그와트
+   * 지하). Not when the words after the name say beside, under, beyond … (「검은 호수 아래」 is not in the lake).
+   * Returns { relations: changes, left: [place ids still alone] }.
+   */
+  linkPlaces(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const by = meta.by || 'location-fill';
+    const insideOf = (doc) => new Set(doc.relations.filter((r) => r.type === '위치').map((r) => r.from));
+    let doc = this.readEntities(worldId);
+    const found = [];
+    for (const p of doc.entities.filter((e) => e.type === 'place' && !insideOf(doc).has(e.entityId))) {
+      const seg = String(p.fields?.location || '').split(/[,，;]/)[0].trim();
+      if (!seg) continue;
+      const k = squashName(seg);
+      let best = null;
+      for (const o of doc.entities) {
+        if (o.entityId === p.entityId || (o.type !== 'place' && o.type !== 'group')) continue;
+        for (const n of [o.name, ...(o.aliases || [])]) {
+          const nk = squashName(n);
+          if (nk.length < 2 || !k.startsWith(nk)) continue;
+          if (!best || nk.length > best.len) best = { o, len: nk.length, name: n };
+        }
+      }
+      if (!best) continue;
+      // what comes after the name: 「아래 · 옆 · 너머 …」 is near it, not in it
+      const after = seg.slice(seg.indexOf(best.name) >= 0 ? seg.indexOf(best.name) + best.name.length : 0);
+      // under a building is still in it when the place is underground (「지하 선착장 · 성 아래」); under a bridge or a
+      // cliff is not (사령탑 E 덧붙임)
+      const underBuilding = /지하/.test(p.name + ' ' + p.fields.location) && /^\s*\S*\s*(바로\s*)?(아래|밑)/.test(after.replace(/^\s*기초/, ''))
+        && (best.o.type === 'group' || BUILDING.test(best.name));
+      if (NOT_INSIDE.test(after) && !underBuilding) continue;
+      // 「호그와트 급행열차 3호차」 is not in 호그와트: the name with the next word names something else the world has
+      const next = after.trim().split(/\s+/)[0];
+      if (next && doc.entities.some((x) => x !== p && x !== best.o && squashName(x.name).startsWith(squashName(best.name + next)))) continue;
+      found.push({ p, o: best.o });
+    }
+    const rels = [];
+    for (const { p, o } of found) {
+      const to = o.type === 'place' ? o.entityId : this.basePlace(worldId, o.entityId, { by });
+      if (!to || to === p.entityId) continue;
+      rels.push({ from: p.entityId, to, type: '위치', note: '', evidence: '위치·소속: ' + p.fields.location });
+    }
+    const changes = this.applyRelations(worldId, rels, { ...meta, by });
+    doc = this.readEntities(worldId);
+    const inside = insideOf(doc);
+    return { relations: changes, left: doc.entities.filter((e) => e.type === 'place' && !inside.has(e.entityId)).map((e) => e.entityId) };
+  }
+
+  // ---------------------------------------------------------------- 적용되는 곳 (v0.5.0 C)
+
+  /**
+   * Where a rule or system holds: one place or group (its entityId), or the whole world (none). The reader's and the
+   * buttons' value never goes over the person's (sources.appliesTo 'manual'). Recorded ('applies', undoable).
+   * meta.by: who; force: the person (manual). targetId null: the whole world.
+   */
+  setAppliesTo(worldId, entityId, targetId, meta = {}, { force = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === entityId);
+    if (!e || !APPLIES_TYPES.has(e.type)) throw new ArchiveError(404, '규칙이나 시스템을 찾지 못했습니다.');
+    if (targetId != null && targetId !== WORLD && !doc.entities.some((x) => x.entityId === targetId && APPLIES_TO.has(x.type))) throw new ArchiveError(400, '적용되는 곳은 장소나 집단(또는 세계 전체)이어야 합니다.');
+    if (!force && e.sources?.appliesTo === 'manual') return null;
+    const before = e.appliesTo || null;
+    const after = targetId || null;
+    if (before === after && !(force && e.sources?.appliesTo !== 'manual')) return null;
+    if (after) e.appliesTo = after; else delete e.appliesTo;
+    e.sources = { ...(e.sources || {}) };
+    if (force) e.sources.appliesTo = 'manual';
+    else if (after) e.sources.appliesTo = 'auto';
+    else delete e.sources.appliesTo;
+    e.revision++;
+    e.updatedAt = now();
+    this.writeJson(this.entityFile(worldId), doc);
+    const nameOf = (id) => (id === WORLD ? '세계 전체' : doc.entities.find((x) => x.entityId === id)?.name || '');
+    const c = { id: randomUUID(), at: e.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId, name: e.name, type: e.type, action: 'applies', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
+    this.pushHistory(worldId, [c]);
+    return c;
+  }
+
+  // ---------------------------------------------------------------- 학사일정 (v0.5.0 K)
+
+  /** The owner's 학사일정 (ownerId null: the whole world's), or null. */
+  calendarOf(doc, ownerId) {
+    return doc.entities.find((e) => e.type === 'schedule' && e.calendar && (e.calendar.ownerId ?? null) === (ownerId ?? null)) || null;
+  }
+
+  /**
+   * Dated events the reader (or 「학사일정으로 모으기」) found: [{ ownerId|null, date, end, when, name, place, placeId,
+   * who, cancelled, evidence }]. The same event (same name, same school year or no date yet) is changed, not added: a
+   * new date keeps the old one as 「이전」; cancelled marks it (never deleted); an event the person wrote only gets
+   * 「대화에서는 ○○예요 [적용] [무시]」. meta.yearStart: the school year's first month. Recorded ('event', undoable).
+   */
+  applyCalendar(worldId, events, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
+    const start = Number.isInteger(meta.yearStart) ? meta.yearStart : 9;
+    const t = now();
+    const changes = [];
+    const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
+    for (const raw of Array.isArray(events) ? events : []) {
+      const name = String(raw?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, CAL.NAME_MAX);
+      if (!name) continue;
+      const ownerId = raw.ownerId ?? null;
+      const owner = ownerId ? doc.entities.find((e) => e.entityId === ownerId && (e.type === 'group' || e.type === 'place')) : null;
+      if (ownerId && !owner) continue;
+      const date = raw.date ? CAL.normDate(raw.date) : null;
+      const end = raw.end ? CAL.normDate(raw.end) : null;
+      const when = !date && typeof raw.when === 'string' ? raw.when.trim().slice(0, 60) : '';
+      if (!date && !when) continue;
+      const evidence = typeof raw.evidence === 'string' ? raw.evidence.slice(0, 300) : '';
+      let sheet = this.calendarOf(doc, ownerId);
+      if (!sheet) {
+        if (doc.entities.length >= ENTITY_MAX) continue;
+        sheet = {
+          entityId: randomUUID(), type: 'schedule', name: owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
+          fields: owner ? { who: owner.name } : {}, extra: [], pinned: false, sources: {}, status: 'confirmed',
+          provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, calendar: { ownerId, events: {} },
+          revision: 1, createdAt: t, updatedAt: t,
+        };
+        doc.entities.push(sheet);
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create', evidence });
+      }
+      const k = squashName(name);
+      const same = Object.values(sheet.calendar.events).find((x) => squashName(x.name) === k
+        && (!x.date || !date || CAL.schoolYear(x.date, start) === CAL.schoolYear(date, start) || x.date.slice(-5) === date.slice(-5)));
+      const facts = {
+        ...(date ? { date } : {}), ...(end && end !== date ? { end } : {}), ...(when ? { when } : {}),
+        ...(raw.place ? { place: String(raw.place).trim().slice(0, 60) } : {}), ...(raw.placeId ? { placeId: raw.placeId } : {}),
+        ...(raw.who ? { who: String(raw.who).trim().slice(0, 80) } : {}),
+      };
+      if (!same) {
+        const id = randomUUID();
+        sheet.calendar.events[id] = { id, name, ...facts, ...(raw.cancelled ? { cancelled: true } : {}), evidence, source: 'auto', at: t };
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event', eventId: id, before: null, after: structuredClone(sheet.calendar.events[id]), evidence });
+        sheet.revision++;
+        sheet.updatedAt = t;
+        continue;
+      }
+      const before = structuredClone(same);
+      const next = { ...same };
+      if (date && date !== same.date) {
+        if (same.date) next.past = [{ date: same.date, until: t, evidence: same.evidence || '' }, ...(same.past || [])].slice(0, 3);
+        next.date = date;
+        delete next.when;
+      }
+      if (end && end !== next.end) next.end = end;
+      if (raw.cancelled && !same.cancelled) next.cancelled = true;
+      for (const f of ['place', 'placeId', 'who']) if (facts[f] && !same[f]) next[f] = facts[f];
+      if (JSON.stringify(next) === JSON.stringify(same)) continue;
+      if (same.source === 'manual') {
+        const offer = { ...(date && date !== same.date ? { date } : {}), ...(raw.cancelled && !same.cancelled ? { cancelled: true } : {}), evidence, at: t };
+        if (Object.keys(offer).length <= 2 || JSON.stringify(same.pending || {}) === JSON.stringify(offer)) continue;
+        same.pending = offer;
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event-pending', eventId: same.id, after: offer, evidence });
+      } else {
+        Object.assign(same, next, { evidence: evidence || same.evidence, at: t });
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event', eventId: same.id, before, after: structuredClone(same), evidence });
+      }
+      sheet.revision++;
+      sheet.updatedAt = t;
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * An event the person writes (theirs from then on): { entityId | ownerId (null: the world's), eventId?, name, date,
+   * end, place, who, cancelled }; name '' takes the event away. Recorded ('event', by person), undoable.
+   */
+  setEvent(worldId, body = {}) {
+    this.getWorld(worldId);
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
+    const doc = this.readEntities(worldId);
+    let sheet = body.entityId ? doc.entities.find((e) => e.entityId === body.entityId && e.calendar) : this.calendarOf(doc, body.ownerId ?? null);
+    const t = now();
+    const changes = [];
+    if (!sheet) {
+      const owner = body.ownerId ? doc.entities.find((e) => e.entityId === body.ownerId && (e.type === 'group' || e.type === 'place')) : null;
+      if (body.ownerId && !owner) throw new ArchiveError(404, '학사일정의 주인(집단이나 장소)을 찾지 못했습니다.');
+      sheet = {
+        entityId: randomUUID(), type: 'schedule', name: owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
+        fields: owner ? { who: owner.name } : {}, extra: [], pinned: false, sources: { name: 'manual' }, status: 'confirmed',
+        provenance: { source: 'manual' }, calendar: { ownerId: owner?.entityId ?? null, events: {} }, revision: 1, createdAt: t, updatedAt: t,
+      };
+      doc.entities.push(sheet);
+      changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create' });
+    }
+    const ev = body.eventId ? sheet.calendar.events[body.eventId] : null;
+    if (body.eventId && !ev) throw new ArchiveError(404, '그 일정을 찾지 못했습니다.');
+    const before = ev ? structuredClone(ev) : null;
+    const name = String(body.name ?? ev?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, CAL.NAME_MAX);
+    if (!name) {
+      if (!ev) throw new ArchiveError(400, '행사 이름을 적어 주세요.');
+      delete sheet.calendar.events[ev.id];
+    } else {
+      const date = body.date !== undefined ? (body.date ? CAL.normDate(body.date) : null) : ev?.date || null;
+      if (body.date && !date) throw new ArchiveError(400, '날짜는 1991-10-31이나 10월 31일처럼 적어 주세요.');
+      const id = ev?.id || randomUUID();
+      const next = { ...(ev || {}), id, name, source: 'manual', at: t };
+      if (date) next.date = date; else delete next.date;
+      for (const f of ['place', 'who']) if (body[f] !== undefined) { if (String(body[f]).trim()) next[f] = String(body[f]).trim().slice(0, 80); else delete next[f]; }
+      if (body.end !== undefined) { const e2 = body.end ? CAL.normDate(body.end) : null; if (e2) next.end = e2; else delete next.end; }
+      if (body.cancelled !== undefined) { if (body.cancelled) next.cancelled = true; else delete next.cancelled; }
+      if (ev?.date && date && ev.date !== date) next.past = [{ date: ev.date, until: t, evidence: '' }, ...(ev.past || [])].slice(0, 3);
+      delete next.pending;
+      sheet.calendar.events[id] = next;
+    }
+    sheet.revision++;
+    sheet.updatedAt = t;
+    const after = name ? structuredClone(Object.values(sheet.calendar.events).find((x) => x.name === name && x.source === 'manual' && x.at === t) || null) : null;
+    changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event', eventId: after?.id || ev?.id, before, after });
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return sheet;
+  }
+
+  /** 「대화에서는 ○○예요」 on an event the person wrote: [적용] or [무시]. */
+  applyEventPending(worldId, entityId, eventId, { discard = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const sheet = doc.entities.find((e) => e.entityId === entityId && e.calendar);
+    const ev = sheet?.calendar.events[eventId];
+    if (!ev?.pending) throw new ArchiveError(404, '대화에서 온 값이 없습니다.');
+    const before = structuredClone(ev);
+    const p = ev.pending;
+    delete ev.pending;
+    const t = now();
+    if (!discard) {
+      if (p.date && p.date !== ev.date) { if (ev.date) ev.past = [{ date: ev.date, until: t, evidence: ev.evidence || '' }, ...(ev.past || [])].slice(0, 3); ev.date = p.date; }
+      if (p.cancelled) ev.cancelled = true;
+      ev.at = t;
+    }
+    sheet.revision++;
+    sheet.updatedAt = t;
+    this.writeJson(this.entityFile(worldId), doc);
+    if (!discard) this.pushHistory(worldId, [{ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId, name: sheet.name, type: 'schedule', action: 'event', eventId, before, after: structuredClone(ev) }]);
+    return sheet;
+  }
+
+  /** v0.5.0 (밤샘 2): whether the room is in English (its latest messages mostly in Latin letters). */
+  setRoomLatin(roomId, latin) {
+    needRoom(roomId);
+    const rooms = this.readRooms();
+    if (!rooms.rooms[roomId] || rooms.rooms[roomId].latin === latin) return;
+    rooms.rooms[roomId].latin = latin;
+    this.writeJson(this.roomsFile, rooms);
+  }
+
+  /** The story's today the room last showed (§RP header): { date, weekday, written, at } or null. */
+  setRoomStory(roomId, story) {
+    needRoom(roomId);
+    const rooms = this.readRooms();
+    if (!rooms.rooms[roomId]) return;
+    const prev = rooms.rooms[roomId].story;
+    if (!story) { if (!prev) return; delete rooms.rooms[roomId].story; }
+    else if (prev?.date === story.date && prev?.weekday === story.weekday) return;
+    else rooms.rooms[roomId].story = { date: story.date, weekday: story.weekday, written: !!story.written, at: now() };
+    this.writeJson(this.roomsFile, rooms);
+  }
+
+  // ---------------------------------------------------------------- 시간표 (v0.5.0 B)
+
+  /** The owner's 시간표 setting (a schedule with a timetable), or null. */
+  timetableOf(doc, ownerId, year = null) {
+    // v0.5.0 K: with a 학년도 — that year's sheet, or one with no year yet (it takes the year); a new year gets a new
+    // sheet and last year's stays. Without one — the newest.
+    const mine = doc.entities.filter((e) => e.type === 'schedule' && e.timetable?.ownerId === ownerId);
+    if (year) return mine.find((e) => e.timetable.year === year) || mine.find((e) => !e.timetable.year) || null;
+    return mine.sort((a, b) => String(b.timetable.year || '').localeCompare(String(a.timetable.year || '')))[0] || null;
+  }
+
+  /**
+   * Cells the reader (or 「시간표로 모으기」) found: [{ ownerId, day, slot, value, evidence }]. The owner's sheet is made
+   * when there is none (「○○ 시간표」). A new value for a cell: the old one is kept as 「이전」 (PAST_MAX); a cell the person
+   * wrote is not written over — 「대화에서는 ○○예요 [적용] [무시]」 (pending) instead. Each change is in the history
+   * ('cell', undoable). Returns the changes.
+   */
+  applyTimetable(worldId, cells, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
+    const t = now();
+    const changes = [];
+    const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
+    for (const raw of Array.isArray(cells) ? cells : []) {
+      const owner = doc.entities.find((e) => e.entityId === raw?.ownerId && (e.type === 'group' || e.type === 'person'));
+      const day = TT.normDay(raw?.day);
+      const slot = TT.normSlot(raw?.slot);
+      const value = String(raw?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, TT.CELL_MAX);
+      if (!owner || !day || !slot || !value) continue;
+      const evidence = typeof raw.evidence === 'string' ? raw.evidence.slice(0, 300) : '';
+      const year = typeof meta.year === 'string' && meta.year ? meta.year : null;
+      let sheet = this.timetableOf(doc, owner.entityId, year);
+      if (sheet && year && !sheet.timetable.year) sheet.timetable.year = year;
+      if (!sheet) {
+        if (doc.entities.length >= ENTITY_MAX) continue;
+        const older = doc.entities.some((e) => e.type === 'schedule' && e.timetable?.ownerId === owner.entityId);
+        sheet = {
+          entityId: randomUUID(), type: 'schedule', name: owner.name + ' 시간표' + (year && older ? ` (${year})` : ''), aliases: [], description: '',
+          fields: { when: '매주', who: owner.name }, extra: [], pinned: false, sources: { when: 'auto', who: 'auto' }, status: 'confirmed',
+          provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, timetable: { ownerId: owner.entityId, cells: {}, ...(year ? { year } : {}) },
+          revision: 1, createdAt: t, updatedAt: t,
+        };
+        doc.entities.push(sheet);
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create', evidence });
+      }
+      const key = TT.cellKey(day, slot);
+      const cell = sheet.timetable.cells[key];
+      if (cell?.value === value) continue;
+      if (cell?.source === 'manual') {
+        if (cell.pending?.value === value) continue;
+        cell.pending = { value, evidence, at: t };
+        sheet.revision++;
+        sheet.updatedAt = t;
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell-pending', key, after: value, evidence });
+        continue;
+      }
+      const before = cell ? structuredClone(cell) : null;
+      const past = cell?.value ? [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX) : cell?.past;
+      sheet.timetable.cells[key] = { day, slot, value, evidence, source: 'auto', at: t, ...TT.cellExtras(raw), ...(past?.length ? { past } : {}) };
+      sheet.revision++;
+      sheet.updatedAt = t;
+      log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence });
+    }
+    if (!changes.length) return [];
+    for (const e of doc.entities) if (e.timetable) TT.refresh(e);
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * A cell the person writes (value '' takes it away). Theirs from then on: the reader only offers its value. To make
+   * a sheet for someone: ownerId without entityId. Recorded ('cell', by person) and undoable.
+   */
+  setCell(worldId, body = {}) {
+    this.getWorld(worldId);
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
+    const doc = this.readEntities(worldId);
+    const day = TT.normDay(body.day);
+    const slot = TT.normSlot(body.slot);
+    if (!day) throw new ArchiveError(400, '요일은 월 · 화 · 수 · 목 · 금 · 토 · 일 · 평일 · 매일 중 하나입니다.');
+    if (!slot) throw new ArchiveError(400, `시간은 1~${TT.SLOT_MAX}자로 적어 주세요(예: 1교시, 오전, 09:00–10:30).`);
+    const value = cleanText(body.value ?? '', TT.CELL_MAX, '칸 내용').replace(/\s+/g, ' ').trim();
+    let sheet = body.entityId ? doc.entities.find((e) => e.entityId === body.entityId && e.timetable) : this.timetableOf(doc, body.ownerId);
+    const t = now();
+    const changes = [];
+    if (!sheet) {
+      const owner = doc.entities.find((e) => e.entityId === body.ownerId && (e.type === 'group' || e.type === 'person'));
+      if (!owner) throw new ArchiveError(404, body.entityId ? '시간표를 찾지 못했습니다.' : '시간표의 주인(집단이나 인물)을 찾지 못했습니다.');
+      if (!value) throw new ArchiveError(400, '칸 내용을 적어 주세요.');
+      if (doc.entities.length >= ENTITY_MAX) throw new ArchiveError(400, `설정은 ${ENTITY_MAX}개까지입니다.`);
+      sheet = {
+        entityId: randomUUID(), type: 'schedule', name: owner.name + ' 시간표', aliases: [], description: '',
+        fields: { when: '매주', who: owner.name }, extra: [], pinned: false, sources: { name: 'manual' }, status: 'confirmed',
+        provenance: { source: 'manual' }, timetable: { ownerId: owner.entityId, cells: {} }, revision: 1, createdAt: t, updatedAt: t,
+      };
+      doc.entities.push(sheet);
+      changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create' });
+    }
+    if (body.revision !== undefined && sheet.revision !== body.revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
+    const key = TT.cellKey(day, slot);
+    const cell = sheet.timetable.cells[key];
+    if ((cell?.value || '') === value && cell?.source === 'manual') return { entity: sheet, changed: false };
+    if (!cell && !value) throw new ArchiveError(404, '그 칸은 비어 있습니다.');
+    const before = cell ? structuredClone(cell) : null;
+    if (value) {
+      const past = cell?.value && cell.value !== value ? [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX) : cell?.past;
+      sheet.timetable.cells[key] = { day, slot, value, evidence: '', source: 'manual', at: t, ...TT.cellExtras(body), ...(past?.length ? { past } : {}) };
+    } else delete sheet.timetable.cells[key];
+    TT.refresh(sheet);
+    sheet.revision++;
+    sheet.updatedAt = t;
+    changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before });
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return { entity: sheet, changed: true };
+  }
+
+  /** 「대화에서는 ○○예요」 on a cell the person wrote: [적용] (the story's value, the person's one kept as 「이전」) or [무시]. */
+  applyCellPending(worldId, entityId, key, { discard = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const sheet = doc.entities.find((e) => e.entityId === entityId && e.timetable);
+    const cell = sheet?.timetable.cells[key];
+    if (!cell?.pending) throw new ArchiveError(404, '대화에서 온 값이 없습니다.');
+    const t = now();
+    const before = structuredClone(cell);
+    const p = cell.pending;
+    delete cell.pending;
+    if (!discard) {
+      cell.past = [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX);
+      cell.value = p.value;
+      cell.evidence = p.evidence || '';
+      cell.at = t;
+      // still the person's: they chose this value
+    }
+    TT.refresh(sheet);
+    sheet.revision++;
+    sheet.updatedAt = t;
+    this.writeJson(this.entityFile(worldId), doc);
+    if (!discard) this.pushHistory(worldId, [{ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before.value, after: cell.value, cellBefore: before, evidence: cell.evidence }]);
+    return sheet;
   }
 
   // ---------------------------------------------------------------- names from the translation glossary
@@ -1048,6 +1685,31 @@ class Archive {
       e.updatedAt = t;
       dirty = true;
     }
+    // v0.5.0 F: an other name in Latin letters left on a rule or system (「Slytherin」 on 「호그와트는 네 기숙사로
+    // 나뉜다」) whose glossary pair's Korean names a group or place goes to that group or place ('alias-move', undoable).
+    {
+      const sq = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
+      for (const e of doc.entities) {
+        if (e.type !== 'rule' && e.type !== 'system') continue;
+        for (const a of [...(e.aliases || [])]) {
+          if (!/^[A-Za-z][A-Za-z '’.-]*$/.test(a)) continue;
+          const pair = pairs.find((p) => sq(p.from) === sq(a) || sq(p.to) === sq(a));
+          if (!pair) continue;
+          const ko = /[가-힣]/.test(pair.to) ? pair.to : pair.from;
+          const owners = doc.entities.filter((x) => (x.type === 'group' || x.type === 'place') && [x.name, ...(x.aliases || [])].some((n) => sq(n) === sq(ko)));
+          if (owners.length !== 1) continue;
+          const to = owners[0];
+          e.aliases = e.aliases.filter((x) => x !== a);
+          if (!to.aliases.some((x) => sq(x) === sq(a)) && to.aliases.length < ALIAS_MAX) to.aliases.push(a);
+          e.revision++;
+          e.updatedAt = t;
+          to.revision++;
+          to.updatedAt = t;
+          dirty = true;
+          log({ entityId: e.entityId, entityIds: [e.entityId, to.entityId], name: e.name, type: e.type, action: 'alias-move', alias: a, to: to.name, toId: to.entityId, evidence: `번역 단어장 「${pair.from} = ${pair.to}」` });
+        }
+      }
+    }
     if (!dirty) return [];
     this.writeJson(this.entityFile(worldId), doc);
     if (changes.length) {
@@ -1081,7 +1743,7 @@ class Archive {
     const doc = this.readEntities(worldId);
     const skip = (a, b) => gone.has(pairKey(a, b));
     const seen = new Set();
-    return [...findPairs(doc.entities, skip), ...describedPairs(doc.entities, doc.relations, skip), ...speciesPairs(doc.entities, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
+    return [...findPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...describedPairs(doc.entities, doc.relations, skip).map((x) => ({ ...x, type: 'person' })), ...speciesPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...thingPairs(doc.entities, doc.relations, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
   }
 
   /** 「다른 사람이에요」: the pair is not suggested again (by id, so renaming either does not bring it back). */
@@ -1137,6 +1799,11 @@ class Archive {
     const relationsBefore = structuredClone(doc.relations.filter((r) => [r.from, r.to].some((x) => x === keepId || x === dropId)));
     const seen = new Set();
     const moved = [];
+    for (const e of doc.entities) {
+      if (e.appliesTo === dropId) e.appliesTo = keepId; // v0.5.0 C
+      if (e.base === dropId) e.base = keepId; // v0.5.0 E
+      if (e.timetable?.ownerId === dropId) e.timetable.ownerId = keepId; // v0.5.0 B
+    }
     for (const r of doc.relations) {
       const n = { ...r, from: r.from === dropId ? keepId : r.from, to: r.to === dropId ? keepId : r.to };
       if (n.from === n.to || seen.has(relKey(n))) continue;
@@ -1299,21 +1966,260 @@ class Archive {
   linkAffiliations(worldId, ids = null, meta = {}) {
     this.getWorld(worldId);
     const doc = this.readEntities(worldId);
-    const squashed = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
     const groups = doc.entities.filter((e) => e.type === 'group');
     const exists = new Set(doc.relations.map(relKey));
     const found = [];
+    // v0.5.0 (명단은 지금 상태): the 소속 칸 changed (전학 · 배정) → a relation to a group it no longer names goes. Those
+    // made from the 소속 칸 always follow it; the reader's go when the earlier value (meta.was: { personId: before })
+    // named that group. The person's own relations stay.
+    const stale = [];
     for (const p of doc.entities) {
       if (p.type !== 'person' || (ids && !ids.includes(p.entityId))) continue;
-      const text = squashed(p.fields?.affiliation);
-      if (!text) continue;
+      const named = new Set(groups.filter((g) => namesGroup(p.fields?.affiliation, g)).map((g) => g.entityId));
+      const was = typeof meta.was?.[p.entityId] === 'string' ? meta.was[p.entityId] : null;
+      for (const r of doc.relations) {
+        if (r.type !== '소속' || r.source === 'manual' || (r.from !== p.entityId && r.to !== p.entityId)) continue;
+        const g = groups.find((x) => x.entityId === (r.from === p.entityId ? r.to : r.from));
+        if (!g || named.has(g.entityId)) continue;
+        if (String(r.evidence || '').startsWith('소속:') || (was !== null && namesGroup(was, g))) stale.push(r);
+      }
       for (const g of groups) {
-        if (!g.name || ![g.name, ...g.aliases].some((n) => squashed(n).length >= 2 && text.includes(squashed(n)))) continue;
+        if (!named.has(g.entityId)) continue;
         const r = { from: p.entityId, to: g.entityId, type: '소속', note: '', evidence: '소속: ' + p.fields.affiliation };
         if (!exists.has(relKey(r))) found.push(r);
       }
     }
-    return this.applyRelations(worldId, found, { ...meta, by: meta.by || 'affiliation' });
+    const by = meta.by || 'affiliation';
+    const gone = [];
+    if (stale.length) {
+      doc.relations = doc.relations.filter((r) => !stale.includes(r));
+      this.writeJson(this.entityFile(worldId), doc);
+      gone.push(...stale.map((r) => ({ ...this.relationLog(doc, r, 'relation-remove', by, meta), why: 'affiliation changed' })));
+      this.pushHistory(worldId, gone);
+    }
+    return [...gone, ...this.applyRelations(worldId, found, { ...meta, by })];
+  }
+
+  /**
+   * 작은 집단 → 큰 집단, by code (v0.5.0): a group whose name begins with another group's name or other name
+   * (「슬리데린 1학년」 → 「슬리데린」) gets a 소속 relation to it, unless the two are already joined either way.
+   */
+  linkSubgroups(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const groups = doc.entities.filter((e) => e.type === 'group');
+    const joined = new Set(doc.relations.filter((r) => r.type === '소속').flatMap((r) => [r.from + '|' + r.to, r.to + '|' + r.from]));
+    const found = [];
+    for (const a of groups) {
+      const an = squashName(a.name);
+      // The longest name it begins with: 「슬리데린 1학년 여학생」 joins 「슬리데린 1학년」, not 「슬리데린」 as well.
+      let best = null;
+      for (const b of groups) {
+        if (b === a) continue;
+        const len = Math.max(0, ...[b.name, ...(b.aliases || [])].map(squashName)
+          .filter((k) => k.length >= 2 && an.length > k.length && an.startsWith(k) && !SAME_GROUP_SUFFIX.has(an.slice(k.length)))
+          .map((k) => k.length));
+        if (len && (!best || len > best.len)) best = { b, len };
+      }
+      if (!best || joined.has(a.entityId + '|' + best.b.entityId)) continue;
+      found.push({ from: a.entityId, to: best.b.entityId, type: '소속', note: '', evidence: '이름: ' + a.name });
+    }
+    return this.applyRelations(worldId, found, { ...meta, by: meta.by || 'subgroup' });
+  }
+
+  /**
+   * 없는 집단 채우기 (v0.5.0 A-2, by code, no model). What the 소속 칸 of people name that is not a group yet:
+   * - an other name of a rule · system · …(「호그와트는 네 기숙사로 나뉜다」's 「슬리데린 기숙사」) that people's 소속 칸 name;
+   * - a piece of the 소속 칸 that reads as a group (「슬리데린 1학년」, after a bigger group's name in front of another group's
+   *   name: 「호그와트 슬리데린 1학년」), not the name of another setting (a place 「… 남학생 기숙사」 stays a place).
+   * Two people or more: made (make). One: only offered (suggest — 「집단으로 만들기」).
+   */
+  planGroups(doc) {
+    const groups = doc.entities.filter((e) => e.type === 'group');
+    const people = doc.entities.filter((e) => e.type === 'person' && String(e.fields?.affiliation || '').trim());
+    const covered = (name) => groups.some((g) => sameGroupName(name, g));
+    const isOther = (name) => doc.entities.some((e) => e.type !== 'group' && [e.name, ...(e.aliases || [])].some((n) => squashName(n) === squashName(name)));
+    const out = [];
+    const taken = (name) => out.some((o) => sameGroupName(name, { name: o.name, aliases: o.aliases }));
+    // 1) other names of rules · systems · …
+    for (const x of doc.entities.filter((e) => KEEP_AS_IS.has(e.type))) {
+      for (const a of x.aliases || []) {
+        if (!/\p{Script=Hangul}/u.test(a) || squashName(a).length < 2 || covered(a) || taken(a)) continue;
+        const who = people.filter((p) => namesGroup(p.fields.affiliation, { name: a, aliases: [] }));
+        if (!who.length) continue;
+        const core = a.replace(/\s*(기숙사|가문|집안|일가|무리|일행)$/, '').trim();
+        const parents = groups.filter((gr) => namesGroup([x.name, ...Object.values(x.fields || {})].join(' '), gr));
+        out.push({ name: a, aliases: core.length >= 2 && core !== a ? [core] : [], people: who.map((p) => p.entityId), from: 'alias', ownerId: x.entityId, ownerName: x.name, parentId: parents.length === 1 ? parents[0].entityId : null, evidence: x.name });
+      }
+    }
+    // 2) pieces of the 소속 칸 that read as a group
+    const all = () => [...groups, ...out.map((o) => ({ name: o.name, aliases: o.aliases }))];
+    const isGroupWord = (w) => all().some((g) => groupKeys(g).includes(squashName(w)));
+    const pieces = new Map();
+    for (const p of people) {
+      for (const part of p.fields.affiliation.split(/[,，/·;]|\s및\s/)) {
+        let words = part.trim().split(/\s+/).filter(Boolean);
+        let prefix = null;
+        // 「호그와트 슬리데린 1학년」: the bigger group in front goes while another group's name follows it
+        while (words.length > 1) {
+          const k = [1, 2, 3].find((n) => n < words.length && isGroupWord(words.slice(0, n).join(' ')) && isGroupWord(words[n]));
+          if (!k) break;
+          prefix = all().find((g) => groupKeys(g).includes(squashName(words.slice(0, k).join(' '))));
+          words = words.slice(k);
+        }
+        const r = words.join(' ');
+        if (squashName(r).length < 2 || !GROUPISH.test(r) || ROLE_WORDS.test(words.at(-1)) || !/\p{Script=Hangul}/u.test(r) || covered(r) || isOther(r)) continue;
+        const key = squashName(r);
+        const it = pieces.get(key) || { name: r, people: new Set(), prefixes: new Map() };
+        it.people.add(p.entityId);
+        if (prefix?.name) it.prefixes.set(prefix.name, (it.prefixes.get(prefix.name) || 0) + 1);
+        pieces.set(key, it);
+      }
+    }
+    for (const it of pieces.values()) {
+      if (taken(it.name)) continue;
+      const top = [...it.prefixes].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+      out.push({ name: it.name, aliases: [], people: [...it.people], from: 'affiliation', parentName: top, evidence: '' });
+    }
+    const names = (o) => o.people.map((id) => doc.entities.find((e) => e.entityId === id)?.name).filter(Boolean);
+    return {
+      make: out.filter((o) => o.people.length >= 2).map((o) => ({ ...o, peopleNames: names(o) })),
+      suggest: out.filter((o) => o.people.length === 1).map((o) => ({ ...o, peopleNames: names(o) })),
+    };
+  }
+
+  /**
+   * Carries out planGroups (only = one name: the person chose 「집단으로 만들기」). A new group is source auto (the
+   * person's: manual), in the history and undoable; an other name it came from leaves that setting ('alias-move',
+   * undoable). Then the groups are joined: by name (linkSubgroups), to the bigger group the rule names or the 소속 칸
+   * put in front, and the people by their 소속 칸.
+   */
+  fillGroups(worldId, meta = {}, only = null) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const plan = this.planGroups(doc);
+    const list = only ? [...plan.make, ...plan.suggest].filter((o) => squashName(o.name) === squashName(only)) : plan.make;
+    if (only && !list.length) throw new ArchiveError(404, '소속 칸에서 그 이름을 찾지 못했습니다.');
+    if (!list.length) return { created: [], moved: [], relations: [] };
+    const by = only ? 'person' : meta.by || 'fill-groups';
+    const t = now();
+    const changes = [];
+    const made = [];
+    for (const o of list) {
+      if (doc.entities.length >= ENTITY_MAX) break;
+      const entity = {
+        entityId: randomUUID(), type: 'group', name: o.name, aliases: o.aliases, description: '', fields: {}, extra: [], pinned: false,
+        sources: only ? { name: 'manual' } : {}, status: 'confirmed',
+        provenance: { source: only ? 'manual' : 'auto', by, roomId: meta.roomId ?? null, evidence: o.from === 'alias' ? '「' + o.ownerName + '」의 다른 이름' : '소속 칸 · ' + o.peopleNames.join(', ') },
+        revision: 1, createdAt: t, updatedAt: t,
+      };
+      doc.entities.push(entity);
+      made.push({ entity, o });
+      changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: [], entityId: entity.entityId, name: entity.name, type: 'group', action: 'create', evidence: entity.provenance.evidence });
+      const owner = o.ownerId && doc.entities.find((e) => e.entityId === o.ownerId);
+      if (owner && owner.aliases.includes(o.name)) {
+        owner.aliases = owner.aliases.filter((a) => a !== o.name);
+        owner.revision++;
+        owner.updatedAt = t;
+        changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: owner.entityId, entityIds: [owner.entityId, entity.entityId], name: owner.name, type: owner.type, action: 'alias-move', alias: o.name, to: entity.name });
+      }
+    }
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    const rels = [...this.linkSubgroups(worldId, { by })];
+    // the bigger group: what the rule names (네 기숙사 → 호그와트), or what the 소속 칸 put in front — unless joined by name
+    const after = this.readEntities(worldId);
+    const up = [];
+    for (const { entity, o } of made) {
+      if (after.relations.some((r) => r.type === '소속' && r.from === entity.entityId)) continue;
+      const parent = o.parentId ? after.entities.find((e) => e.entityId === o.parentId)
+        : o.parentName ? after.entities.find((e) => e.type === 'group' && e.name === o.parentName) : null;
+      if (!parent || parent.entityId === entity.entityId) continue;
+      const first = after.entities.find((e) => e.entityId === o.people[0]);
+      up.push({ from: entity.entityId, to: parent.entityId, type: '소속', note: '', evidence: o.from === 'alias' ? o.evidence : '소속: ' + (first?.fields?.affiliation || '') });
+    }
+    rels.push(...this.applyRelations(worldId, up, { ...meta, by }), ...this.linkAffiliations(worldId, null, { ...meta, by }));
+    return { created: made.map(({ entity }) => entity.name), moved: changes.filter((c) => c.action === 'alias-move').map((c) => ({ from: c.name, alias: c.alias })), relations: rels };
+  }
+
+  /** v0.5.0 R: 「이름 확인 필요」 on a person (a mark only; the person renaming them takes it off). */
+  setNameCheck(worldId, entityId, check) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === entityId && x.type === 'person');
+    if (!e) return null;
+    e.nameCheck = { said: String(check?.said || '').slice(0, 60) };
+    this.writeJson(this.entityFile(worldId), doc);
+    return e;
+  }
+
+  /** v0.5.0 P · Q: the world's latest 「잡다한 설정 정리」 candidates (nothing deleted until the person picks). */
+  tidyFile(worldId) {
+    return path.join(this.dir, 'tidy', `${needId(worldId)}.json`);
+  }
+  saveTidy(worldId, out) {
+    this.getWorld(worldId);
+    fs.mkdirSync(path.join(this.dir, 'tidy'), { recursive: true });
+    this.writeJson(this.tidyFile(worldId), { schemaVersion: SCHEMA, at: out.at, items: out.items, fields: out.fields });
+  }
+  readTidy(worldId) {
+    this.getWorld(worldId);
+    const f = this.tidyFile(worldId);
+    if (!fs.existsSync(f)) return { schemaVersion: SCHEMA, at: null, items: [], fields: [] };
+    const doc = this.readJson(f, () => ({ schemaVersion: SCHEMA, at: null, items: [], fields: [] }), (x) => Array.isArray(x.items) && Array.isArray(x.fields), '정리 후보');
+    // what is gone or was emptied since is no longer offered
+    const ents = new Map(this.readEntities(worldId).entities.map((e) => [e.entityId, e]));
+    doc.items = doc.items.filter((x) => ents.has(x.entityId));
+    doc.fields = doc.fields.filter((x) => { const e = ents.get(x.entityId); return e && (x.key === 'description' ? e.description : e.fields?.[x.key]); });
+    return doc;
+  }
+  /** 「남기기」: a candidate taken off the list (nothing changes in the world). */
+  keepTidy(worldId, entityId, key = null) {
+    const doc = this.readTidy(worldId);
+    if (key) doc.fields = doc.fields.filter((x) => !(x.entityId === entityId && x.key === key));
+    else doc.items = doc.items.filter((x) => x.entityId !== entityId);
+    this.writeJson(this.tidyFile(worldId), doc);
+    return doc;
+  }
+
+  /** 구성원 명단 of a group (v0.5.0): gathered from the 소속 relations by code; see roster.cjs. */
+  roster(worldId, groupId) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const out = rosterOf(doc.entities, doc.relations, groupId);
+    if (!out) throw new ArchiveError(404, '집단을 찾지 못했습니다.');
+    return out;
+  }
+
+  /**
+   * Adding someone to a group's list, or taking them off, is changing their 소속 칸 (v0.5.0): on adds the group's name
+   * to it, off takes the group's names out and ends the 소속 relations between the two (the person's own too — they
+   * asked). Each step is in the history like any edit and can be undone.
+   */
+  setMember(worldId, groupId, personId, on) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const g = doc.entities.find((e) => e.entityId === groupId && e.type === 'group');
+    const p = doc.entities.find((e) => e.entityId === personId && e.type === 'person');
+    if (!g || !p) throw new ArchiveError(404, g ? '인물을 찾지 못했습니다.' : '집단을 찾지 못했습니다.');
+    const before = p.fields?.affiliation || '';
+    let after = before;
+    if (on) {
+      if (!namesGroup(before, g)) after = before ? `${before}, ${g.name}` : g.name;
+    } else {
+      const names = [g.name, ...(g.aliases || [])].filter((n) => String(n).trim().length >= 2).sort((x, y) => y.length - x.length);
+      for (const n of names) after = after.split(n).join(' ');
+      after = after.replace(/\s*([,·/])\s*(?=[,·/]|$)/g, '').replace(/^[\s,·/]+|[\s,·/]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+    }
+    if (after !== before) this.updateEntity(worldId, personId, { revision: p.revision, fields: { ...(p.fields || {}), affiliation: after } });
+    const changes = this.linkAffiliations(worldId, [personId], { by: 'person', was: { [personId]: before } });
+    if (!on) {
+      for (const r of this.readEntities(worldId).relations.filter((r) => r.type === '소속' && [r.from, r.to].includes(personId) && [r.from, r.to].includes(groupId))) {
+        this.deleteRelation(worldId, r.relationId);
+        changes.push({ action: 'relation-remove' });
+      }
+    }
+    return { affiliation: { before, after }, relations: changes.length, roster: this.roster(worldId, groupId) };
   }
 
   /**
@@ -1340,6 +2246,30 @@ class Archive {
       const gone = doc.relations.filter((r) => (r.from === e.entityId || r.to === e.entityId) && r.source !== 'manual' && !relationFits(r.type, typeOf(r.from), typeOf(r.to)));
       doc.relations = doc.relations.filter((r) => !gone.includes(r));
       changes.push({ id: randomUUID(), at: t, by: meta.by || 'retype', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: e.entityId, name: e.name, type: 'group', action: 'retype', before, after: 'group', afterRevision: e.revision, relations: gone });
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * v0.5.0 O: other names that are not names (pieces of sentences, descriptions) taken off — not the ones the person
+   * wrote (sources.aliases 'manual'). Recorded ('alias-remove', undoable). Returns the changes.
+   */
+  tidyAliases(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const t = now();
+    const changes = [];
+    for (const e of doc.entities) {
+      if (e.sources?.aliases === 'manual') continue;
+      const off = (e.aliases || []).filter((a) => !nameLike(a));
+      if (!off.length) continue;
+      e.aliases = e.aliases.filter((a) => nameLike(a));
+      e.revision++;
+      e.updatedAt = t;
+      for (const a of off) changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'alias-remove', alias: a });
     }
     if (!changes.length) return [];
     this.writeJson(this.entityFile(worldId), doc);
@@ -1649,7 +2579,8 @@ class Archive {
     const link = this.readRooms().rooms[roomId];
     if (!link) return { roomId, worldId: null };
     const exists = this.readWorlds().worlds.some((w) => w.worldId === link.worldId);
-    return { roomId, worldId: exists ? link.worldId : null, linkedAt: link.linkedAt, read: link.read || null };
+    // v0.5.0: the story's today the room last showed, and whether it is in English
+    return { roomId, worldId: exists ? link.worldId : null, linkedAt: link.linkedAt, read: link.read || null, ...(link.story ? { story: link.story } : {}), ...(typeof link.latin === 'boolean' ? { latin: link.latin } : {}) };
   }
 
   /** worldId null unlinks the room. */
@@ -1715,6 +2646,8 @@ class Archive {
 }
 
 module.exports = {
+  nameLike,
+  namesGroup,
   Archive,
   ArchiveError,
   SCHEMA,
