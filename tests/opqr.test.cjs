@@ -63,7 +63,7 @@ test('P: a passing thing is not kept (lasting false); 「잡다한 설정 정리
   let asked = '';
   service._test.useEngine({
     model: async (cid) => ({ id: cid }),
-    askModel: async (m, messages) => { asked = messages[1].content; return { content: JSON.stringify({ items: [{ name: '욕실 수도꼭지', why: '한 번 스침' }], fields: [{ name: '노을 교수', key: 'personality', why: '그 장면의 행동' }] }) }; },
+    askModel: async (m, messages) => { asked = messages[1].content; return { content: JSON.stringify({ items: [{ name: '욕실 수도꼭지', keep: false, why: '한 번 스침' }], fields: [{ name: '노을 교수', key: 'personality', why: '그 장면의 행동' }] }) }; },
     parseJsonObject: real.parseJsonObject,
   });
   const out = await service.tidyCandidates(w.worldId);
