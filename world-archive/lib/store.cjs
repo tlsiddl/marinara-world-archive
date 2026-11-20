@@ -1529,7 +1529,7 @@ class Archive {
       sheet.timetable.cells[key] = { day, slot, value, evidence, source: 'auto', at: t, ...TT.cellExtras(raw), ...(past?.length ? { past } : {}) };
       sheet.revision++;
       sheet.updatedAt = t;
-      log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence });
+      log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence, ...(raw.moved ? { moved: raw.moved } : {}) });
     }
     if (!changes.length) return [];
     for (const e of doc.entities) if (e.timetable) TT.refresh(e);

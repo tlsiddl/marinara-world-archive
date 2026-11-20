@@ -315,8 +315,9 @@ function checkFields(type, raw, index, itemFound = []) {
   const hidden = {};
   const rumors = {};
   const corrections = {};
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections };
-  for (const [key, given] of Object.entries(raw)) {
+  const moved = [];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections, moved };
+  for (let [key, given] of Object.entries(raw)) {
     // 종 is for a being that is not a person: "사람" (or the like) stays empty, which means unknown.
     if (type === 'person' && key === 'species' && HUMAN_SPECIES.test(String((typeof given === 'string' ? given : given?.v) || '').trim())) {
       droppedFields.push({ key, why: 'a person (species is only for other beings)' });
@@ -339,10 +340,18 @@ function checkFields(type, raw, index, itemFound = []) {
       droppedFields.push({ key, why: 'not in its evidence' });
       continue;
     }
-    // v0.5.0 H: a timetable written into a field belongs in "timetable"
-    if (type !== 'schedule' && TT.parseWhen(given.v).length >= 2) {
-      droppedFields.push({ key, why: 'a timetable in a field' });
-      continue;
+    // v0.5.1 H: a timetable written into a field (two cells or more) is not thrown away — it moves to a 시간표
+    // (「시간표로 옮김」: the item's own when it is a group or person, a 「시간표로 모으기」 candidate otherwise); the field
+    // keeps the rest of its text, or stays empty when nothing is left
+    if (type !== 'schedule') {
+      const sw = TT.splitWhen(given.v);
+      if (sw.cells.length >= 2) {
+        const label = FIELDS[type]?.find((f) => f.key === key)?.label || key;
+        const cells = sw.cells.map((c) => ({ day: c.day, slot: c.slot, value: clip(c.after || label, TT.CELL_MAX) }));
+        moved.push({ key, label, text: sw.moved, cells, evidence: clip(said, 300) });
+        if (!sw.rest) continue;
+        given = { ...given, v: sw.rest };
+      }
     }
     // v0.5.0 L: what someone says, a rumour — kept apart, never over a settled fact
     if (typeof given.rumor === 'string' && given.rumor.trim()) {
@@ -356,7 +365,7 @@ function checkFields(type, raw, index, itemFound = []) {
     // v0.5.0 S: only a profile block says it (not the story yet) — 「아직 드러나지 않음」
     if (found.every((p) => p.block)) hidden[key] = true;
   }
-  return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections };
+  return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections, moved };
 }
 
 /**
@@ -411,6 +420,7 @@ function checkItems(parsed, part, cast) {
       hidden: f.hidden,
       rumors: f.rumors,
       corrections: f.corrections,
+      ...(f.moved.length ? { toTimetable: f.moved } : {}),
       memo: typeof it.memo === 'string' ? it.memo : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',

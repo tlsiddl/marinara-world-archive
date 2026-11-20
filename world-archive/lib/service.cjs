@@ -216,7 +216,13 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         // v0.5.0 R: 「○○의 누나」 whose sentence names another person the world has: 「이름 확인 필요」
         const peopleNow = before.filter((e) => e.type === 'person');
         for (const it of items) if (it.type === 'person') { const c = X.whoseCheck(it.name, it.evidence, peopleNow); if (c) it.nameCheck = c; }
-        const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
+        // v0.5.1 H: a timetable in a field of a place, rule … (no owner): a schedule for 「시간표로 모으기」 to place
+        const homeless = [];
+        for (const it of items) for (const m of it.toTimetable || []) {
+          if (it.type === 'group' || it.type === 'person') continue;
+          homeless.push({ type: 'schedule', name: `${it.name} ${m.label}`, aliases: [], match: null, fields: { when: m.text, ...(it.type === 'place' ? { where: it.name } : {}) }, fieldEvidence: { when: m.evidence }, hidden: {}, rumors: {}, corrections: {}, memo: `「${it.name}」의 ${m.label} 칸에서 시간표로 옮김 — 「시간표로 모으기」가 주인을 찾아요`, where: '', base: '', evidence: m.evidence, evidenceAt: it.evidenceAt });
+        }
+        const changes = s.applyAuto(worldId, [...items, ...homeless], { roomId, messageIds: part.batch.map((x) => x.id) });
         const afterSave = s.readEntities(worldId).entities;
         for (const it of items) {
           // v0.5.0 E: a group's 본거지 — a place the world has (now)
@@ -261,6 +267,12 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         const tt = X.checkTimetable(parsed, part, cast);
         const owners = s.readEntities(worldId).entities.filter((e) => e.type === 'group' || e.type === 'person');
         const cells = [];
+        // v0.5.1 H: 「시간표로 옮김」 — a field's timetable goes to its own group's or person's 시간표
+        for (const it of items) for (const m of it.toTimetable || []) {
+          if (it.type !== 'group' && it.type !== 'person') continue;
+          const self = owners.find((x) => x.type === it.type && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.match || it.name)));
+          if (self) for (const c of m.cells) cells.push({ ...c, ownerId: self.entityId, evidence: m.evidence, moved: { type: it.type, key: m.key } });
+        }
         for (const c of tt.cells) {
           const owner = s.findByName(owners, c.owner);
           const where = c.place ? s.findByName(owners.concat(s.readEntities(worldId).entities.filter((e) => e.type === 'place')), c.place) : null;
@@ -768,7 +780,7 @@ async function gatherTimetables(worldId, { model = true } = {}) {
   const strip = (name) => String(name).replace(/(?<=^|[\s·,])((월|화|수|목|금|토|일)요일|매일|평일|새벽|아침|오전|점심|오후|저녁|자정|\d+\s*교시|\d{1,2}:\d{2}|\d{1,2}\s*시)(?=$|[\s·,])/g, ' ').replace(/[·,]/g, ' ').replace(/\s+/g, ' ').trim();
   const out = { moved: [], left: [], calls: 0, tokens: {} };
   const manual = (e) => e.provenance?.source === 'manual' || Object.values(e.sources || {}).includes('manual');
-  const candidates = doc.entities.filter((e) => e.type === 'schedule' && !e.timetable && /(월|화|수|목|금|토|일)요일|매일|평일/.test(String(e.fields?.when || '') + ' ' + e.name));
+  const candidates = doc.entities.filter((e) => e.type === 'schedule' && !e.timetable && (/(월|화|수|목|금|토|일)요일|매일|평일/.test(String(e.fields?.when || '') + ' ' + e.name) || TT.parseWhen(e.fields?.when || '').length > 0));
   const asks = [];
   for (const e of candidates) {
     const found = TT.parseWhen(e.fields?.when || '').length ? TT.parseWhen(e.fields?.when || '') : TT.parseWhen(e.name);

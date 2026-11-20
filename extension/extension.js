@@ -908,7 +908,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     'relation-note': (c) => `관계 <b>${esc(c.name)}</b> · ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
     'relation-flip': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 방향 바뀜`,
     'relation-remove': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 끝남`,
-    cell: (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: ${c.before ? `${esc(c.before)} → ` : ''}${c.after ? esc(c.after) : '지움'}`,
+    cell: (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: ${c.before ? `${esc(c.before)} → ` : ''}${c.after ? esc(c.after) : '지움'}${c.moved ? ` · 시간표로 옮김(${esc((st.fields[c.moved.type] || []).find((f) => f.key === c.moved.key)?.label || c.moved.key)} 칸에서)` : ''}`,
     event: (c) => `<b>${esc(c.name)}</b> · ${esc(c.after?.name || c.before?.name || '')}: ${c.before?.date && c.after?.date && c.before.date !== c.after.date ? `${esc(c.before.date)} → ` : ''}${esc(c.after?.date || c.after?.when || '')}${c.after?.cancelled && !c.before?.cancelled ? ' · 취소' : ''}${c.after ? '' : ' 지움'}`,
     'cell-pending': (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: 대화에서는 「${esc(c.after)}」`,
     base: (c) => `<b>${esc(c.name)}</b> · 본거지: ${esc(c.beforeName || '없음')} → ${esc(c.afterName || '없음')}`,
