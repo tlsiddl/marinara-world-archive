@@ -81,9 +81,66 @@ function parseWhen(text) {
   return out;
 }
 
+/**
+ * When a slot is, in minutes of the day [start, end), or null when it cannot be told (「1교시」 has no clock time).
+ * 「09:00–12:00」 · 「23:00–00:30」 (past midnight) · 「아침 9시」 / 「9시」 (an hour from then) · 「1시 30분까지」 (up to then,
+ * 1–6시 read as afternoon) · words: 아침 6–10시, 오전 9–12시, 점심 11:30–13:30, 오후 12–18시, 저녁 17–21시, 밤 20–24시 …
+ */
+const WORD_SPAN = { 새벽: [180, 360], 아침: [360, 600], 오전: [540, 720], 점심: [690, 810], 오후: [720, 1080], 저녁: [1020, 1260], 밤: [1200, 1440], 자정: [1410, 1470] };
+function span(slot) {
+  const t = String(slot || '');
+  const hm = (h, m) => (Number(h) < 7 && !/오전|아침|새벽/.test(t) ? Number(h) + 12 : Number(h)) * 60 + Number(m || 0);
+  let m = t.match(/(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})/);
+  if (m) {
+    const a = Number(m[1]) * 60 + Number(m[2]);
+    let b = Number(m[3]) * 60 + Number(m[4]);
+    if (b <= a) b += 1440;
+    return [a, b];
+  }
+  m = t.match(/(\d{1,2})(?::(\d{2})|\s*시(?:\s*(\d{1,2})\s*분)?)/);
+  if (m) {
+    const at = /\d{1,2}:\d{2}/.test(m[0]) ? Number(m[1]) * 60 + Number(m[2]) : hm(m[1], m[3]);
+    return /까지/.test(t) ? [at - 60, at] : [at, at + 60];
+  }
+  const w = Object.keys(WORD_SPAN).find((x) => t.startsWith(x));
+  return w ? WORD_SPAN[w] : null;
+}
+/**
+ * The sheet's cells looked at together (v0.5.0 B, by code): overlaps — two cells of one day whose times cross and
+ * neither holds the other (shown as 「시간이 겹쳐요」, never merged or taken away by code); wide — a cell that holds
+ * another (「09:00–15:00 수업」 with 「13:30–15:00 변신술」 in it: shown faintly, after the narrow ones in {{세계}}).
+ */
+function lookTogether(cells) {
+  const list = Object.entries(cells || {}).map(([k, c]) => ({ k, day: c.day, s: span(c.slot) })).filter((x) => x.s);
+  const overlaps = [];
+  const wide = new Set();
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j];
+    if (a.day !== b.day || a.s[1] <= b.s[0] || b.s[1] <= a.s[0]) continue;
+    const aHolds = a.s[0] <= b.s[0] && a.s[1] >= b.s[1];
+    const bHolds = b.s[0] <= a.s[0] && b.s[1] >= a.s[1];
+    if (aHolds && !bHolds) wide.add(a.k);
+    else if (bHolds && !aHolds) wide.add(b.k);
+    else overlaps.push([a.k, b.k]);
+  }
+  return { overlaps, wide: [...wide] };
+}
+/** Keeps a sheet's overlaps and wide cells up to date (after every change to its cells). */
+function refresh(sheet) {
+  if (!sheet?.timetable) return sheet;
+  const { overlaps, wide } = lookTogether(sheet.timetable.cells);
+  sheet.timetable.overlaps = overlaps;
+  sheet.timetable.wide = wide;
+  return sheet;
+}
+
 /** The sheet as one short line for {{세계}}: 「월 1교시 마법약 · 월 2교시 변신술」 (a hidden-from-the-story cell is not special here). */
 function timetableLine(e) {
-  return sortCells(e.timetable?.cells).filter((c) => c.value).map((c) => `${c.day} ${c.slot} ${c.value}`).join(' · ');
+  // the narrow cells first: a wide one (「09:00–15:00 수업」) only gives the background
+  const wide = new Set(e.timetable?.wide || []);
+  const cells = sortCells(e.timetable?.cells).filter((c) => c.value);
+  const isWide = (c) => wide.has(cellKey(c.day, c.slot));
+  return [...cells.filter((c) => !isWide(c)), ...cells.filter(isWide)].map((c) => `${c.day} ${c.slot} ${c.value}`).join(' · ');
 }
 
 function validTimetable(t) {
@@ -96,4 +153,4 @@ function validTimetable(t) {
     && (c.pending === undefined || (isObj(c.pending) && typeof c.pending.value === 'string')));
 }
 
-module.exports = { DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };
+module.exports = { DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, span, lookTogether, refresh, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };

@@ -979,6 +979,7 @@ class Archive {
         if ((cells[c.key]?.value || '') !== (c.after || '')) throw new ArchiveError(409, later);
         if (c.cellBefore) cells[c.key] = structuredClone(c.cellBefore);
         else delete cells[c.key];
+        TT.refresh(e);
       } else if (c.action === 'cell-pending') {
         const cell = e.timetable?.cells?.[c.key];
         if (cell?.pending?.value === c.after) delete cell.pending;
@@ -1070,6 +1071,7 @@ class Archive {
       log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence });
     }
     if (!changes.length) return [];
+    for (const e of doc.entities) if (e.timetable) TT.refresh(e);
     this.writeJson(this.entityFile(worldId), doc);
     this.pushHistory(worldId, changes);
     return changes;
@@ -1114,6 +1116,7 @@ class Archive {
       const past = cell?.value && cell.value !== value ? [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX) : cell?.past;
       sheet.timetable.cells[key] = { day, slot, value, evidence: '', source: 'manual', at: t, ...(past?.length ? { past } : {}) };
     } else delete sheet.timetable.cells[key];
+    TT.refresh(sheet);
     sheet.revision++;
     sheet.updatedAt = t;
     changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before });
@@ -1140,6 +1143,7 @@ class Archive {
       cell.at = t;
       // still the person's: they chose this value
     }
+    TT.refresh(sheet);
     sheet.revision++;
     sheet.updatedAt = t;
     this.writeJson(this.entityFile(worldId), doc);

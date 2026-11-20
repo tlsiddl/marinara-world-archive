@@ -168,7 +168,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
 .sec{padding:16px 0 4px;border-top:1px dashed var(--wa-line);margin-top:14px}
 .sec small,.state small{display:block;font:10px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted);margin-bottom:6px}
 .sec p,.state p{margin:0;white-space:pre-wrap;text-align:justify;overflow-wrap:anywhere}
-.tt-wrap{overflow-x:auto;margin:4px 0 8px}.tt{border-collapse:collapse;font-size:13px;min-width:100%}.tt th,.tt td{border:1px solid var(--wa-line);padding:6px 8px;vertical-align:top;text-align:left}.tt thead th{font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}.tt td small{display:block}.tt-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}.tt-form input{min-width:0;flex:1 1 120px}
+.tt-wrap{overflow-x:auto;margin:4px 0 8px}.tt{border-collapse:collapse;font-size:13px;min-width:100%}.tt th,.tt td{border:1px solid var(--wa-line);padding:6px 8px;vertical-align:top;text-align:left}.tt thead th{font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}.tt td small{display:block}.tt td.wide{opacity:.5;font-style:italic}.tt-clash{border:1.5px dashed var(--wa-ink);border-radius:3px;padding:8px 10px;margin:4px 0 8px}.tt-clash p{margin:4px 0}.tt-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}.tt-form input{min-width:0;flex:1 1 120px}
 .roster-add{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.roster-add select{max-width:100%}
 .state{margin-top:18px;padding:14px 16px;border:1.5px dashed var(--wa-ink);border-radius:3px}
 .meta{margin-top:20px;font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}
@@ -640,14 +640,18 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       if (!c) return '<td></td>';
       const past = c.past?.[0] ? `<small class="past">이전: ${esc(c.past[0].value)}</small>` : '';
       const wait = c.pending ? `<small class="pending">대화에서는 「${esc(c.pending.value)}」${copula(c.pending.value)} <button class="quiet" type="button" data-act="cell-pending" data-id="${esc(e.entityId)}" data-key="${esc(key)}">적용</button><button class="quiet" type="button" data-act="cell-pending" data-id="${esc(e.entityId)}" data-key="${esc(key)}" data-discard="1">무시</button></small>` : '';
-      return `<td title="${esc(c.evidence || '')}">${esc(c.value)}${c.source === 'auto' ? '<span class="auto-tag">· 자동</span>' : ''}${past}${wait}</td>`;
+      return `<td class="${(e.timetable.wide || []).includes(key) ? 'wide' : ''}" title="${esc(c.evidence || '')}${(e.timetable.wide || []).includes(key) ? ' — 이 시간 안에 더 자세한 칸이 있어 바탕으로만 보여 줍니다' : ''}">${esc(c.value)}${c.source === 'auto' ? '<span class="auto-tag">· 자동</span>' : ''}${past}${wait}</td>`;
     };
     const table = cells.length
       ? `<div class="tt-wrap"><table class="tt"><thead><tr><th></th>${days.map((d) => `<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${slots.map((sl) => `<tr><th>${esc(sl)}</th>${days.map((d) => cellHtml(d, sl)).join('')}</tr>`).join('')}</tbody></table></div>`
       : '<p class="sub">아직 칸이 없습니다.</p>';
+    // 「시간이 겹쳐요」: two cells of one day whose times cross — the person chooses (nothing is merged or taken away by code)
+    const label = (k) => { const c = e.timetable.cells[k]; return c ? `${c.day} ${c.slot} ${c.value}` : k; };
+    const clash = (e.timetable.overlaps || []).filter(([a, b]) => e.timetable.cells[a] && e.timetable.cells[b]);
+    const clashHtml = clash.length ? `<div class="tt-clash" role="status"><b>시간이 겹쳐요 ${clash.length}</b>${clash.map(([a, b]) => `<p>${[a, b].map((k) => `${esc(label(k))}${st.readOnly ? '' : ` <button class="quiet" type="button" data-act="cell-clear" data-id="${esc(e.entityId)}" data-key="${esc(k)}">이 칸 지우기</button>`}`).join(' ↔ ')}</p>`).join('')}</div>` : '';
     const owner = st.entities.find((x) => x.entityId === e.timetable.ownerId);
     const form = st.readOnly ? '' : `<div class="tt-form"><select id="ttDay" aria-label="요일">${TT_DAYS.map((d) => `<option>${d}</option>`).join('')}</select><input id="ttSlot" maxlength="24" placeholder="때(1교시 · 오전 · 09:00–10:30)" aria-label="때"><input id="ttValue" maxlength="80" placeholder="내용(비우면 그 칸을 지움)" aria-label="내용"><button class="quiet" type="button" data-act="cell-save" data-id="${esc(e.entityId)}">칸 저장</button></div>`;
-    return `<div class="sec"><small>시간표${owner ? ` · ${esc(owner.name)}` : ''} · 칸 ${cells.length}</small>${table}${form}</div>`;
+    return `<div class="sec"><small>시간표${owner ? ` · ${esc(owner.name)}` : ''} · 칸 ${cells.length}</small>${clashHtml}${table}${form}</div>`;
   }
 
   function detailHtml(e) {
@@ -1176,6 +1180,12 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await api('PUT', `/worlds/${st.worldId}/timetable/cell`, { entityId: e.entityId, revision: e.revision, day: root.getElementById('ttDay')?.value, slot: root.getElementById('ttSlot')?.value, value: root.getElementById('ttValue')?.value || '' });
       await loadEntities();
     }, '칸을 저장했습니다. 직접 쓴 칸은 대화가 덮어쓰지 않습니다.'),
+    'cell-clear': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      const [day, slot] = String(b.dataset.key).split('|');
+      await api('PUT', `/worlds/${st.worldId}/timetable/cell`, { entityId: e.entityId, revision: e.revision, day, slot, value: '' });
+      await loadEntities();
+    }, '그 칸을 지웠습니다. 기록에서 되돌릴 수 있습니다.'),
     'cell-pending': (b) => run(async () => {
       await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.id}/timetable/pending`, { key: b.dataset.key, discard: b.dataset.discard === '1' });
       await loadEntities();

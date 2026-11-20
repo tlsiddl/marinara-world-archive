@@ -152,3 +152,54 @@ test('「시간표로 모으기」: weekly lessons move into their owner\'s shee
   assert.ok(del, 'in 기록');
   assert.equal(r.calls, 0);
 });
+
+test('cells that cross in time are shown as 「시간이 겹쳐요」 (never merged by code); a wide cell holding a narrow one is background, after it in {{세계}}', (t) => {
+  const { s, w, id, sheet } = world(t);
+  s.applyTimetable(w.worldId, [
+    { ownerId: id('은사슴 1학년'), day: '금', slot: '아침', value: '별자리학 · 약초학' },
+    { ownerId: id('은사슴 1학년'), day: '금', slot: '09:00–12:00', value: '두 시간 약초학' },
+    { ownerId: id('은사슴 1학년'), day: '월', slot: '09:00–15:00', value: '수업' },
+    { ownerId: id('은사슴 1학년'), day: '월', slot: '13:30–15:00', value: '비행술' },
+    { ownerId: id('은사슴 1학년'), day: '수', slot: '23:00–00:30', value: '천문 관측' },
+  ]);
+  let tt = sheet('은사슴 1학년').timetable;
+  assert.deepEqual(tt.overlaps, [['금|아침', '금|09:00–12:00']]);
+  assert.deepEqual(tt.wide, ['월|09:00–15:00']);
+  assert.equal(Object.keys(tt.cells).length, 5, 'nothing merged or taken away');
+  assert.equal(TT.timetableLine(sheet('은사슴 1학년')), '월 13:30–15:00 비행술 · 수 23:00–00:30 천문 관측 · 금 아침 별자리학 · 약초학 · 금 09:00–12:00 두 시간 약초학 · 월 09:00–15:00 수업', 'the wide cell last');
+  // the person takes one of the two away: the overlap goes
+  s.setCell(w.worldId, { entityId: sheet('은사슴 1학년').entityId, day: '금', slot: '아침', value: '' });
+  tt = sheet('은사슴 1학년').timetable;
+  assert.deepEqual(tt.overlaps, []);
+  assert.deepEqual(TT.span('1시 30분까지'), [750, 810], '1–6시 read as afternoon; 「까지」 is up to then');
+  assert.equal(TT.span('1교시'), null, 'a 교시 has no clock time: never said to cross');
+});
+
+test('「시간표로 모으기」 asks the model once, small, for what code could not place — with the sheets there are; its owner must be a group or person', async (t) => {
+  const { s, w, id, sheet } = world(t);
+  service._test.useStore(s);
+  const asked = [];
+  service._test.useEngine({
+    model: async (cid) => ({ id: cid }),
+    askModel: async (m, messages) => { asked.push(messages[1].content); return { content: JSON.stringify({ cells: [
+      { from: '비행 수업', owner: '은사슴 1학년', day: '목', slot: '오후', value: '비행술' },
+      { from: '비행 수업', owner: '별시계탑', day: '목', slot: '오후', value: '장소는 주인 아님' },
+      { from: '없는 일정', owner: '은사슴 1학년', day: '목', slot: '오후', value: 'x' },
+    ] }), usage: { prompt_tokens: 900, completion_tokens: 60 } }; },
+    parseJsonObject: real.parseJsonObject,
+  });
+  const wd = s.getWorld(w.worldId);
+  s.updateWorld(w.worldId, { revision: wd.revision, auto: { ...wd.auto, connectionId: 'c1' } });
+  s.applyAuto(w.worldId, [
+    { type: 'schedule', name: '금요일 아침 별자리학', fields: { when: '금요일 아침', who: '은사슴 1학년' } },
+    { type: 'schedule', name: '비행 수업', fields: { when: '학기 첫 주 목요일 오후', who: '1학년' } },
+    { type: 'schedule', name: '쇼핑', fields: { when: '토요일 오후 두 시', who: '하윤과 친구들' } },
+  ]);
+  const r = await service.gatherTimetables(w.worldId);
+  assert.equal(r.calls, 1);
+  assert.deepEqual(r.tokens, { prompt_tokens: 900, completion_tokens: 60 });
+  assert.ok(asked[0].includes('[이미 있는 시간표]\n- 은사슴 1학년: 금 아침 별자리학'), 'the code-made sheet is shown to the model');
+  assert.deepEqual(r.moved.map((m) => [m.name, !!m.byModel]), [['금요일 아침 별자리학', false], ['비행 수업', true]]);
+  assert.deepEqual(r.left, ['쇼핑']);
+  assert.equal(sheet('은사슴 1학년').timetable.cells['목|오후'].value, '비행술');
+});
