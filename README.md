@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/feat
 
 되돌리기는 명령 끝의 `sh`를 `sh -s -- rollback`으로, 끄기는 `sh -s -- uninstall`로 바꾼다. 세계관 데이터(`DATA_DIR/world-archive`)는 어느 경우에도 지우지 않는다.
 
-**화면(개인 확장)** — 이 저장소의 `extension/` 폴더(manifest.json, extension.js, extension.css)를 개인 확장으로 넣는다. 화면 오른쪽 아래 'WORLD ARCHIVE' 티켓 버튼으로 연다.
+**화면(개인 확장)** — 「GitHub 확장 관리자」에서 저장소 주소 `https://github.com/tlsiddl/marinara-world-archive`를 넣고, 찾은 파일 중 `extension/manifest.json`을 골라 설치한다(관리자는 저장소의 기본 브랜치 `main`을 읽고, manifest가 있는 폴더를 기준으로 extension.js · extension.css를 가져온다. ZIP은 쓰지 않는다). 업데이트도 관리자에서 한다. 화면 오른쪽 아래 'WORLD ARCHIVE' 티켓 버튼으로 연다. 화면과 서버 모듈의 판이 다르면 화면 맨 위에 「서버 쪽을 업데이트해 주세요」가 뜬다 — 서버에서 위 설치 명령을 다시 실행하면 된다.
 
 **프리셋** — 원하는 섹션에 `{{세계}}`를 넣는다. 기억 서재를 쓰면 `{{기억}}` 섹션과 따로 두는 걸 권한다(고정 설정 vs 겪은 일).
 

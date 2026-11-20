@@ -378,6 +378,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   async function loadAll(followRoom) {
     const status = await api('GET', '/status');
     st.fields = status.fields || {};
+    st.serverVersion = status.version || null; // 할 일 8: the screen and the server module should be the same version
     await loadRoom();
     if (followRoom && st.room?.worldId) st.worldId = st.room.worldId;
     await loadWorlds();
@@ -787,7 +788,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     el.rail.innerHTML = railHtml();
     const screen = `${st.view}|${st.worldId}|${st.detail}|${st.editing}|${st.dupes}`;
     const keep = screen === lastScreen ? el.main.scrollTop : 0;
-    el.main.innerHTML = (st.msg ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + mainHtml();
+    const skew = st.serverVersion && st.serverVersion !== VERSION
+      ? `<p class="msg bad" role="status">서버 쪽 World Archive(v${esc(st.serverVersion)})와 이 화면(v${esc(VERSION)})의 판이 달라요. 서버 쪽을 업데이트해 주세요 — 서버에서 설치 명령을 다시 실행하면 됩니다.</p>`
+      : '';
+    el.main.innerHTML = skew + (st.msg ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + mainHtml();
     el.main.scrollTop = keep;
     lastScreen = screen;
     if (st.query) filterCards();
