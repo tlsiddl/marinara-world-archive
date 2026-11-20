@@ -337,7 +337,7 @@ test('buildPrompt: only the glossary pairs named in the batch go in, with how to
   const part = X.batches([msg(0, 'Severus Snape가 들어왔다. 마거릿도 왔다.')], 0)[0];
   const pairs = [{ from: 'Severus Snape', to: '세베루스 스네이프' }, { from: 'Margaret', to: '마거릿' }, { from: 'Albus Dumbledore', to: '알버스 덤블도어' }];
   const [sys, user] = X.buildPrompt({ name: '호그와트', description: '' }, [], part, [], pairs);
-  assert.match(user.content, /\[번역 단어장 — [^\]]*name을 단어장의 한국어 표기 그대로[^\]]*aliases에 넣어\]\n- Severus Snape = 세베루스 스네이프\n- Margaret = 마거릿\n\n/);
+  assert.match(user.content, /\[번역 단어장 — [^\]]*name을 단어장의 한국어 표기 그대로[^\]]*aliases에 넣어[^\]]*과목[^\]]*\]\n- Severus Snape = 세베루스 스네이프\n- Margaret = 마거릿\n\n/);
   assert.doesNotMatch(user.content, /덤블도어/, 'a pair not in the batch stays out');
   const [sys0, plain] = X.buildPrompt({ name: '호그와트', description: '' }, [], part, []);
   assert.doesNotMatch(plain.content, /번역 단어장/, 'no glossary: no section');

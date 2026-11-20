@@ -431,3 +431,22 @@ test('v0.5.0 A-2 over HTTP: two people with the same 소속 make the group on th
   const rc = await call('POST', `${A}/worlds/${id}/relations/recheck`, {});
   assert.deepEqual(rc.data.groups, []);
 });
+
+test('v0.5.0 이름 표기: 자동 — the original name first in a room in English; 한국어만 · 원래 표기 by the world', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-nm-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  service._test.useStore(s);
+  service._test.scenes.clear();
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.createEntity(w.worldId, { type: 'person', name: '세베루스 스네이프', aliases: ['Severus Snape'] });
+  s.linkRoom('room', w.worldId);
+  assert.match(service.render({ chatId: 'room' }), /- 세베루스 스네이프 \(다른 이름: Severus Snape\)/, 'not known to be in English: Korean');
+  s.setRoomLatin('room', true);
+  assert.match(service.render({ chatId: 'room' }), /- Severus Snape\(세베루스 스네이프\)/);
+  s.updateWorld(w.worldId, { revision: s.getWorld(w.worldId).revision, nameStyle: 'ko' });
+  assert.match(service.render({ chatId: 'room' }), /- 세베루스 스네이프 \(다른 이름/);
+  s.setRoomLatin('room', false);
+  s.updateWorld(w.worldId, { revision: s.getWorld(w.worldId).revision, nameStyle: 'original' });
+  assert.match(service.render({ chatId: 'room' }), /- Severus Snape\(세베루스 스네이프\)/);
+});

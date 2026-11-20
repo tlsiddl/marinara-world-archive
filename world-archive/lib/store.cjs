@@ -1446,6 +1446,15 @@ class Archive {
     return sheet;
   }
 
+  /** v0.5.0 (밤샘 2): whether the room is in English (its latest messages mostly in Latin letters). */
+  setRoomLatin(roomId, latin) {
+    needRoom(roomId);
+    const rooms = this.readRooms();
+    if (!rooms.rooms[roomId] || rooms.rooms[roomId].latin === latin) return;
+    rooms.rooms[roomId].latin = latin;
+    this.writeJson(this.roomsFile, rooms);
+  }
+
   /** The story's today the room last showed (§RP header): { date, weekday, written, at } or null. */
   setRoomStory(roomId, story) {
     needRoom(roomId);
@@ -2570,7 +2579,8 @@ class Archive {
     const link = this.readRooms().rooms[roomId];
     if (!link) return { roomId, worldId: null };
     const exists = this.readWorlds().worlds.some((w) => w.worldId === link.worldId);
-    return { roomId, worldId: exists ? link.worldId : null, linkedAt: link.linkedAt, read: link.read || null };
+    // v0.5.0: the story's today the room last showed, and whether it is in English
+    return { roomId, worldId: exists ? link.worldId : null, linkedAt: link.linkedAt, read: link.read || null, ...(link.story ? { story: link.story } : {}), ...(typeof link.latin === 'boolean' ? { latin: link.latin } : {}) };
   }
 
   /** worldId null unlinks the room. */

@@ -95,3 +95,17 @@ test('the budget after the scene: rules of the whole world take at most a third,
   const lone = I.assembleWorld({ name: '별시계 학원', description: '', injectMode: 'scene' }, E.filter((e) => !e.name.startsWith('학원 규칙')), 1200, { scene: new Set(scene), relations: [] });
   assert.ok(lone.included.length - 1 > worldIn.length, 'a part that does not use its share leaves it to the other');
 });
+
+test('names as the room reads them: 「Original(한국어)」 when asked (or 자동 in a room in English); the Korean alone without an original', () => {
+  const E = [
+    ent('person', '세베루스 스네이프', { aliases: ['Severus Snape', '스네이프 교수'] }),
+    ent('person', '하윤', { aliases: ['윤이'] }),
+  ];
+  E[0].fields = { personality: '엄격하다' };
+  const w = { name: '별시계 학원', description: '', injectMode: 'all' };
+  const ko = I.assembleWorld(w, E, 3000, {}).text;
+  assert.match(ko, /- 세베루스 스네이프 \(다른 이름: Severus Snape, 스네이프 교수\)/);
+  const en = I.assembleWorld(w, E, 3000, { names: 'original' }).text;
+  assert.match(en, /- Severus Snape\(세베루스 스네이프\) \(다른 이름: 스네이프 교수\)/);
+  assert.match(en, /- 하윤 \(다른 이름: 윤이\)/, 'no original: the Korean alone');
+});

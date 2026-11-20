@@ -147,7 +147,7 @@ function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
   const text = part.batch.map((m) => m.content).join('\n');
   const terms = N.pairsInText(glossary, text);
   const glossed = terms.length
-    ? `[번역 단어장 — 여기 있는 이름은 name을 단어장의 한국어 표기 그대로 쓰고, 원래(로마자) 표기는 aliases에 넣어]\n${terms.map((p) => `- ${p.from} = ${p.to}`).join('\n')}\n\n`
+    ? `[번역 단어장 — 여기 있는 이름은 name을 단어장의 한국어 표기 그대로 쓰고, 원래(로마자) 표기는 aliases에 넣어. timetable의 과목 · calendar의 행사 이름도 단어장 표기를 따라]\n${terms.map((p) => `- ${p.from} = ${p.to}`).join('\n')}\n\n`
     : '';
   const system = `너는 롤플레이 세계관 설정집의 기록자다. 새 대화를 읽고, 이 세계에 **오래 유지되는 설정**만 골라 JSON으로 적는다.
 

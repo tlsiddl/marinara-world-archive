@@ -393,7 +393,11 @@ async function updateScene(roomId, extraText = '') {
   // v0.5.0 K: the story's today (§RP header), for 「며칠 뒤」 and the school year
   const today = CAL.storyToday(messages);
   if (today) store().setRoomStory(roomId, today);
-  scenes.set(roomId, { ids, recent, worldId, at: Date.now(), today });
+  // v0.5.0 (밤샘 2): a room whose latest messages are mostly in Latin letters is in English
+  const letters = texts.join(' ').replace(/[^\p{L}]/gu, '');
+  const latin = letters.length >= 40 ? (letters.match(/[A-Za-z]/g) || []).length / letters.length > 0.6 : null;
+  if (latin !== null) store().setRoomLatin(roomId, latin);
+  scenes.set(roomId, { ids, recent, worldId, at: Date.now(), today, latin });
   return ids;
 }
 
@@ -423,7 +427,10 @@ function preview(roomId) {
   const doc = s.readEntities(worldId);
   const scene = known?.worldId === worldId ? known.ids : null;
   const today = (known?.worldId === worldId && known.today) || s.getRoom(roomId).story || null;
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null }) };
+  // 이름 표기: the world's choice; 「자동」 — the original name first in a room in English
+  const latin = known?.latin ?? s.getRoom(roomId).latin ?? false;
+  const names = world.nameStyle === 'original' ? 'original' : world.nameStyle === 'ko' ? 'ko' : latin ? 'original' : 'ko';
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names }) };
 }
 
 /** 할 일 12: what one room's {{세계외형}} would be right now. */

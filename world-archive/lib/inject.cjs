@@ -41,15 +41,23 @@ const oneLine = (t) => String(t).replace(/\s*\n+\s*/g, ' / ').trim();
 /** 할 일 10: the earlier value, only for a field the person switched on (「이전 값도 프롬프트에」). */
 const was = (e, k) => (e.pastInPrompt?.[k] && e.past?.[k]?.[0]?.value ? ` (과거: ${oneLine(e.past[k][0].value)})` : '');
 
-function entityLine(e, nameOf = () => '', today = null) {
+/**
+ * v0.5.0 (밤샘 2): a setting's name the way the room writes — 「Severus Snape(세베루스 스네이프)」 in a room in English
+ * (its original name: the first other name in Latin letters), the Korean one alone otherwise or when there is none.
+ */
+const originalOf = (e) => (e.aliases || []).find((a) => /^[A-Za-z][A-Za-z .'’-]*$/.test(String(a).trim()));
+const shownName = (e, names) => { const o = names === 'original' ? originalOf(e) : null; return o ? `${o}(${e.name})` : e.name; };
+function entityLine(e, nameOf = () => '', today = null, names = 'ko') {
   // v0.5.0 K: a 학사일정 is the next three events on one line (nothing ahead: nothing)
-  if (e.calendar) { const l = CAL.calendarLine(e, today); return l ? sanitize(`- ${e.name}\n  ${l}`) : ''; }
+  if (e.calendar) { const l = CAL.calendarLine(e, today); return l ? sanitize(`- ${shownName(e, names)}\n  ${l}`) : ''; }
   // v0.5.0 B: a 시간표 is its cells on one line
-  if (e.timetable) return sanitize(`- ${e.name}\n  시간표: ${TT.timetableLine(e) || '(비어 있음)'}`);
-  const aliases = e.aliases?.length ? ` (다른 이름: ${e.aliases.join(', ')})` : '';
+  if (e.timetable) return sanitize(`- ${shownName(e, names)}\n  시간표: ${TT.timetableLine(e) || '(비어 있음)'}`);
+  const shown = shownName(e, names);
+  const rest = (e.aliases || []).filter((a) => !(shown !== e.name && a === originalOf(e)));
+  const aliases = rest.length ? ` (다른 이름: ${rest.join(', ')})` : '';
   // v0.5.0 C: where a rule or system holds
   const where = e.appliesTo && nameOf(e.appliesTo) ? ` [${nameOf(e.appliesTo)}에서]` : '';
-  const lines = [`- ${e.name}${aliases}${where}`];
+  const lines = [`- ${shown}${aliases}${where}`];
   const defs = FIELDS[e.type] || [];
   const fields = e.fields || {};
   // v0.5.0 S: a field only a profile block has said so far
@@ -87,7 +95,7 @@ function orderEntities(entities, scene = null) {
  * included / omitted are entity IDs. An item that does not fit is left out whole; smaller ones after it can
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null } = {}) {
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko' } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
@@ -169,7 +177,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   const fill = (list, limit) => {
     for (const e of list) {
       if (tried.has(e.entityId) && included.includes(e.entityId)) continue;
-      const line = entityLine(e, nameOf, today);
+      const line = entityLine(e, nameOf, today, names);
       if (!line) continue;
       const header = byType.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length;
       const cost = header + 1 + line.length;
@@ -202,7 +210,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
       const a = shown.get(r.from);
       const b = shown.get(r.to);
       if (!a || !b || !scene.has(a.entityId) || !scene.has(b.entityId) || (a.type !== 'person' && b.type !== 'person')) continue;
-      const line = sanitize(`- ${a.name} — ${b.name}: ${r.note || r.type}`);
+      const line = sanitize(`- ${shownName(a, names)} — ${shownName(b, names)}: ${r.note || r.type}`);
       const cost = (relLines.length ? 0 : '\n\n[관계]'.length) + 1 + line.length;
       if (used + cost > budget) continue;
       used += cost;
@@ -268,4 +276,4 @@ function assembleLooks(entities, scene, { recent = null, budget = LOOKS_CHARS } 
   return { text: lines.length ? `${head}\n${lines.join('\n')}` : '', included, omitted };
 }
 
-module.exports = { WORLD, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
+module.exports = { WORLD, shownName, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
