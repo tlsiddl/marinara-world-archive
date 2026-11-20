@@ -178,6 +178,7 @@ function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
 - 이야기 안에서 지금 일어나는 사건은 history(역사)가 아니다(그건 기억 서재 몫이다). history는 등장인물이 말하거나 글에 나온, 이야기가 시작되기 전의 일만 적는다.
 - 글에 나오지 않은 추측. 원문에 쓰여 있거나 분명히 보이는 것만 적는다.
 - 이미 있는 항목과 똑같은 내용.
+- 가정 · 비유 · 소문 속에서만 나온 이름(「판시 파킨슨의 사촌이라도 되는 듯」, 「캐로 자매 같은 아이들」, 「~라는 소문의 누구」)은 인물로 만들지 않는다. 그 장면에 실제로 있거나 실제로 말해진 사람만.
 - 이름 없이 지나가는 사람(「지나가던 학생」). 이름이 없는 인물은 고정된 직함·역할이 있고(수위, 사감, 여관 주인, 생선 장수) 다시 나올 사람만, 그 직함·역할을 이름으로 적는다. 외모로 부르지 않는다(「붉은 머리 남자」가 아니라 「대장장이」). 직함·역할도 없으면 만들지 않는다.
 - 흔한 일반 장소(「시내」, 「복도」, 「거리」). 장소는 고유한 이름이 있거나 특정한 한 곳만 적는다.
 
@@ -318,6 +319,12 @@ function overlap(value, evidence) {
   return hit / (v.length - 1);
 }
 const FIELD_OVERLAP = { line: 0.5, text: 0.2 };
+/**
+ * v0.6.4 g: the reader's own sentence numbers that leak into a value (「… 어둡지 않았다 (45.28)」 · 「(34.17–34.18)」)
+ * are not part of the setting — taken out when it is saved (store.recheckFields takes them out of what is there).
+ */
+const REF_NUMBERS = /\s*[(（]\s*\d{1,4}\.\d{1,3}(?:\s*(?:[–\-~,·]|및)\s*\d{1,4}(?:\.\d{1,3})?)*\s*[)）]/g;
+const noRefs = (v) => String(v || '').replace(REF_NUMBERS, '').replace(/[ \t]{2,}/g, ' ').trim();
 /** v0.6.2: whether a sentence says a value — its two-letter pieces in it (Korean), or its words in it (other letters). */
 function saysValue(value, sentence, kind = 'text') {
   const v = String(value || '').trim();
@@ -404,12 +411,12 @@ function checkFields(type, raw, index, itemFound = []) {
     }
     // v0.5.0 M: a correction (it was wrong) — no 「이전」
     if (given.fix === true) corrections[key] = true;
-    fields[key] = given.v;
+    fields[key] = noRefs(given.v);
     fieldEvidence[key] = clip(found.map((p) => p.text).join(' / '), 300);
     // v0.5.0 S: only a profile block says it (not the story yet) — 「아직 드러나지 않음」
-    // v0.6.2 ④: field by field — hidden when its evidence is profile sentences only; one story sentence takes it off
-    // (status lines were taken out above). Story sentences elsewhere that say the value: recheck (store.recheckFields).
-    if (found.some((p) => isProfile(p.block)) && !found.some((p) => !p.block)) hidden[key] = true;
+    // v0.6.4 c: field by field — hidden only when every evidence sentence of it is a profile-block sentence; a story
+    // sentence (or a status line) among them: not hidden. The story saying it later: recheck (store.recheckFields).
+    if (found.length && found.every((p) => isProfile(p.block))) hidden[key] = true;
   }
   return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections, moved };
 }
@@ -474,7 +481,7 @@ function checkItems(parsed, part, cast) {
       corrections: f.corrections,
       ...(bal && Object.keys(bal.fields).length ? { balance: bal.fields } : {}),
       ...(f.moved.length ? { toTimetable: f.moved } : {}),
-      memo: typeof it.memo === 'string' && memoOk ? it.memo : '',
+      memo: typeof it.memo === 'string' && memoOk ? noRefs(it.memo) : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
       // v0.5.0 E: group — the place it is at (본거지), a name
@@ -630,4 +637,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { saysValue, segmentBlocks, STATUS_LINE, isProfile, customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { REF_NUMBERS, noRefs, saysValue, segmentBlocks, STATUS_LINE, isProfile, customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };

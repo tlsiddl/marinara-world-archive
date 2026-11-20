@@ -69,6 +69,7 @@ test('③ ④ recheck: a status-line change goes back (logged, undoable, a perso
   // the person writes 성격 themselves: never taken back
   s.updateEntity(w.worldId, e0.entityId, { revision: e0.revision, fields: { ...e0.fields, personality: '조용함' } });
   const check = { isStatus: (x) => X.STATUS_LINE.test(x.trim()), says: X.saysValue, story: ['윤하윤은 11살이 되던 해 입학했다.'], profile: [] };
+  // v0.6.4 c: a hidden field without its own evidence in the history stays as it is (no word comparison in Korean)
   const out = s.recheckFields(w.worldId, check);
   const e = s.listEntities(w.worldId).find((x) => x.name === '윤하윤');
   assert.equal(e.fields.appearance, '은빛 머리');
@@ -76,8 +77,7 @@ test('③ ④ recheck: a status-line change goes back (logged, undoable, a perso
   const back = out.find((c) => c.key === 'appearance');
   assert.equal(back.why, '상태줄 근거라 되돌림');
   assert.ok(!out.some((c) => c.key === 'personality' && c.action === 'field'));
-  assert.equal(e.hidden?.age, undefined, 'the story says 11살 — not hidden any more');
-  assert.ok(out.some((c) => c.action === 'reveal' && c.key === 'age' && c.why === '본문에 나옴'));
+  assert.equal(e.hidden?.age, true, 'no evidence of its own for 나이 in the history: left as it is');
   // undoable
   s.undoChange(w.worldId, back.id);
   assert.equal(s.listEntities(w.worldId).find((x) => x.name === '윤하윤').fields.appearance, '잠옷 차림');
@@ -292,4 +292,100 @@ test('⑦ a 학사일정 entry for one person becomes that person\'s 일정 (und
   const moved = ch.find((c) => c.action === 'event');
   s.undoChange(w.worldId, moved.id);
   assert.equal(Object.values(s.listEntities(w.worldId).find((e) => e.calendar).calendar.events).length, 2);
+});
+
+test('⑨ ④ v0.6.4 c: a profile field the code filled keeps its own words (origText); the story naming the person with most of them takes 숨김 off', (t) => {
+  const P = require('../world-archive/lib/profile.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-064-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'person', name: 'Rowan Hart' }]);
+  s.applyProfiles(w.worldId, P.parseProfiles('<npc_profile>\n- Name: Rowan Hart / Age: 11 / Gender: Female\n- Appearance and clothing: Silver braided hair, star-pinned grey robe.\n</npc_profile>'), { story: [] });
+  let e = s.listEntities(w.worldId)[0];
+  assert.equal(e.origText.appearance, 'Silver braided hair, star-pinned grey robe.');
+  assert.deepEqual(e.hidden, { age: true, gender: true, appearance: true });
+  const out = s.recheckFields(w.worldId, { isStatus: () => false, story: ['Rowan Hart tugged at her silver braided hair and smoothed the grey robe.', 'Someone else had silver braided hair.'], profile: ['- Appearance and clothing: Silver braided hair, star-pinned grey robe.'] });
+  e = s.listEntities(w.worldId)[0];
+  assert.deepEqual(e.hidden, { age: true, gender: true });
+  assert.ok(out.some((c) => c.action === 'reveal' && c.key === 'appearance' && c.why === '본문에 나옴'));
+});
+
+test('④ v0.6.4 c: the model\'s field with profile and story evidence is not hidden; profile only is', () => {
+  const t1 = '<npc_profile>\n- Name: 윤하윤 / Age: 11살\n- Appearance: 은빛 머리\n</npc_profile>\n윤하윤은 은빛 머리를 묶었다.';
+  const [part] = X.batches([{ id: 'm1', speaker: '서하', role: 'assistant', content: t1 }], 0);
+  const b = X.segmentBlocks(t1);
+  const num = (re) => `1.${b.sentences.findIndex((x) => re.test(x)) + 1}`;
+  const it = X.checkItems({ items: [{ type: 'person', name: '윤하윤', evidence: [{ n: num(/Name/) }], fields: { age: { v: '11살', n: num(/Age/) }, appearance: { v: '은빛 머리', n: [num(/Appearance/), num(/묶었다/)] } } }] }, part, []).items[0];
+  assert.deepEqual(it.hidden, { age: true });
+});
+
+test('g: the reader\'s sentence numbers leave values and memos (saved and recheck)', (t) => {
+  assert.equal(X.noRefs('교장실은 밤에도 어둡지 않았다 (45.28)'), '교장실은 밤에도 어둡지 않았다');
+  assert.equal(X.noRefs('잔을 띄움(34.17–34.18). 끝'), '잔을 띄움. 끝');
+  assert.equal(X.noRefs('1988년(9월) 2.5배'), '1988년(9월) 2.5배');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-064-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'place', name: '학장실', fields: { use: '학장의 방 (45.28)' }, memo: '밤에도 밝다 (12.3)' }]);
+  const out = s.recheckFields(w.worldId, { isStatus: () => false, noRefs: X.noRefs });
+  const e = s.listEntities(w.worldId)[0];
+  assert.equal(e.fields.use, '학장의 방');
+  assert.equal(e.description, '밤에도 밝다');
+  assert.equal(out.filter((c) => c.why === '근거 번호 지움').length, 2);
+});
+
+test('a · b: 기타 · 역사 one batch only stay out; a whole-world system only when pinned, in the scene, or a law · 화폐', () => {
+  const world = { name: '별시계', description: '', injectMode: 'scene' };
+  const shop = ent('place', '지팡이 가게');
+  const E = [shop,
+    ent('custom', '가게 주인의 자기소개', { seen: { n: 1, last: 'm1' } }),
+    ent('history', '옛 전쟁', { seen: { n: 1, last: 'm1' }, pinned: true }),
+    ent('system', '지팡이가 주인을 고른다', { appliesTo: 'world', seen: { n: 3, last: 'm9' } }),
+    ent('system', '마법 사용 제한령', { appliesTo: 'world', seen: { n: 3, last: 'm9' } }),
+    ent('system', '갈레온 화폐', { appliesTo: 'world', seen: { n: 3, last: 'm9' } }),
+    ent('system', '편지는 부엉이로', { appliesTo: 'world', seen: { n: 3, last: 'm9' } }),
+  ];
+  assert.deepEqual(E.map(I.onceOnly), [false, true, false, false, false, false, false]);
+  const by = (n) => E.find((e) => e.name === n).entityId;
+  const inScene = I.assembleWorld(world, E, 5000, { scene: new Set([shop.entityId, by('편지는 부엉이로')]), relations: [] }).text;
+  assert.doesNotMatch(inScene, /지팡이가 주인을 고른다/);
+  assert.doesNotMatch(inScene, /가게 주인의 자기소개/);
+  for (const n of ['마법 사용 제한령', '갈레온 화폐', '편지는 부엉이로', '옛 전쟁']) assert.match(inScene, new RegExp(n));
+});
+
+test('e: 시간표로 모으기 reads an English timetable, finds the owner by its English name, keeps the Korean cells there', async (t) => {
+  const TT = require('../world-archive/lib/timetable.cjs');
+  const service = require('../world-archive/lib/service.cjs');
+  assert.deepEqual(TT.parseWhen(TT.englishWhen('Lunch runs daily from 12:15 to 13:30. Monday: 9 o\'clock Charms (with Ravenclaw, Room 2E); 1:30 pm Herbology. Friday: 09:00–12:00 Double Potions.')).map((c) => `${c.day}|${c.slot}=${c.after}`),
+    ['매일|12:15–13:30=Lunch', '월|9시=Charms', '월|13:30=Herbology', '금|09:00–12:00=Double Potions']);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-064-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  service._test.useStore(s);
+  service._test.useEngine({ glossary: async () => 'Potions = 마법약' });
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'group', name: '은사슴', aliases: ['Silverstag'] }, { type: 'group', name: '은사슴 1학년' }]);
+  s.linkRoom('room-e', w.worldId);
+  const year = s.listEntities(w.worldId).find((e) => e.name === '은사슴 1학년');
+  s.applyTimetable(w.worldId, [{ ownerId: year.entityId, day: '월', slot: '09:00–10:30', value: '주문술' }], { by: 'person' });
+  s.applyAuto(w.worldId, [{ type: 'schedule', name: 'Silverstag First-Year Timetable', fields: { when: 'Monday: 09:00–10:30 Charms. Friday: 09:00–12:00 Double Potions.' } }]);
+  const out = await service.gatherTimetables(w.worldId, { model: false });
+  assert.equal(out.moved.length, 1);
+  assert.equal(out.moved[0].already, 1, 'the Korean 월 09:00 cell stays');
+  const sheet = s.listEntities(w.worldId).find((e) => e.timetable);
+  assert.deepEqual(Object.entries(sheet.timetable.cells).map(([k, c]) => `${k}=${c.value}`).sort(), ['금|09:00–12:00=Double 마법약', '월|09:00–10:30=주문술']);
+  assert.ok(!s.listEntities(w.worldId).some((e) => e.name === 'Silverstag First-Year Timetable'), 'moved, not kept twice');
+});
+
+test('f: a vehicle is not pulled into the group its 위치 칸 names', () => {
+  const school = ent('group', '별시계 마법학교');
+  const train = ent('place', '별시계 급행열차', { fields: { location: '별시계' } });
+  const boat = ent('place', '호수 보트', { fields: { location: '별시계 마법학교' } });
+  const hall = ent('place', '대강당', { fields: { location: '별시계' } });
+  const E = [school, train, boat, hall];
+  assert.equal(groupOfPlace(train, E), null);
+  assert.equal(groupOfPlace(boat, E), null);
+  assert.equal(groupOfPlace(hall, E)?.name, '별시계 마법학교');
 });

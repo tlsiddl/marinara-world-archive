@@ -21,7 +21,7 @@ function world() {
   const duke = ent('person', '하르트 공작');
   const E = [school, house, year1, manor, campus, tower, hayun, duke,
     ent('rule', '마법은 지팡이로', { appliesTo: 'world', updatedAt: '2026-11-02T00:00:00Z' }),
-    ent('system', '금화와 은화', { appliesTo: 'world', updatedAt: '2026-11-05T00:00:00Z' }),
+    ent('system', '금화와 은화 화폐', { appliesTo: 'world', updatedAt: '2026-11-05T00:00:00Z' }),
     ent('rule', '탑 계단은 오른쪽으로만', { appliesTo: tower.entityId }),
     ent('rule', '캠퍼스 안 비행 금지', { appliesTo: campus.entityId }),
     ent('rule', '기숙사 암호는 2주마다', { appliesTo: house.entityId }),
@@ -46,7 +46,7 @@ test('a school scene: world rules (latest first), then the rules of the tower, t
   const r = run(E, R, [by('하윤'), by('별시계탑')]);
   assert.deepEqual(names(E, r.included), [
     '하윤', '별시계탑', // the scene
-    '금화와 은화', '마법은 지팡이로', // the whole world, latest first
+    '금화와 은화 화폐', '마법은 지팡이로', // the whole world, latest first
     '탑 계단은 오른쪽으로만', '캠퍼스 안 비행 금지', '은사슴 1학년 시간표', '기숙사 암호는 2주마다', // here: the tower (0), the campus it is in (1), 하윤's year (1), the house of that year (2)
     '어디 것인지 모르는 규칙', // nobody said where
   ].filter((x) => r.included.some((i) => E.find((e) => e.entityId === i).name === x)));
@@ -58,7 +58,7 @@ test('a school scene: world rules (latest first), then the rules of the tower, t
 test('a manor scene: no school rules, no 시간표; the manor\'s rule after the world\'s; the unknown last', () => {
   const { E, R, by } = world();
   const r = run(E, R, [by('하르트 공작'), by('하르트 저택')]);
-  assert.deepEqual(names(E, r.included), ['하르트 저택', '하르트 공작', '금화와 은화', '마법은 지팡이로', '저택에서는 하인이 문을 연다', '어디 것인지 모르는 규칙'].sort((a, b) => names(E, r.included).indexOf(a) - names(E, r.included).indexOf(b)));
+  assert.deepEqual(names(E, r.included), ['하르트 저택', '하르트 공작', '금화와 은화 화폐', '마법은 지팡이로', '저택에서는 하인이 문을 연다', '어디 것인지 모르는 규칙'].sort((a, b) => names(E, r.included).indexOf(a) - names(E, r.included).indexOf(b)));
   for (const x of ['탑 계단은 오른쪽으로만', '캠퍼스 안 비행 금지', '기숙사 암호는 2주마다', '은사슴 1학년 시간표']) assert.ok(!names(E, r.included).includes(x), x);
   const order = names(E, r.included);
   assert.ok(order.indexOf('마법은 지팡이로') < order.indexOf('저택에서는 하인이 문을 연다'));
