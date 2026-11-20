@@ -94,13 +94,22 @@ const isDescriptiveName = (n) => /의\s/.test(String(n || ''));
 /** 「그리핀도르 1학년 무리」, 「학생들」: a crowd, not a person. */
 const isGroupName = (n) => /(무리|일행|들)$/.test(String(n || '').trim());
 const squashName = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
-/** Whether a text names a setting: its name, another name, or one of the name's words (2+ letters). */
+/** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
+const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
+/**
+ * Whether a text names a setting: its whole name or another name, or one of their words — a Korean word of 2+ letters,
+ * a word in Latin letters of 4+ letters that is not a filler word.
+ */
 function mentions(text, e) {
   const t = squashName(text);
   if (!t || !e) return false;
   const names = [e.name, ...(e.aliases || [])];
-  const parts = names.flatMap((n) => [n, ...String(n).split(/[\s.]+/)]).map(squashName).filter((k) => k.length >= 2);
-  return parts.some((k) => t.includes(k));
+  const whole = names.map(squashName).filter((k) => k.length >= 2);
+  const words = names.flatMap((n) => String(n).split(/[\s.,'’-]+/)).map((w) => w.normalize('NFC').toLowerCase()).filter((w) => {
+    if (/^[a-z]+$/.test(w)) return w.length >= 4 && !NAME_FILLER.has(w);
+    return w.length >= 2 && /\p{Script=Hangul}/u.test(w);
+  });
+  return [...whole, ...words].some((k) => t.includes(squashName(k)));
 }
 /**
  * Which kinds of settings a relation from the reader may join: 위치 two places, 소속 a person and a group, the people
