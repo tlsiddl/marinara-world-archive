@@ -1,5 +1,5 @@
 'use strict';
-const { FIELDS } = require('./store.cjs');
+const { FIELDS, groupOfPlace } = require('./store.cjs');
 const TT = require('./timetable.cjs');
 const R = require('./roster.cjs');
 const CAL = require('./calendar.cjs');
@@ -205,6 +205,8 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
       const e = byIdAll.get(id);
       if (e?.type === 'group' && e.base && byIdAll.has(e.base)) add(e.base, here.get(id));
       if (e?.type === 'place') for (const g of entities || []) if (g.type === 'group' && g.base === id) add(g.entityId, here.get(id) + 1);
+      // v0.6.2: a place whose 위치 칸 names a group (교장실 → 호그와트) is in that group: its rules · 시간표 · 학사일정 are here too
+      if (e?.type === 'place') { const g = groupOfPlace(e, entities); if (g) add(g.entityId, here.get(id) + 1); }
     }
     const ruleLike = (e) => ALWAYS.has(e.type);
     const whereKnown = (e) => ruleLike(e) && e.appliesTo && e.appliesTo !== WORLD && byIdAll.has(e.appliesTo);

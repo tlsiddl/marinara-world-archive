@@ -791,7 +791,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const t = st.tidy;
     if (!t || (!t.items.length && !t.fields.length)) return '';
     const items = t.items.map((x) => `<li><b>${esc(x.name)}</b> <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-trash" data-id="${esc(x.entityId)}">휴지통으로</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}">남기기</button></li>`).join('');
-    const fields = t.fields.map((x) => `<li><b>${esc(x.name)}</b> · ${x.key === 'description' ? '메모' : '성격'}: ${esc(x.value)} <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-clear" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">칸 비우기</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">남기기</button></li>`).join('');
+    const fields = t.fields.map((x) => `<li><b>${esc(x.name)}</b> · ${x.key === 'description' ? '메모' : x.key === 'appearance' ? '외형' : '성격'}: ${esc(x.value)} <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-clear" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">칸 비우기</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">남기기</button></li>`).join('');
     return `<div class="paper"><h2>잡다한 설정 정리 · 후보 ${t.items.length + t.fields.length}</h2><p class="hint">지우지 않았습니다. 고른 것만 휴지통으로 가고 기록에서 되돌릴 수 있습니다.</p>${items ? `<ul class="hist">${items}</ul>` : ''}${fields ? `<ul class="hist">${fields}</ul>` : ''}</div>`;
   }
 
@@ -809,6 +809,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const extra = (e.extra || []).filter((x) => x.value).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(x.value)}</p></div>`).join('');
     const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}${tag('description')}</small><p>${esc(e.description)}</p></div>` : '';
     // v0.5.0 L: 「확인 안 됨 · ○○의 말」
+    // v0.6.2 ⑨: a profile that says another 나이 · 성별 · 종 — never written over, shown beside it
+    const differs = Object.entries(e.differs || {}).map(([k, x]) => `<div class="sec"><small>${esc(d.find((y) => y.key === k)?.label || k)} · 서로 다른 말을 해요</small><p>${esc(e.fields?.[k] || '')} ↔ ${esc(x.value)}</p>${x.evidence ? `<p class="ev">${quoted(x.evidence)}</p>` : ''}</div>`).join('');
     const rumors = Object.entries(e.rumors || {}).map(([k, r]) => `<div class="sec"><small>${esc(d.find((x) => x.key === k)?.label || k)} · 확인 안 됨 · ${esc(r.by || '소문')}의 말</small><p>${esc(r.value)}</p></div>`).join('');
     // 관계: both directions; a chip opens the other setting.
     const rels = (st.relations || []).filter((r) => r.from === e.entityId || r.to === e.entityId).map((r) => {
@@ -832,7 +834,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}${e.nameCheck ? `<span class="pill" title="근거 문장에는 「${esc(e.nameCheck.said)}」이(가) 나옵니다. 이름을 확인해 주세요(고치면 사라집니다).">이름 확인 필요</span>` : ''}
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
-        ${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'person' ? roomHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
+        ${differs}${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'person' ? roomHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
         ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
@@ -1008,10 +1010,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       const keys = (c.keys || []).map((k) => label[k] || (st.fields[c.type] || []).find((f) => f.key === k)?.label || k);
       return `<b>${esc(c.name)}</b> · 직접 고침${keys.length ? `: ${esc(keys.join(', '))}` : ''}`;
     },
-    field: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}${c.correction ? ' · 정정됨' : ''}`,
+    field: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}${c.correction ? ' · 정정됨' : ''}${c.why ? ` · ${esc(c.why)}` : ''}`,
     rumor: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: 확인 안 됨 「${esc(c.after)}」 · ${esc(c.by2 || '소문')}의 말`,
     alias: (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.after)}」`,
-    memo: (c) => `<b>${esc(c.name)}</b> · 메모: ${esc(c.after)}`,
+    memo: (c) => `<b>${esc(c.name)}</b> · 메모: ${esc(c.after)}${c.why ? ` · ${esc(c.why)}` : ''}`,
     merge: (c) => `<b>${esc(c.name)}</b> · 「${esc(c.dropName)}」와(과) 합침`,
     rename: (c) => `<b>${esc(c.before)}</b> → <b>${esc(c.after)}</b> · 번역 단어장의 이름으로`,
     'relation-add': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')}${c.relation?.note ? ` (${esc(c.relation.note)})` : ''}`,
@@ -1025,6 +1027,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     extra: (c) => `<b>${esc(c.name)}</b> · ${esc(c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
     room: (c) => `<b>${esc(c.name)}</b> · 지내는 곳: ${esc(c.beforeName || '없음')} → ${esc(c.afterName || '없음')}`,
     reveal: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: 이야기에 드러남`,
+    hide: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: 아직 드러나지 않음(프로필에만 있음)`,
     applies: (c) => `<b>${esc(c.name)}</b> · 적용되는 곳: ${esc(c.beforeName || '세계 전체')} → ${esc(c.afterName || '세계 전체')}`,
     'alias-remove': (c) => `<b>${esc(c.name)}</b> · 이름이 아닌 다른 이름 「${esc(c.alias)}」 뗌`,
     'alias-move': (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.alias)}」을(를) 새 집단 「${esc(c.to)}」(으)로 옮김`,
@@ -1106,6 +1109,23 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   /** The story's today in this room (when the room reads the world on screen): { date, weekday } or null. */
   const storyToday = () => (st.room?.worldId === st.worldId && st.room?.story?.date ? st.room.story : null);
 
+  // v0.6.2: a place whose 위치 칸 names a group (교장실 → 「호그와트」) is in that group — the same rule as the server's
+  // groupOfPlace (world-archive/lib/store.cjs): the group's name or other name, or that without 학교 · 기숙사 · 가문 …
+  const SQ = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
+  const GROUP_ENDS = ['마법학교', '기숙사', '기사단', '가문', '집안', '일가', '학교', '학원', '조직', '무리', '일행', 'family', 'school', 'house'];
+  const groupKeysC = (g) => [...new Set([g.name, ...(g.aliases || [])].map(SQ).flatMap((k) => { const end = GROUP_ENDS.find((x) => k.endsWith(x) && k.length - x.length >= 2); return [k, end ? k.slice(0, -end.length) : k]; }))].filter((k) => k.length >= 2);
+  const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus'];
+  function groupOfPlaceC(p, all) {
+    if (p?.type !== 'place') return null;
+    const nm = SQ(p.name);
+    const own = all.find((g) => g.type === 'group' && groupKeysC(g).some((k) => GROUP_BUILDING.some((w) => nm === k + w)));
+    if (own) return own;
+    const t = SQ(p?.fields?.location);
+    if (!t) return null;
+    if (all.some((x) => x.type === 'place' && x.entityId !== p.entityId && [x.name, ...(x.aliases || [])].some((n) => SQ(n).length >= 2 && SQ(n) === t))) return null;
+    const len = (g) => Math.max(0, ...groupKeysC(g).filter((k) => t.includes(k)).map((k) => k.length));
+    return all.filter((g) => g.type === 'group' && len(g) > 0).sort((a, b) => len(b) - len(a))[0] || null;
+  }
   function worldMap() {
     const byId = new Map(st.entities.map((e) => [e.entityId, e]));
     const rels = st.relations || [];
@@ -1113,15 +1133,20 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     for (const r of rels) if (r.type === '위치' && byId.get(r.from)?.type === 'place' && byId.get(r.to)?.type === 'place' && !up.has(r.from)) up.set(r.from, r.to);
     const chain = (id) => { const out = []; const seen = new Set([id]); let x = id; while (up.has(x) && !seen.has(up.get(x))) { x = up.get(x); seen.add(x); out.push(x); } return out; }; // the places it is in, nearest first
     const top = (id) => chain(id).at(-1) || id;
+    // a top place that is in a group: the group heads its tab
+    const inGroup = new Map();
+    for (const p of st.entities.filter((e) => e.type === 'place' && !up.has(e.entityId))) { const g = groupOfPlaceC(p, st.entities); if (g) inGroup.set(p.entityId, g.entityId); }
+    const tabTop = (id) => inGroup.get(top(id)) || top(id);
+    const heads = new Set(inGroup.values());
     const groupUp = new Map(); // a group → the bigger group it belongs to (소속, smaller → bigger)
     for (const r of rels) if (r.type === '소속' && byId.get(r.from)?.type === 'group' && byId.get(r.to)?.type === 'group' && !groupUp.has(r.from)) groupUp.set(r.from, r.to);
-    const groupHome = (g) => { const seen = new Set(); let x = g; while (x && !seen.has(x.entityId)) { seen.add(x.entityId); if (x.base && byId.get(x.base)?.type === 'place') return top(x.base); x = byId.get(groupUp.get(x.entityId)); } return null; };
-    const homeOf = (id) => { const e = byId.get(id); return !e ? null : e.type === 'place' ? top(id) : e.type === 'group' ? groupHome(e) : e.type === 'person' && e.room && byId.has(e.room) ? top(e.room) : null; };
+    const groupHome = (g) => { const seen = new Set(); let x = g; while (x && !seen.has(x.entityId)) { seen.add(x.entityId); if (x.base && byId.get(x.base)?.type === 'place') return tabTop(x.base); if (heads.has(x.entityId)) return x.entityId; x = byId.get(groupUp.get(x.entityId)); } return null; };
+    const homeOf = (id) => { const e = byId.get(id); return !e ? null : e.type === 'place' ? tabTop(id) : e.type === 'group' ? groupHome(e) : e.type === 'person' && e.room && byId.has(e.room) ? tabTop(e.room) : null; };
     const tabs = new Map();
     const tabOf = (id) => { if (!tabs.has(id)) tabs.set(id, { key: id, place: byId.get(id), places: [], groups: [], rules: [], sheets: [], cals: [] }); return tabs.get(id); };
     const everywhere = { key: 'world', rules: [], sheets: [], cals: [] };
     const lost = { key: 'unknown', rules: [], groups: [], places: [], sheets: [], cals: [] };
-    for (const p of st.entities.filter((e) => e.type === 'place')) { if (up.has(p.entityId)) tabOf(top(p.entityId)).places.push(p); else tabOf(p.entityId); }
+    for (const p of st.entities.filter((e) => e.type === 'place')) { const t = tabTop(p.entityId); if (t !== p.entityId) tabOf(t).places.push(p); else tabOf(p.entityId); }
     for (const g of st.entities.filter((e) => e.type === 'group')) { const h = groupHome(g); (h ? tabOf(h).groups : lost.groups).push(g); }
     for (const e of st.entities) {
       if (RULEISH.has(e.type)) { if (e.appliesTo === 'world') everywhere.rules.push(e); else { const h = e.appliesTo && homeOf(e.appliesTo); (h ? tabOf(h).rules : lost.rules).push(e); } }
@@ -1130,10 +1155,11 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     }
     const size = (t) => t.places.length + t.groups.length + t.rules.length + t.sheets.length + t.cals.length;
     const list = [...tabs.values()].filter((t) => t.place);
-    for (const t of list) if (!size(t)) lost.places.push(t.place);
-    const big = list.filter((t) => size(t)).sort((a, b) => size(b) - size(a) || a.place.name.localeCompare(b.place.name, 'ko'));
-    const pathOf = (p) => [...chain(p.entityId).slice(0, -1).reverse().map((id) => byId.get(id)?.name), p.name].filter(Boolean).join(' › ');
-    return { byId, big, everywhere, lost, size, pathOf, top, homeOf, up, groupUp };
+    for (const t of list) if (!size(t) && t.place.type === 'place') lost.places.push(t.place);
+    const big = list.filter((t) => size(t) && (t.place.type === 'place' || heads.has(t.key))).sort((a, b) => size(b) - size(a) || a.place.name.localeCompare(b.place.name, 'ko'));
+    // the path inside the tab: every place it is in but the tab's own head (a group head: the top place is shown)
+    const pathOf = (p, key) => [...chain(p.entityId).reverse().filter((id) => id !== key).map((id) => byId.get(id)?.name), p.name].filter(Boolean).join(' › ');
+    return { byId, big, everywhere, lost, size, pathOf, top: tabTop, homeOf, up, groupUp };
   }
   const RULEISH = new Set(['rule', 'system']);
   const caps = (list, label = (e) => e.name) => `<div class="wt-row">${list.map((e) => `<button class="cap" type="button" data-act="open" data-id="${esc(e.entityId)}" data-q="${esc(label(e).toLowerCase())}">${esc(label(e))}</button>`).join('')}</div>`;
@@ -1335,8 +1361,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       const based = t.groups.some((g) => g.base);
       const lead = p.description || p.fields?.use || '';
       const staying = st.entities.filter((e) => e.type === 'person' && e.room && m.top(e.room) === p.entityId);
-      body = `${yearsHtml(y)}<p class="wt-eyebrow">${based ? '큰 장소 · 집단 본거지' : '큰 장소'}</p><h1 class="wt-h1">${esc(p.name)}</h1><p class="wt-lead">${esc(lead)}${lead ? (/[.!?。」)]$/.test(lead.trim()) ? ' ' : '. ') : ''}이 탭의 규칙은 장면이 여기일 때 모델에게 들어가요${todayLine}.</p>${find}
-        ${t.places.length ? `<div class="wt-sec">안의 장소</div>${caps(t.places.slice().sort((a, b) => m.pathOf(a).localeCompare(m.pathOf(b), 'ko')), m.pathOf)}` : ''}
+      body = `${yearsHtml(y)}<p class="wt-eyebrow">${p.type === 'group' ? '큰 장소 · 집단' : based ? '큰 장소 · 집단 본거지' : '큰 장소'}</p><h1 class="wt-h1">${esc(p.name)}</h1><p class="wt-lead">${esc(lead)}${lead ? (/[.!?。」)]$/.test(lead.trim()) ? ' ' : '. ') : ''}이 탭의 규칙은 장면이 여기일 때 모델에게 들어가요${todayLine}.</p>${find}
+        ${t.places.length ? `<div class="wt-sec">안의 장소</div>${caps(t.places.slice().sort((a, b) => m.pathOf(a, t.key).localeCompare(m.pathOf(b, t.key), 'ko')), (e) => m.pathOf(e, t.key))}` : ''}
         ${t.groups.length ? `<div class="wt-sec">집단 · 명단</div>${t.groups.filter((g) => !t.groups.some((x) => x.entityId === m.groupUp.get(g.entityId))).map((g) => rosterCard(g, t.groups.filter((x) => m.groupUp.get(x.entityId) === g.entityId))).join('')}` : ''}
         ${staying.length ? `<div class="wt-sec">여기서 지내는 사람</div>${caps(staying, (e) => `${e.name} · ${m.byId.get(e.room)?.name || ''}`)}` : ''}
         ${timeParts(t, y)}

@@ -1,0 +1,154 @@
+'use strict';
+// v0.6.2 — ① a place whose 위치 칸 names a group is in that group (its rules are 「여기」 in a scene there);
+// ③ the scene's status lines never back a lasting field, and recheck takes back what they wrote;
+// ④ 「아직 드러나지 않음」 field by field; ⑦ evidence without HTML tags. Made-up world only (별시계 학원).
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { Archive, groupOfPlace } = require('../world-archive/lib/store.cjs');
+const X = require('../world-archive/lib/extract.cjs');
+const I = require('../world-archive/lib/inject.cjs');
+
+let n = 0;
+const id = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+const ent = (type, name, extra = {}) => ({ entityId: id(), type, name, aliases: [], description: '', fields: {}, extra: [], pinned: false, status: 'confirmed', revision: 1, createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z', ...extra });
+
+test('① a place whose 위치 names a group (or the group without 마법학교) is in it; its rules come with the scene', () => {
+  const school = ent('group', '별시계 마법학교');
+  const office = ent('place', '학장실', { fields: { location: '별시계 성 3층' } });
+  const hall = ent('place', '대강당', { fields: { location: '별시계' } });
+  const inn = ent('place', '은사슴 여관', { fields: { location: '별시계 마을' } });
+  const village = ent('place', '별시계 마을');
+  const E = [school, office, hall, inn, village, ent('rule', '복도에서 뛰지 않는다', { appliesTo: school.entityId })];
+  assert.equal(groupOfPlace(office, E)?.name, '별시계 마법학교');
+  assert.equal(groupOfPlace(hall, E)?.name, '별시계 마법학교');
+  assert.equal(groupOfPlace(inn, E), null, 'a place with that name is where it is, not the group');
+  assert.equal(groupOfPlace(ent('place', '별시계 성'), E)?.name, '별시계 마법학교', 'the group\'s name and a building word');
+  assert.equal(groupOfPlace(ent('place', '별시계 급행열차'), E), null, 'not every place that starts with the name');
+  const r = I.assembleWorld({ name: '별시계', description: '', injectMode: 'scene' }, E, 5000, { scene: new Set([office.entityId]), relations: [] });
+  assert.match(r.text, /복도에서 뛰지 않는다/);
+});
+
+test('③ status lines are marked; ⑦ evidence has no HTML tags', () => {
+  const t = '§RP | 1988-07-19 (화) | 16:15 | 학장실 | 맑음§\n윤하윤: 잠옷 차림 | 침대에 누움 | 졸림\n윤하윤은 <font color="red">은빛 머리</font>를 묶었다.';
+  const b = X.segmentBlocks(t);
+  assert.deepEqual(b.blocks, ['status', 'status', null]);
+  const [part] = X.batches([{ id: 'm1', speaker: '서하', role: 'assistant', content: t }], 0);
+  const reply = JSON.stringify({ items: [{ type: 'person', name: '윤하윤', evidence: [{ n: '1.3' }],
+    fields: { appearance: { v: '잠옷 차림', n: '1.2' }, state: { v: '졸림', n: '1.2' }, gender: { v: '여성', n: '1.3' } } }] });
+  const out = X.checkItems(JSON.parse(reply), part, []);
+  const it = out.items[0];
+  assert.equal(it.fields.appearance, undefined, 'a status line does not back 외형');
+  assert.equal(it.fields.state, '졸림', 'it does back 지금 상태');
+  assert.ok(out.droppedFields.some((d) => d.key === 'appearance' && d.why === 'a status line only'));
+  assert.doesNotMatch(it.evidence, /<font|<\/font>/);
+});
+
+test('④ hidden field by field: a profile-only field is hidden, one the story also says is not', () => {
+  const t = '<npc_profile>\n- Name: 윤하윤\n- Age: 11살\n- Appearance: 은빛 머리\n</npc_profile>\n윤하윤은 은빛 머리를 묶었다.';
+  const [part] = X.batches([{ id: 'm1', speaker: '서하', role: 'assistant', content: t }], 0);
+  const b = X.segmentBlocks(t);
+  const num = (re) => `1.${b.sentences.findIndex((x) => re.test(x)) + 1}`;
+  const reply = { items: [{ type: 'person', name: '윤하윤', evidence: [{ n: num(/Name/) }],
+    fields: { age: { v: '11살', n: num(/Age/) }, appearance: { v: '은빛 머리', n: [num(/Appearance/), num(/묶었다/)] } } }] };
+  const it = X.checkItems(reply, part, []).items[0];
+  assert.equal(it.hidden.age, true);
+  assert.equal(it.hidden.appearance, undefined);
+});
+
+test('③ ④ recheck: a status-line change goes back (logged, undoable, a person\'s field untouched); hidden recomputed', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'person', name: '윤하윤', fields: { appearance: '은빛 머리', personality: '차분함', age: '11살' }, hidden: { age: true }, evidence: '윤하윤은 차분하다' }]);
+  s.applyAuto(w.worldId, [{ type: 'person', name: '윤하윤', fields: { appearance: '잠옷 차림', personality: '졸림' }, fieldEvidence: { appearance: '윤하윤: 잠옷 차림 | 침대에 누움 | 졸림', personality: '윤하윤: 잠옷 차림 | 침대에 누움 | 졸림' } }]);
+  const e0 = s.listEntities(w.worldId).find((e) => e.name === '윤하윤');
+  // the person writes 성격 themselves: never taken back
+  s.updateEntity(w.worldId, e0.entityId, { revision: e0.revision, fields: { ...e0.fields, personality: '조용함' } });
+  const check = { isStatus: (x) => X.STATUS_LINE.test(x.trim()), says: X.saysValue, story: ['윤하윤은 11살이 되던 해 입학했다.'], profile: [] };
+  const out = s.recheckFields(w.worldId, check);
+  const e = s.listEntities(w.worldId).find((x) => x.name === '윤하윤');
+  assert.equal(e.fields.appearance, '은빛 머리');
+  assert.equal(e.fields.personality, '조용함');
+  const back = out.find((c) => c.key === 'appearance');
+  assert.equal(back.why, '상태줄 근거라 되돌림');
+  assert.ok(!out.some((c) => c.key === 'personality' && c.action === 'field'));
+  assert.equal(e.hidden?.age, undefined, 'the story says 11살 — not hidden any more');
+  assert.ok(out.some((c) => c.action === 'reveal' && c.key === 'age' && c.why === '본문에 나옴'));
+  // undoable
+  s.undoChange(w.worldId, back.id);
+  assert.equal(s.listEntities(w.worldId).find((x) => x.name === '윤하윤').fields.appearance, '잠옷 차림');
+  // run again: nothing more (the reverted change is not taken back twice)
+  assert.equal(s.recheckFields(w.worldId, check).filter((c) => c.key === 'appearance').length, 0);
+});
+
+test('④ recheck: a field written only from profile sentences is marked hidden', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'person', name: '하르트 공작', fields: { gender: '남성' }, evidence: '하르트 공작이 들어왔다.' }]);
+  s.applyAuto(w.worldId, [{ type: 'person', name: '하르트 공작', fields: { age: '58살' }, fieldEvidence: { age: '- Age: 58' } }]);
+  const out = s.recheckFields(w.worldId, { isStatus: (x) => X.STATUS_LINE.test(x.trim()), says: X.saysValue, story: ['하르트 공작이 들어왔다.'], profile: ['- Age: 58'] });
+  const e = s.listEntities(w.worldId).find((x) => x.name === '하르트 공작');
+  assert.equal(e.hidden?.age, true);
+  assert.equal(e.hidden?.gender, undefined);
+  assert.ok(out.some((c) => c.action === 'hide' && c.key === 'age'));
+});
+
+test('⑨ profile blocks read by code: parse both shapes', () => {
+  const P = require('../world-archive/lib/profile.cjs');
+  const t = '<npc_profile>\n- Name: Rowan "Ro" Hart / Age: 11 / Gender: Female\n- Appearance and clothing: Silver hair, star-pinned robe.\n- Demeanor and key personality traits: Quiet, stubborn.\n- Other noteworthy details: Only daughter of the Hart family.\n</npc_profile>\n<npc_profile>\n이름/나이/성별: 노을 하르트 / 마흔둘 / 남\n외형과 옷차림: 은테 안경, 회색 망토\n</npc_profile>\n<world_profile>\n- Subject: Silverstag First-Year Timetable\n- Type: Schedule\n- Established information: Monday 1st period Astronomy; Tuesday 1st period Herbology; Wednesday 2nd period Flying.\n</world_profile>';
+  const [a, b, c] = P.parseProfiles(t);
+  assert.equal(a.name, 'Rowan Hart');
+  assert.equal(a.nick, 'Ro');
+  assert.deepEqual(Object.keys(a.fields).sort(), ['age', 'appearance', 'background', 'gender', 'personality']);
+  assert.equal(P.tidyValue('age', a.fields.age), '11살');
+  assert.equal(P.tidyValue('gender', a.fields.gender), '여성');
+  assert.equal(b.name, '노을 하르트');
+  assert.equal(b.fields.age, '마흔둘');
+  assert.equal(b.fields.appearance, '은테 안경, 회색 망토');
+  assert.equal(c.kind, 'world');
+  assert.equal(P.kindOfType(c.type), 'schedule');
+  assert.deepEqual(P.parseProfiles('<npc_profile>\n- Name: Gringotts silver-door goblin\n</npc_profile>')[0].nameless, true);
+});
+
+test('⑨ applyProfiles: empty fields only, a person made, a second profile\'s other age is 「서로 다른 말을 해요」, a timetable kept', (t) => {
+  const P = require('../world-archive/lib/profile.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'person', name: '로완 하트', fields: { personality: '말수가 적다' } }]);
+  const e0 = s.listEntities(w.worldId)[0];
+  s.updateEntity(w.worldId, e0.entityId, { revision: e0.revision, fields: { ...e0.fields, background: '직접 쓴 배경' } });
+  const pairs = [{ from: 'Rowan Hart', to: '로완 하트' }, { from: 'Silverstag First-Year Timetable', to: '은사슴 1학년 시간표' }];
+  const first = P.parseProfiles('<npc_profile>\n- Name: Rowan Hart / Age: 11 / Gender: Female\n- Demeanor and key personality traits: Quiet.\n- Other noteworthy details: Heir.\n</npc_profile>\n<npc_profile>\n- Name: Madam Velloy / Age: 60 / Gender: Female\n</npc_profile>\n<world_profile>\n- Subject: Silverstag First-Year Timetable\n- Type: Schedule\n- Established information: Monday 1st period Astronomy; Tuesday 1st period Herbology.\n</world_profile>\n<world_profile>\n- Subject: Unknown Hall\n- Type: Location\n- Established information: A hall.\n</world_profile>');
+  const ch = s.applyProfiles(w.worldId, first, { pairs, story: ['로완 하트는 열한 살이다.'], says: X.saysValue });
+  let E = s.listEntities(w.worldId);
+  const rowan = E.find((x) => x.name === '로완 하트');
+  assert.equal(rowan.fields.age, '11살');
+  assert.equal(rowan.fields.gender, '여성');
+  assert.equal(rowan.fields.personality, '말수가 적다', 'a field with a value stays');
+  assert.equal(rowan.fields.background, '직접 쓴 배경', 'the person\'s own field is never touched');
+  assert.equal(rowan.hidden?.gender, true, 'only the profile says it');
+  assert.ok(E.some((x) => x.name === 'Madam Velloy' && x.fields.age === '60살'), 'a person the reader left out is made');
+  const sheet = E.find((x) => x.name === '은사슴 1학년 시간표');
+  assert.equal(sheet.type, 'schedule');
+  assert.match(sheet.fields.when, /Monday/);
+  assert.ok(!E.some((x) => x.name === 'Unknown Hall'), 'an English-only setting the glossary does not name is not made');
+  assert.ok(ch.every((c) => c.why === '프로필 블록'));
+  // a second profile with another age
+  s.applyProfiles(w.worldId, P.parseProfiles('<npc_profile>\n- Name: Rowan Hart / Age: 12 / Gender: Female\n</npc_profile>'), { pairs });
+  E = s.listEntities(w.worldId);
+  const again = E.find((x) => x.name === '로완 하트');
+  assert.equal(again.fields.age, '11살', 'not written over');
+  assert.equal(again.differs.age.value, '12살');
+  // undo of a field filled
+  const filled = ch.find((c) => c.action === 'field' && c.key === 'gender');
+  s.undoChange(w.worldId, filled.id);
+  assert.equal(s.listEntities(w.worldId).find((x) => x.name === '로완 하트').fields.gender, undefined);
+});

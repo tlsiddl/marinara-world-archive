@@ -14,11 +14,14 @@ const { rosterOf, ROLE_WORDS } = require('./roster.cjs');
 const TT = require('./timetable.cjs');
 const CAL = require('./calendar.cjs');
 const N = require('./names.cjs');
+const P = require('./profile.cjs');
 
 const SCHEMA = 1;
 const BACKUP_FORMAT = 'marinara-world-archive-backup';
 /** 할 일 10: how many earlier values a field keeps (shown as 「이전: ○○」; never put in {{세계}}). */
 const PAST_MAX = 3;
+/** v0.6.2 ③: the lasting fields a scene's status line (옷차림 · 자세 · 기분) never backs — with 메모. */
+const STATUS_OFF = new Set(['appearance', 'personality', 'background', 'family']);
 /** 할 일 11: a room's score events (the board's name and unit are the world's). */
 const SCORE_MAX = 20000;
 function validScoreEvent(e) {
@@ -141,8 +144,10 @@ const squashName = (x) => String(x || '').normalize('NFC').toLowerCase().replace
 /** What a longer group name may add and still be the same group, not one inside it (「슬리데린 기숙사」 is 「슬리데린」). */
 const SAME_GROUP_SUFFIX = new Set(['기숙사', '가문', '집안', '일가', '학교', '마법학교', '학원', '기사단', '조직', '무리', '일행', 'house', 'family', 'school']);
 /** A squashed group name without such an ending (「슬리데린기숙사」 → 「슬리데린」); itself when nothing of 2+ letters is left. */
+// v0.6.2: the longest ending first (「호그와트마법학교」 → 「호그와트」, not 「호그와트마법」)
+const SUFFIX_LONGEST = [...SAME_GROUP_SUFFIX].sort((a, b) => b.length - a.length);
 const groupCore = (k) => {
-  for (const suf of SAME_GROUP_SUFFIX) if (k.endsWith(suf) && k.length - suf.length >= 2) return k.slice(0, -suf.length);
+  for (const suf of SUFFIX_LONGEST) if (k.endsWith(suf) && k.length - suf.length >= 2) return k.slice(0, -suf.length);
   return k;
 };
 const groupKeys = (g) => [...new Set([g.name, ...(g.aliases || [])].map(squashName).flatMap((k) => [k, groupCore(k)]))].filter((k) => k.length >= 2);
@@ -150,6 +155,25 @@ const groupKeys = (g) => [...new Set([g.name, ...(g.aliases || [])].map(squashNa
 const namesGroup = (text, g) => {
   const t = squashName(text);
   return Boolean(t && g?.name) && groupKeys(g).some((k) => t.includes(k));
+};
+/**
+ * v0.6.2: the group a place is part of when its 위치·소속 칸 names a group, not a place (교장실 → 「호그와트」): the
+ * longest group name it holds; or when its name is the group's and a building word (「호그와트 성」 → 「호그와트」). null when
+ * the 칸 names no group (or names a place of the world first).
+ */
+const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus'];
+const groupOfPlace = (place, entities) => {
+  if (place?.type !== 'place') return null;
+  // 「호그와트 성」: the group's name and a building word — the group's own grounds
+  const nm = squashName(place.name);
+  const own = (entities || []).find((g) => g.type === 'group' && groupKeys(g).some((k) => GROUP_BUILDING.some((w) => nm === k + w)));
+  if (own) return own;
+  const text = String(place?.fields?.location || '').trim();
+  if (!text) return null;
+  const keyLen = (g) => Math.max(0, ...groupKeys(g).filter((k) => squashName(text).includes(k)).map((k) => k.length));
+  const places = (entities || []).filter((e) => e.type === 'place' && e.entityId !== place.entityId);
+  if (places.some((p) => [p.name, ...(p.aliases || [])].some((n) => squashName(n).length >= 2 && squashName(n) === squashName(text)))) return null;
+  return (entities || []).filter((g) => g.type === 'group' && namesGroup(text, g)).sort((a, b) => keyLen(b) - keyLen(a))[0] || null;
 };
 /** Two group names for the same group (「슬리데린」 · 「슬리데린 기숙사」 · 「그리핀도르 1학년 무리」 ~ 「그리핀도르 1학년」). */
 const sameGroupName = (name, g) => { const k = squashName(name); return groupKeys(g).some((x) => x === k || x === groupCore(k)); };
@@ -468,6 +492,7 @@ function validEntity(e) {
     (e.calendar === undefined || CAL.validCalendar(e.calendar)) &&
     (e.nameCheck === undefined || isObject(e.nameCheck)) &&
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
+    (e.differs === undefined || (isObject(e.differs) && Object.values(e.differs).every((d) => isObject(d) && typeof d.value === 'string'))) &&
     (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
     (e.maybe === undefined || (Array.isArray(e.maybe) && e.maybe.every((m) => isObject(m) && typeof m.id === 'string'))) &&
@@ -1115,6 +1140,8 @@ class Archive {
         else { delete e.rumors[c.key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
       } else if (c.action === 'reveal') {
         e.hidden = { ...(e.hidden || {}), [c.key]: true };
+      } else if (c.action === 'hide') {
+        if (e.hidden?.[c.key]) { delete e.hidden[c.key]; if (!Object.keys(e.hidden).length) delete e.hidden; }
       } else if (c.action === 'extra') {
         const x = (e.extra || []).find((y) => y.label === c.key);
         if (!x || x.value !== c.after || x.source !== 'auto') throw new ArchiveError(409, later);
@@ -2396,6 +2423,214 @@ class Archive {
   }
 
   /**
+   * v0.6.2 ⑨: profile blocks read by code (profile.cjs parseProfiles), written in — no model.
+   * <npc_profile>: the person (by name, other name, or the glossary's Korean; made when there is none) gets its empty
+   * 나이 · 성별 · 종 · 외형 · 성격 · 배경 filled ('field' changes, undoable); a field the person wrote is never touched; a
+   * 나이 · 성별 · 종 that already says something else is not written over — it waits as 「서로 다른 말을 해요」
+   * (e.differs). Each field filled is 「아직 드러나지 않음」 unless a story sentence naming the person says it (④).
+   * <world_profile>: Type → kind (Location → 장소, Group · Institution → 집단, Schedule → 일정, System → 시스템); the
+   * information is the evidence and the 메모 of a new one (or an empty 메모); a schedule whose information holds two
+   * cells or more keeps it in 언제 for 「시간표로 모으기」.
+   * opts: { pairs (glossary), story: [sentence], says(value, sentence, kind), by, roomId }. Returns the changes.
+   */
+  applyProfiles(worldId, profiles, opts = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const t = now();
+    const by = opts.by || 'profile';
+    const changes = [];
+    const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: opts.roomId ?? null, messageIds: [], ...c });
+    const touched = new Set();
+    const story = (opts.story || []).map((s) => ({ s, q: squashName(s) }));
+    const keysOf = (e) => [e.name, ...(e.aliases || [])].map(squashName).filter((k) => k.length >= 2);
+    const find = (types, names) => {
+      const ks = names.map(squashName).filter((k) => k.length >= 2);
+      return doc.entities.find((e) => types.includes(e.type) && keysOf(e).some((k) => ks.includes(k))) || null;
+    };
+    const told = (e, value, kind) => {
+      if (typeof opts.says !== 'function') return false;
+      const names = keysOf(e);
+      return story.some((x) => names.some((n) => x.q.includes(n)) && opts.says(value, x.s, kind));
+    };
+    const make = (type, name, aliases, evidence) => {
+      if (doc.entities.length >= ENTITY_MAX) return null;
+      const e = { entityId: randomUUID(), type, name, aliases: aliases.filter((a) => a && squashName(a) !== squashName(name)).slice(0, ALIAS_MAX), description: '', fields: {}, extra: [], pinned: false, sources: {}, status: 'confirmed', provenance: { source: 'auto', by, roomId: opts.roomId ?? null, evidence: String(evidence).slice(0, 300) }, revision: 1, createdAt: t, updatedAt: t };
+      doc.entities.push(e);
+      log({ entityId: e.entityId, name, type, action: 'create', evidence: String(evidence).slice(0, 300), why: '프로필 블록' });
+      return e;
+    };
+    for (const p of profiles || []) {
+      if (p.kind === 'npc') {
+        const kor = P.korean(p.name, opts.pairs);
+        let e = find(['person'], [p.name, kor].filter(Boolean));
+        if (!e && p.nameless) continue; // 「(unnamed)」: no one to make
+        if (!e) {
+          // one word of the name (「노을」 of 「노을 하르트」 → 「노을 교수」): that one person, its full name kept as another
+          // name; two or more such people: nobody is made (one of them, most likely)
+          const TITLE = new Set(['madam', 'madame', 'mr', 'mrs', 'miss', 'ms', 'sir', 'lady', 'lord', 'dr', 'professor', 'master', 'mistress', 'duke', 'duchess', 'the', 'of', '교수', '부인', '선생', '공작', '경', '씨']);
+          const words = [...new Set([p.name, kor].filter(Boolean).flatMap((n) => String(n).trim().split(/\s+/)).map(squashName).filter((w) => w.length >= 2 && !TITLE.has(w)))];
+          const near = doc.entities.filter((x) => x.type === 'person' && [x.name, ...(x.aliases || [])].some((n) => String(n).trim().split(/\s+/).map(squashName).some((w) => words.includes(w))));
+          if (near.length > 1) continue;
+          if (near.length === 1) {
+            e = near[0];
+            const add = [kor, p.name].filter((n) => n && nameLike(n) && !keysOf(e).includes(squashName(n)) && !find(['person'], [n]));
+            if (add.length && e.sources?.aliases !== 'manual' && (e.aliases || []).length < ALIAS_MAX) {
+              for (const a of add) { e.aliases.push(a); log({ entityId: e.entityId, name: e.name, type: e.type, action: 'alias', after: a, evidence: (p.lines.name || '').slice(0, 300), why: '프로필 블록' }); }
+              touched.add(e);
+            }
+          }
+        }
+        if (!e) {
+          const other = (x) => (x && nameLike(x) && !find(['person'], [x]) ? x : '');
+          e = make('person', kor || p.name, [kor ? p.name : '', other(p.nick), other(p.title)], p.lines.name || p.name);
+          if (!e) continue;
+        }
+        e.sources = e.sources || {};
+        for (const [key, raw] of Object.entries(p.fields)) {
+          if (!FIELDS.person.some((f) => f.key === key)) continue;
+          const value = P.tidyValue(key, raw).slice(0, 2000);
+          const before = e.fields?.[key] || '';
+          const evidence = (p.lines[key] || '').slice(0, 300);
+          if (before) {
+            // a 나이 · 성별 · 종 that says something else: 「서로 다른 말을 해요」, never over it
+            if (['age', 'gender', 'species'].includes(key) && !P.sameValue(key, before, value) && e.differs?.[key]?.value !== value) {
+              e.differs = { ...(e.differs || {}), [key]: { value, evidence, at: t } };
+              touched.add(e);
+            }
+            continue;
+          }
+          if (e.sources[key] === 'manual') continue;
+          e.fields = { ...(e.fields || {}), [key]: value };
+          e.sources[key] = 'auto';
+          const kind = FIELDS.person.find((f) => f.key === key)?.kind || 'text';
+          const hide = !told(e, value, kind);
+          if (hide) e.hidden = { ...(e.hidden || {}), [key]: true };
+          touched.add(e);
+          log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before: '', after: value, evidence, ...(hide ? { hidden: true } : {}), why: '프로필 블록' });
+        }
+      } else if (p.kind === 'world') {
+        const type = P.kindOfType(p.type);
+        const kor = P.korean(p.subject, opts.pairs);
+        const sameKinds = type === 'place' || type === 'group' ? [type] : ['rule', 'system', 'schedule', 'history', 'custom'];
+        let e = find(sameKinds, [p.subject, kor].filter(Boolean));
+        const info = p.info.slice(0, 2000);
+        // a new one only when the glossary names it in Korean (or it is a timetable to gather): an English-only name is
+        // most often a setting the reader already wrote in Korean
+        const cells = type === 'schedule' && (TT.splitWhen(info).cells.length >= 2 || P.holdsDays(info));
+        if (!e && !kor && !cells) continue;
+        if (!e) {
+          e = make(type, kor || p.subject, [kor ? p.subject : ''], p.line || info);
+          if (!e) continue;
+          if (cells) {
+            e.fields.when = info;
+            e.sources.when = 'auto';
+            e.description = '프로필 블록의 시간표 — 「시간표로 모으기」가 주인을 찾아요';
+            e.sources.description = 'auto';
+            continue;
+          }
+          e.description = info;
+          e.sources.description = 'auto';
+          continue;
+        }
+        if (!e.description && e.sources?.description !== 'manual') {
+          e.description = info;
+          e.sources = { ...(e.sources || {}), description: 'auto' };
+          touched.add(e);
+          log({ entityId: e.entityId, name: e.name, type: e.type, action: 'memo', before: '', after: info, evidence: (p.line || info).slice(0, 300), why: '프로필 블록' });
+        }
+      }
+    }
+    for (const e of touched) if (!changes.some((c) => c.entityId === e.entityId && c.action === 'create')) { e.revision++; e.updatedAt = t; }
+    if (!changes.length && !touched.size) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * v0.6.2 ③ ④: fields read before, checked again by code (no model).
+   * ③ a field (or 메모) change whose evidence is only the scene's status lines (「이름: 옷차림 | 자세 | 기분」, the §RP head)
+   *    goes back to what it was before — a 'field' change by recheck, why 「상태줄 근거라 되돌림」, undoable. Not 지금 상태,
+   *    never a field the person wrote, and only while the field still holds what that change wrote.
+   * ④ 「아직 드러나지 않음」 field by field: off when a story sentence (outside profile blocks and status lines) that names
+   *    the setting says the value ('reveal', why 「본문에 나옴」); on when the field's evidence is only profile sentences and
+   *    no such story sentence says it ('hide').
+   * check: { isStatus(text), says(value, sentence), story: [sentence], profile: [sentence] } — the sentences of the
+   * world's rooms (service.cjs gives them; without them only ③ runs). Returns the changes.
+   */
+  recheckFields(worldId, check, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const history = this.readHistory(worldId);
+    const t = now();
+    const by = meta.by || 'recheck';
+    const changes = [];
+    const strip = (x) => String(x || '').replace(/<\/?[a-z][a-z0-9_-]*(\s[^<>]*)?\/?>/gi, '').replace(/\s+/g, ' ').trim();
+    const pieces = (ev) => String(ev || '').split(' / ').map(strip).filter(Boolean);
+    const onlyStatus = (ev) => { const p = pieces(ev); return p.length > 0 && p.every((x) => check.isStatus(x)); };
+    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+    const touched = new Set();
+    // ③ newest first, so a chain of status-line changes goes all the way back; one taken back before (even if the
+    // person undid that) is not taken back again
+    const done = new Set(history.changes.map((c) => c.statusRevert).filter(Boolean));
+    for (const c of [...history.changes].reverse()) {
+      if (c.undoneAt || c.by === 'person' || (c.action !== 'field' && c.action !== 'memo') || c.statusRevert || done.has(c.id)) continue;
+      const key = c.action === 'memo' ? 'description' : c.key;
+      if (!(key === 'description' || (c.type === 'person' && STATUS_OFF.has(key))) || !onlyStatus(c.evidence)) continue;
+      const e = byId.get(c.entityId);
+      if (!e || e.sources?.[key] === 'manual') continue;
+      const current = key === 'description' ? e.description || '' : e.fields?.[key] || '';
+      if (current !== (c.after || '')) continue;
+      const back = c.before || '';
+      if (key === 'description') e.description = back;
+      else if (back) e.fields[key] = back;
+      else delete e.fields[key];
+      if (key !== 'description' && e.past?.[key]?.[0]?.value === back) { e.past[key] = e.past[key].slice(1); if (!e.past[key].length) delete e.past[key]; if (!Object.keys(e.past).length) delete e.past; }
+      if (!back) delete e.sources[key];
+      if (e.hidden?.[key]) { delete e.hidden[key]; if (!Object.keys(e.hidden).length) delete e.hidden; }
+      touched.add(e);
+      changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: c.action, ...(c.action === 'field' ? { key } : {}), before: current, after: back, evidence: c.evidence, why: '상태줄 근거라 되돌림', statusRevert: c.id });
+    }
+    // ④ hidden again, field by field
+    if (Array.isArray(check.story)) {
+      const profile = new Set((check.profile || []).map(strip));
+      const inProfile = (x) => profile.has(x) || [...profile].some((p) => x.length >= 20 && p.startsWith(x));
+      const lastEvidence = new Map(); // `${entityId}.${key}` → the evidence of the change that wrote the field
+      for (const c of history.changes) if (!c.undoneAt && c.action === 'field' && c.after) lastEvidence.set(`${c.entityId}.${c.key}`, c.evidence);
+      const story = check.story.map(strip).filter(Boolean).map((s) => ({ s, q: squashName(s) }));
+      for (const e of doc.entities) {
+        if (!['person', 'place', 'group'].includes(e.type)) continue;
+        const names = [e.name, ...(e.aliases || [])].map(squashName).filter((n) => n.length >= 2);
+        const first = squashName(String(e.name).trim().split(/\s+/)[0]);
+        if (first.length >= 2) names.push(first);
+        const about = story.filter((x) => names.some((n) => x.q.includes(n)));
+        for (const [key, value] of Object.entries(e.fields || {})) {
+          if (!value || e.sources?.[key] === 'manual') continue;
+          const kind = FIELDS[e.type]?.find((f) => f.key === key)?.kind || 'text';
+          const said = about.find((x) => check.says(value, x.s, kind));
+          if (e.hidden?.[key] && said) {
+            delete e.hidden[key];
+            if (!Object.keys(e.hidden).length) delete e.hidden;
+            touched.add(e);
+            changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'reveal', key, before: '', after: value, evidence: said.s.slice(0, 300), why: '본문에 나옴' });
+          } else if (!e.hidden?.[key] && !said && profile.size) {
+            const ev = pieces(lastEvidence.get(`${e.entityId}.${key}`) ?? (e.provenance?.evidence || ''));
+            if (!ev.length || !ev.every(inProfile)) continue;
+            e.hidden = { ...(e.hidden || {}), [key]: true };
+            touched.add(e);
+            changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'hide', key, after: value, evidence: ev.join(' / ').slice(0, 300), why: '프로필에만 있음' });
+          }
+        }
+      }
+    }
+    if (!changes.length) return [];
+    for (const e of touched) { e.revision++; e.updatedAt = t; }
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
    * The reader's relations checked again by code (no model): a relation whose kind does not fit its two settings,
    * that has a person named by description at either end, or whose evidence names neither setting, is removed
    * ('relation-remove', undoable). Relations from the 소속 칸 and the person's own are left as they are.
@@ -2618,6 +2853,11 @@ class Archive {
 
   // ---------------------------------------------------------------- 할 일 7 — 백업 · 복원
 
+  /** The rooms linked to a world (ids). */
+  roomsOfWorld(worldId) {
+    return Object.entries(this.readRooms().rooms).filter(([, l]) => l.worldId === worldId).map(([roomId]) => roomId);
+  }
+
   /**
    * One world as one file: its settings, entities, relations, history and the rooms that read it. format and
    * schemaVersion say what it is, so a later version can refuse it safely.
@@ -2764,8 +3004,10 @@ class Archive {
 }
 
 module.exports = {
+  STATUS_OFF,
   nameLike,
   namesGroup,
+  groupOfPlace,
   Archive,
   ArchiveError,
   SCHEMA,
