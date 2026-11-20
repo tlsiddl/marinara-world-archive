@@ -232,13 +232,15 @@ function speciesName(name, species) {
 /**
  * 「크니즐」: a person setting that is only a 종 name (made before the reader was told not to) — suggested as possibly
  * the person whose 종 it is (「베아트릭스」, 종 하프 크니즐). Never merged by itself; the named one comes first.
+ * Only another individual of that kind counts: a setting whose own name is its 종 (「거대 오징어」, 「그린디로」) is
+ * the creature itself when nothing else has that 종, and is never suggested.
  */
 function speciesPairs(entities, skip = () => false) {
   const people = entities.filter((e) => e.type === 'person');
   const out = [];
   for (const p of people) {
     const sp = String(p.fields?.species || '').trim();
-    if (!sp) continue;
+    if (!sp || speciesName(p.name, sp)) continue; // the kind itself, not another individual of it
     for (const s of people) {
       if (s === p || !speciesName(s.name, sp) || skip(p.entityId, s.entityId)) continue;
       out.push({ a: p.entityId, b: s.entityId, why: `「${s.name}」은(는) 종 이름일 수 있음 (${p.name}의 종: ${sp})` });

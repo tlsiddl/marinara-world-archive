@@ -309,9 +309,10 @@ function checkItems(parsed, part, cast) {
   const items = [];
   const dropped = [];
   const droppedFields = [];
-  // 종 written in this batch: a person item that is only one of them (「크니즐」 next to 「베아트릭스」, 종 하프 크니즐) is no one.
+  // 종 of the individuals in this batch: a person item that is only one of them (「크니즐」 next to 「베아트릭스」, 종 하프
+  // 크니즐) is no one. An item whose own name is its 종 (「거대 오징어」) is the creature itself, not another individual.
   const spOf = (it) => { const v = it?.fields?.species; return String((v && typeof v === 'object' ? v.v : v) || '').trim(); };
-  const batchSpecies = list.filter((x) => x && typeof x === 'object' && x.type === 'person').map(spOf).filter(Boolean);
+  const individuals = list.filter((x) => x && typeof x === 'object' && x.type === 'person' && spOf(x) && !speciesName(String(x.name || ''), spOf(x)));
   for (const it of list) {
     if (!it || typeof it !== 'object' || typeof it.name !== 'string') continue;
     const name = it.name.trim();
@@ -322,7 +323,7 @@ function checkItems(parsed, part, cast) {
     if (!NAMED_KINDS.has(it.type) && castParts.some((p) => squash(name).includes(p))) { dropped.push({ name, why: 'about a card' }); continue; }
     if (/\p{Script=Hangul}/u.test(name) && /[A-Za-z]/.test(name)) { dropped.push({ name, why: 'mixed script name' }); continue; }
     if (NAMED_KINDS.has(it.type) && !names.some((n) => n.length >= 1 && text.includes(n))) { dropped.push({ name, why: 'name not in text' }); continue; }
-    if (it.type === 'person' && batchSpecies.some((sp) => speciesName(name, sp))) { dropped.push({ name, why: 'species name only' }); continue; }
+    if (it.type === 'person' && individuals.some((x) => x !== it && speciesName(name, spOf(x)))) { dropped.push({ name, why: 'species name only' }); continue; }
     const raw = Array.isArray(it.evidence) ? it.evidence : it.evidence ? [it.evidence] : [];
     const found = S.resolveEvidence(raw.map((e) => (typeof e === 'string' ? { q: e } : e)), index).slice(0, 3);
     if (!found.length) { dropped.push({ name, why: 'no evidence sentence' }); continue; }
