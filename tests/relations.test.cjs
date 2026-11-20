@@ -178,6 +178,7 @@ test('relationFits: 위치 joins places, 소속 a person and a group, family kin
   assert.equal(f('소속', 'person', 'group'), true);
   assert.equal(f('소속', 'group', 'person'), true);
   assert.equal(f('소속', 'person', 'place'), false);
+  assert.equal(f('소속', 'group', 'group'), true, 'a smaller group in a bigger one');
   assert.equal(f('가족', 'person', 'person'), true);
   assert.equal(f('연인', 'person', 'group'), false);
   assert.equal(f('적대', 'group', 'group'), true);
@@ -190,15 +191,15 @@ test('(라) a crowd read as a person becomes a group by code, misfit relations g
   const w = s.createWorld({ name: '호그와트' });
   s.applyAuto(w.worldId, [{ type: 'person', name: '그리핀도르 1학년 무리', fields: { affiliation: '그리핀도르', appearance: '붉은 넥타이' } }, { type: 'group', name: '그리핀도르' }, { type: 'person', name: '해나' }]);
   const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n).entityId;
-  s.applyRelations(w.worldId, [{ from: id('그리핀도르 1학년 무리'), to: id('그리핀도르'), type: '소속' }, { from: id('그리핀도르 1학년 무리'), to: id('해나'), type: '적대' }]);
+  s.applyRelations(w.worldId, [{ from: id('그리핀도르 1학년 무리'), to: id('그리핀도르'), type: '소속' }, { from: id('그리핀도르 1학년 무리'), to: id('해나'), type: '가족' }]);
   const [c] = s.convertGroups(w.worldId);
   const g = s.listEntities(w.worldId).find((e) => e.name === '그리핀도르 1학년 무리');
   assert.deepEqual([c.action, g.type, Object.keys(g.fields)], ['retype', 'group', []]);
-  assert.deepEqual(s.listRelations(w.worldId).map((r) => r.type), ['적대'], '소속 between two groups no longer fits; 적대 still does');
+  assert.deepEqual(s.listRelations(w.worldId).map((r) => r.type), ['소속'], 'a crowd in a house still fits (group → group); 가족 no longer does');
   s.undoChange(w.worldId, c.id);
   const back = s.listEntities(w.worldId).find((e) => e.name === '그리핀도르 1학년 무리');
   assert.deepEqual([back.type, back.fields.appearance], ['person', '붉은 넥타이']);
-  assert.deepEqual(s.listRelations(w.worldId).map((r) => r.type).sort(), ['소속', '적대']);
+  assert.deepEqual(s.listRelations(w.worldId).map((r) => r.type).sort(), ['가족', '소속']);
   assert.equal(s.convertGroups(w.worldId).length, 1, 'still a crowd name: converted again on the next reading');
 });
 
@@ -232,4 +233,17 @@ test('(다) a person named by description is suggested as possibly a named famil
   const pairs = s.listDuplicates(w.worldId).map((p) => [name(p.a), name(p.b), p.why]);
   assert.deepEqual(pairs, [['모웨나 셀윈', '가스파르의 5학년 누나', '「가스파르의 5학년 누나」은(는) 이름 있는 인물일 수 있음 (가스파르 셀윈의 가족)']]);
   assert.equal(s.listEntities(w.worldId).length, 4);
+});
+
+test('소속 between groups: no loop (A→B and B→A are one pair); recheck brings back what a crowd → group change took away when it fits again', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: '호그와트' });
+  s.applyAuto(w.worldId, [{ type: 'group', name: '그리핀도르 1학년 무리' }, { type: 'group', name: '그리핀도르' }]);
+  const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n).entityId;
+  const r = { relationId: '11111111-1111-4111-8111-111111111111', from: id('그리핀도르 1학년 무리'), to: id('그리핀도르'), type: '소속', note: '', evidence: '그리핀도르 1학년 무리가 웃었다.', source: 'auto', createdAt: 'x', updatedAt: 'x' };
+  s.pushHistory(w.worldId, [{ id: 'old-retype', at: 'x', by: 'retype', entityId: r.from, name: '그리핀도르 1학년 무리', type: 'group', action: 'retype', relations: [r] }]);
+  const back = s.recheckRelations(w.worldId);
+  assert.deepEqual(back.map((c) => [c.action, c.why]), [['relation-add', 'fits again']]);
+  assert.equal(s.recheckRelations(w.worldId).length, 0, 'once');
+  assert.equal(s.applyRelations(w.worldId, [{ from: id('그리핀도르'), to: id('그리핀도르 1학년 무리'), type: '소속', note: '거꾸로' }]).filter((c) => c.action === 'relation-add').length, 0, 'the reverse is the same pair: no loop');
 });

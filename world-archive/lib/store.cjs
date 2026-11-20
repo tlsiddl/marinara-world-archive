@@ -112,13 +112,13 @@ function mentions(text, e) {
   return [...whole, ...words].some((k) => t.includes(squashName(k)));
 }
 /**
- * Which kinds of settings a relation from the reader may join: 위치 two places, 소속 a person and a group, the people
+ * Which kinds of settings a relation from the reader may join: 위치 two places, 소속 a person and a group (or a smaller group in a bigger one; A→B and B→A are the same pair, so no loop), the people
  * kinds two people (적대·친구 also groups), 기타 any two named settings except a person and a place.
  */
 function relationFits(type, a, b) {
   const both = (...k) => k.includes(a) && k.includes(b);
   if (type === '위치') return a === 'place' && b === 'place';
-  if (type === '소속') return (a === 'person' && b === 'group') || (a === 'group' && b === 'person');
+  if (type === '소속') return (a === 'person' && b === 'group') || (a === 'group' && b === 'person') || (a === 'group' && b === 'group'); // 집단 → 집단: from is the smaller one (a crowd in a house)
   if (type === '적대' || type === '친구') return both('person', 'group');
   if (type === '기타') return both('person', 'place', 'group') && !((a === 'person' && b === 'place') || (a === 'place' && b === 'person'));
   return a === 'person' && b === 'person';
@@ -1264,22 +1264,43 @@ class Archive {
     const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
     const out = [];
     const keep = [];
-    for (const r of doc.relations) {
+    const whyOff = (r) => {
       const a = byId.get(r.from);
       const b = byId.get(r.to);
       const model = r.source === 'auto' && !String(r.evidence || '').startsWith('소속:');
-      const why = !model || !a || !b ? null
+      return !model || !a || !b ? null
         : !relationFits(r.type, a.type, b.type) ? 'kind'
         : (a.type === 'person' && isDescriptiveName(a.name)) || (b.type === 'person' && isDescriptiveName(b.name)) ? 'described name'
         : !mentions(r.evidence, a) && !mentions(r.evidence, b) ? 'evidence names neither'
         : null;
+    };
+    for (const r of doc.relations) {
+      const why = whyOff(r);
       if (why) out.push({ r, why });
       else keep.push(r);
     }
-    if (!out.length) return [];
+    // Relations a crowd → group change took away come back when they fit again under today's rules (e.g. 소속 between
+    // two groups, allowed since) — only while both settings are still there and nothing like them exists.
+    const restored = [];
+    const have = new Set(keep.map(relKey));
+    for (const c of this.readHistory(worldId).changes) {
+      if (c.action !== 'retype' || c.undoneAt) continue;
+      for (const r of c.relations || []) {
+        const a = byId.get(r.from);
+        const b = byId.get(r.to);
+        if (!validRelation(r) || !a || !b || have.has(relKey(r)) || !relationFits(r.type, a.type, b.type) || whyOff(r)) continue;
+        have.add(relKey(r));
+        keep.push(structuredClone(r));
+        restored.push(r);
+      }
+    }
+    if (!out.length && !restored.length) return [];
     doc.relations = keep;
     this.writeJson(this.entityFile(worldId), doc);
-    const changes = out.map(({ r, why }) => ({ ...this.relationLog(doc, r, 'relation-remove', meta.by || 'recheck', meta), why }));
+    const changes = [
+      ...out.map(({ r, why }) => ({ ...this.relationLog(doc, r, 'relation-remove', meta.by || 'recheck', meta), why })),
+      ...restored.map((r) => ({ ...this.relationLog(doc, r, 'relation-add', meta.by || 'recheck', meta), why: 'fits again' })),
+    ];
     this.pushHistory(worldId, changes);
     return changes;
   }
