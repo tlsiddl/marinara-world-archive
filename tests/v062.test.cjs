@@ -307,7 +307,8 @@ test('⑨ ④ v0.6.4 c: a profile field the code filled keeps its own words (ori
   assert.deepEqual(e.hidden, { age: true, gender: true, appearance: true });
   const out = s.recheckFields(w.worldId, { isStatus: () => false, story: ['Rowan Hart tugged at her silver braided hair and smoothed the grey robe.', 'Someone else had silver braided hair.'], profile: ['- Name: Rowan Hart / Age: 11 / Gender: Female', '- Appearance and clothing: Silver braided hair, star-pinned grey robe.'] });
   e = s.listEntities(w.worldId)[0];
-  assert.deepEqual(e.hidden, { age: true, gender: true });
+  // v0.6.6 2: 「her silver braided hair」 also says 성별 (a pronoun in a sentence naming her)
+  assert.deepEqual(e.hidden, { age: true });
   assert.ok(out.some((c) => c.action === 'reveal' && c.key === 'appearance' && c.why === '본문에 나옴'));
 });
 
@@ -429,7 +430,63 @@ test('v0.6.5 3: the tidy prompt asks 「lasting in this world」, not 「can be 
   const src = fs.readFileSync(path.join(__dirname, '../world-archive/lib/service.cjs'), 'utf8');
   const prompt = src.slice(src.indexOf('const TIDY_PROMPT'), src.indexOf('JSON만 출력', src.indexOf('const TIDY_PROMPT')));
   assert.match(prompt, /이 세계에서 오래 지켜지는 사실인가/);
-  assert.match(prompt, /남길 이유가 아니다/);
+  assert.match(prompt, /이유가 아니다/);
   assert.match(prompt, /한 가게의 물건 목록/);
-  assert.match(prompt, /학교 규칙\(금지된 숲/);
+  assert.match(prompt, /keep: true — 오래 지켜지는 법/);
+});
+
+test('v0.6.6 1: 정리 후보 is a verdict — only keep false, and never pinned · the person\'s · two batches · a place\'s rule', async (t) => {
+  const service = require('../world-archive/lib/service.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-066-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  service._test.useStore(s);
+  const w = s.createWorld({ name: '별시계 학원', auto: { enabled: false, connectionId: 'c1', every: 6 } });
+  s.applyAuto(w.worldId, [{ type: 'place', name: '대강당' }]);
+  const hall = s.listEntities(w.worldId)[0];
+  s.applyAuto(w.worldId, [
+    { type: 'system', name: '가게 주인의 자기소개' },
+    { type: 'rule', name: '비밀 유지법' },
+    { type: 'system', name: '고정된 한 번' },
+    { type: 'system', name: '두 번 나온 것' },
+    { type: 'rule', name: '대강당 식탁 예절', appliesTo: hall.entityId },
+    { type: 'custom', name: '판정 없음' },
+  ], { messageIds: ['m1'] });
+  s.applyAuto(w.worldId, [{ type: 'system', name: '두 번 나온 것' }], { messageIds: ['m9'] });
+  const pinned = s.listEntities(w.worldId).find((e) => e.name === '고정된 한 번');
+  s.updateEntity(w.worldId, pinned.entityId, { revision: pinned.revision, pinned: true });
+  const verdict = { items: ['가게 주인의 자기소개', '고정된 한 번', '두 번 나온 것', '대강당 식탁 예절'].map((name) => ({ name, keep: false, why: '한 장면' })).concat([{ name: '비밀 유지법', keep: true, why: '법' }]), fields: [] };
+  service._test.useEngine({ model: async () => ({}), askModel: async () => ({ content: JSON.stringify(verdict) }), parseJsonObject: (x) => JSON.parse(x) });
+  const out = await service.tidyCandidates(w.worldId);
+  assert.deepEqual(out.items.map((x) => x.name), ['가게 주인의 자기소개']);
+});
+
+test('v0.6.6 2: 성별 — he · she in a story sentence naming the person (or the next one) takes 숨김 off', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-066-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  const line = '- Name: Edmund Pryce / Age: 62 / Gender: Male';
+  s.applyAuto(w.worldId, [{ type: 'person', name: 'Edmund Pryce', fields: { gender: '남성', age: '62살' }, fieldEvidence: { gender: line, age: line }, hidden: { gender: true, age: true } }]);
+  s.recheckFields(w.worldId, { isStatus: () => false, story: ['Edmund Pryce set down the tray.', 'He bowed to the duke.'], profile: [line] });
+  const e = s.listEntities(w.worldId)[0];
+  assert.deepEqual(e.hidden, { age: true });
+});
+
+test('v0.6.6 3: a profile timetable goes straight into its owner\'s 시간표 — no schedule, and nothing the second time', (t) => {
+  const P = require('../world-archive/lib/profile.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-066-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'group', name: '은사슴', aliases: ['Silverstag'] }, { type: 'group', name: '은사슴 1학년' }]);
+  const profile = P.parseProfiles('<world_profile>\n- Subject: 1891 Silverstag First-Year Timetable\n- Type: Schedule\n- Established information: Monday: 09:00–10:30 Charms. Friday: 09:00–12:00 Double Potions.\n</world_profile>');
+  const first = s.applyProfiles(w.worldId, profile, { pairs: [{ from: 'Potions', to: '마법약' }] });
+  const E = s.listEntities(w.worldId);
+  assert.ok(!E.some((e) => e.type === 'schedule' && !e.timetable), 'no schedule to gather');
+  const sheet = E.find((e) => e.timetable);
+  assert.equal(E.find((e) => e.entityId === sheet.timetable.ownerId).name, '은사슴 1학년');
+  assert.deepEqual(Object.values(sheet.timetable.cells).map((c) => c.value).sort(), ['Charms', 'Double 마법약']);
+  assert.ok(first.length > 0);
+  assert.deepEqual(s.applyProfiles(w.worldId, profile, {}), [], 'the second time: nothing, no records');
 });

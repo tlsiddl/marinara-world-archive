@@ -316,6 +316,31 @@ function origSaid(orig, sentence) {
   return words.filter((w) => t.includes(w)).length * 2 > words.length;
 }
 
+/**
+ * v0.6.6: the group a timetable's name is for — 「1988–1989 Slytherin First-Year Timetable」 → 슬리데린 1학년: the groups'
+ * English other names put in Korean, 「first-year」 → 1학년, then the longest group name it holds.
+ */
+const YEAR_WORDS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7 };
+function ownerOfName(text, groups) {
+  const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let x = String(text || '');
+  for (const g of groups) for (const a of g.aliases || []) if (/[A-Za-z]/.test(a) && a.length >= 3) x = x.replace(new RegExp(`(?<![A-Za-z])${reEsc(a)}(?![A-Za-z])`, 'gi'), g.name);
+  x = x.replace(/\b(first|second|third|fourth|fifth|sixth|seventh)[- ]years?\b/gi, (m, w) => `${YEAR_WORDS[w.toLowerCase()]}학년`);
+  const len = (g) => Math.max(0, ...groupKeys(g).filter((k) => squashName(x).includes(k)).map((k) => k.length));
+  return groups.filter((g) => len(g) > 0).sort((a, b) => len(b) - len(a))[0] || null;
+}
+/** v0.6.6: a subject in the glossary's Korean (the whole of it, or each glossary word in it). */
+function subjectFrom(v, pairs) {
+  const t = String(v || '').trim();
+  if (!/[A-Za-z]/.test(t)) return t;
+  const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const whole = (pairs || []).find((p) => String(p.from).toLowerCase() === t.toLowerCase());
+  if (whole) return whole.to;
+  let out = t;
+  for (const p of [...(pairs || [])].sort((a, b) => b.from.length - a.from.length)) out = out.replace(new RegExp(`(?<![A-Za-z])${reEsc(p.from)}(?![A-Za-z])`, 'gi'), p.to);
+  return out;
+}
+
 function cleanAliases(v, name) {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v)) throw new ArchiveError(400, '다른 이름은 목록으로 보내 주세요.');
@@ -2532,6 +2557,7 @@ class Archive {
     const changes = [];
     const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: opts.roomId ?? null, messageIds: [], ...c });
     const touched = new Set();
+    const laterCells = [];
     const story = (opts.story || []).map((s) => ({ s, q: squashName(s) }));
     const keysOf = (e) => [e.name, ...(e.aliases || [])].map(squashName).filter((k) => k.length >= 2);
     const find = (types, names) => {
@@ -2619,6 +2645,19 @@ class Archive {
         // a new one only when the glossary names it in Korean (or it is a timetable to gather): an English-only name is
         // most often a setting the reader already wrote in Korean
         const cells = type === 'schedule' && (TT.splitWhen(info).cells.length >= 2 || P.holdsDays(info));
+        // v0.6.6 3: a timetable whose owner can be told (the group its name names) goes straight into that 시간표 —
+        // the cells it lacks only, nothing when they are all there; no schedule to gather, no records each recheck
+        if (cells && !e) {
+          const owner = ownerOfName([p.subject, kor].filter(Boolean).join(' '), doc.entities.filter((x) => x.type === 'group'));
+          if (owner) {
+            const sheet = doc.entities.find((x) => x.timetable?.ownerId === owner.entityId);
+            const had = Object.values(sheet?.timetable?.cells || {});
+            const span = (a, b) => { const x = TT.span(a); const y = TT.span(b); return x && y ? x[0] < y[1] && y[0] < x[1] : a === b; };
+            const wanted = TT.parseWhen(TT.englishWhen(info)).filter((c) => !had.some((h) => h.day === c.day && span(h.slot, c.slot)));
+            for (const c of wanted) laterCells.push({ ownerId: owner.entityId, day: c.day, slot: c.slot, value: subjectFrom(c.after, opts.pairs) || '수업', evidence: (p.line || info).slice(0, 300) });
+            continue;
+          }
+        }
         if (!e && !kor && !cells) continue;
         if (!e) {
           e = make(type, kor || p.subject, [kor ? p.subject : ''], p.line || info);
@@ -2643,9 +2682,12 @@ class Archive {
       }
     }
     for (const e of touched) if (!changes.some((c) => c.entityId === e.entityId && c.action === 'create')) { e.revision++; e.updatedAt = t; }
-    if (!changes.length && !touched.size) return [];
-    this.writeJson(this.entityFile(worldId), doc);
-    this.pushHistory(worldId, changes);
+    if (changes.length || touched.size) {
+      this.writeJson(this.entityFile(worldId), doc);
+      this.pushHistory(worldId, changes);
+    }
+    // v0.6.6 3: the timetable cells after the settings are saved (applyTimetable reads and writes the file itself)
+    if (laterCells.length) changes.push(...this.applyTimetable(worldId, laterCells, { by, roomId: opts.roomId ?? null }));
     return changes;
   }
 
@@ -2818,6 +2860,7 @@ class Archive {
         if (c.action === 'field' && c.after && c.why !== '단어장 표기로' && c.why !== '근거 번호 지움') lastEvidence.set(`${c.entityId}.${c.key}`, c.evidence);
       }
       const story = check.story.map(strip).filter(Boolean).map((s) => ({ s, q: squashName(s) }));
+      const storyAll = story; // in order, for 「the sentence after」
       for (const e of doc.entities) {
         if (!['person', 'place', 'group'].includes(e.type)) continue;
         const names = [e.name, ...(e.aliases || [])].map(squashName).filter((n) => n.length >= 2);
@@ -2848,11 +2891,20 @@ class Archive {
             hide = true;
             ev = evs.join(' / ');
           }
+          // v0.6.6 2: 성별 — a story sentence naming the person, or the one after it, with he · him · his / she · her
+          // (그 · 그녀) of that gender: the story has said it
+          if (key === 'gender' && e.type === 'person' && hide !== false) {
+            const male = /^(남|남성|남자|male|man|boy|m)$/i.test(String(value).trim());
+            const female = /^(여|여성|여자|female|woman|girl|f)$/i.test(String(value).trim());
+            const pron = male ? /\b(he|him|his|himself)\b|그는|그가|그의|그를/i : female ? /\b(she|her|hers|herself)\b|그녀/i : null;
+            const at = pron ? storyAll.findIndex((x, i) => names.some((n) => x.q.includes(n)) && (pron.test(x.s) || pron.test(storyAll[i + 1]?.s || ''))) : -1;
+            if (at >= 0) { hide = false; ev = storyAll[at].s; }
+          }
           if (hide === null || Boolean(e.hidden?.[key]) === hide) continue;
           if (hide) e.hidden = { ...(e.hidden || {}), [key]: true };
           else { delete e.hidden[key]; if (!Object.keys(e.hidden).length) delete e.hidden; }
           touched.add(e);
-          changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: hide ? 'hide' : 'reveal', key, before: '', after: value, evidence: String(ev).slice(0, 300), why: hide ? '프로필에만 있음' : orig ? '본문에 나옴' : '본문 근거가 있음' });
+          changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: hide ? 'hide' : 'reveal', key, before: '', after: value, evidence: String(ev).slice(0, 300), why: hide ? '프로필에만 있음' : key === 'gender' && !story ? '본문에 나옴(대명사)' : orig ? '본문에 나옴' : '본문 근거가 있음' });
         }
       }
     }
