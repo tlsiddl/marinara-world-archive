@@ -154,6 +154,7 @@ test('runRoom: relations from the reply are added when both ends are settings, p
   service._test.jobs.clear();
   const w = s.createWorld({ name: '호그와트', auto: { enabled: true, connectionId: 'c1', every: 2 } });
   s.linkRoom('room', w.worldId);
+  s.setRoomRead('room', { lastId: null, count: 0 }); // linked while the chat was empty: read from its first message (v0.4.2)
   const job = await service.runRoom('room', { all: true });
   assert.equal(job.state, 'done');
   assert.equal(job.relations, 2);
