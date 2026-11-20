@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.6.3';
+  const VERSION = '0.6.4';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -819,8 +819,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     // v0.5.0 L: 「확인 안 됨 · ○○의 말」
     // v0.6.2 ⑨: a profile that says another 나이 · 성별 · 종 — never written over, shown beside it
     // v0.6.2 ②: a rule or system one batch spoke of — kept, not in {{세계}}
-    const lawName = /(법|령|규칙|제도)/;
-    const once = (e.type === 'rule' || e.type === 'system') && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !lawName.test(e.name) && Number.isFinite(e.seen?.n) && e.seen.n < 2
+    const lawName = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)/;
+    const once = ['rule', 'system', 'custom', 'history'].includes(e.type) && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !lawName.test(e.name) && Number.isFinite(e.seen?.n) && e.seen.n < 2
       ? '<div class="sec"><small>한 번 나옴</small><p>대화의 한 묶음에서만 나왔어요. 설정집에는 두고 {{세계}}에는 넣지 않아요. 다시 나오거나 고정하면 들어가요.</p></div>' : '';
     const differs = Object.entries(e.differs || {}).map(([k, x]) => `<div class="sec"><small>${esc(d.find((y) => y.key === k)?.label || k)} · 서로 다른 말을 해요</small><p>${esc(e.fields?.[k] || '')} ↔ ${esc(x.value)}</p>${x.evidence ? `<p class="ev">${quoted(x.evidence)}</p>` : ''}</div>`).join('');
     const rumors = Object.entries(e.rumors || {}).map(([k, r]) => `<div class="sec"><small>${esc(d.find((x) => x.key === k)?.label || k)} · 확인 안 됨 · ${esc(r.by || '소문')}의 말</small><p>${esc(r.value)}</p></div>`).join('');
@@ -1140,8 +1140,9 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   const GROUP_ENDS = ['마법학교', '기숙사', '기사단', '가문', '집안', '일가', '학교', '학원', '조직', '무리', '일행', 'family', 'school', 'house'];
   const groupKeysC = (g) => [...new Set([g.name, ...(g.aliases || [])].map(SQ).flatMap((k) => { const end = GROUP_ENDS.find((x) => k.endsWith(x) && k.length - x.length >= 2); return [k, end ? k.slice(0, -end.length) : k]; }))].filter((k) => k.length >= 2);
   const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus'];
+  const VEHICLE = /(열차|기차|마차|보트|급행|호차|(^|\s)배(\s|$)|express|train|carriage|coach|boat)/i; // v0.6.4 f: the same as the server's
   function groupOfPlaceC(p, all) {
-    if (p?.type !== 'place') return null;
+    if (p?.type !== 'place' || VEHICLE.test(String(p.name || ''))) return null;
     const nm = SQ(p.name);
     const own = all.find((g) => g.type === 'group' && groupKeysC(g).some((k) => GROUP_BUILDING.some((w) => nm === k + w)));
     if (own) return own;

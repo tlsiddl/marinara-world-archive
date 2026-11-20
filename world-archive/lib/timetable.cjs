@@ -89,6 +89,27 @@ function parseWhen(text) {
 }
 
 /**
+ * v0.6.4 e: an English timetable text in the shape the reader of Korean ones knows — 「Monday: 09:00–10:30 Charms (with
+ * Ravenclaw, …); 10:45–12:15 Herbology」 → 「월요일: 09:00–10:30 Charms; 10:45–12:15 Herbology」. Days, 「daily」,
+ * 「9 o'clock」 · 「1:30 pm」 · 「from 12:15 to 13:30」; what is in brackets (who with, which room) is left out. A text
+ * with no English day stays as it is.
+ */
+const EN_DAYS = [['mon', '월'], ['tue', '화'], ['wed', '수'], ['thu', '목'], ['fri', '금'], ['sat', '토'], ['sun', '일']];
+function englishWhen(text) {
+  let t = String(text || '');
+  if (!/\b(mon|tues?|wed|thu|fri|sat|sun)[a-z]*\b|\bdaily\b|\bevery day\b|\bweekdays?\b/i.test(t)) return t;
+  t = t.replace(/\s*\([^)]*\)/g, '');
+  t = t.replace(/\b(mon|tue|wed|thu|fri|sat|sun)(?:day|sday|nesday|rsday|urday|s)?s?\b\.?/gi, (m, d) => `${EN_DAYS.find(([k]) => k === d.toLowerCase())[1]}요일`);
+  t = t.replace(/\b(daily|every day)\b/gi, '매일').replace(/\bweekdays?\b/gi, '평일');
+  // 「Luncheon runs daily from …」: what happens comes before the day — put it after the time, where it is read
+  t = t.replace(/\b([A-Z][A-Za-z]+(?: [A-Za-z]+)?)\s+(?:runs|is held|is|are held|are|takes place|happens)\s+(매일|평일|[월화수목금토일]요일)\s+(?:from\s+)?(\d{1,2}:\d{2})\s*(?:to|until|till|–|-)\s*(\d{1,2}:\d{2})/g, '$2 $3–$4 $1');
+  t = t.replace(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\.?(?![a-z])/gi, (m, h, mm, ap) => { let n = Number(h) % 12; if (/p/i.test(ap)) n += 12; return `${String(n).padStart(2, '0')}:${mm || '00'}`; });
+  t = t.replace(/\b(\d{1,2})\s*o['’]?clock\b/gi, '$1시');
+  t = t.replace(/\bfrom\s+(\d{1,2}:\d{2})\s+(?:to|until|till)\s+(\d{1,2}:\d{2})/gi, '$1–$2').replace(/(\d{1,2}:\d{2})\s+(?:to|until|till)\s+(\d{1,2}:\d{2})/gi, '$1–$2');
+  return t;
+}
+
+/**
  * v0.5.1 H: a field's text split into its timetable part and the rest — 「월·수 오후 도서관 당번, 책을 좋아함」 →
  * cells 월 · 수 오후 「도서관 당번」, moved 「월·수 오후 도서관 당번」, rest 「책을 좋아함」. A piece (between commas,
  * semicolons, lines or sentences) is timetable when it names a cell, or is only a time following one (「…, 2교시 약초학」);
@@ -216,4 +237,4 @@ function validTimetable(t) {
     && (c.placeId === undefined || typeof c.placeId === 'string') && (c.hours === undefined || (Number.isInteger(c.hours) && c.hours >= 1 && c.hours <= 12)));
 }
 
-module.exports = { DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, splitWhen, span, lookTogether, refresh, cellExtras, subjectOf, hoursOf, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };
+module.exports = { englishWhen, DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, splitWhen, span, lookTogether, refresh, cellExtras, subjectOf, hoursOf, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };

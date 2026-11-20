@@ -155,12 +155,16 @@ function orderEntities(entities, scene = null) {
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
 /**
- * v0.6.2 ②: a rule or system the reading found in one batch only (seen.n < 2) — 「한 번 나옴」: kept in the world,
- * not put in {{세계}}. Not one that is pinned, that the person wrote, or whose name says it is a law (법 · 령 · 규칙 · 제도).
+ * v0.6.2 ② · v0.6.4 a: a rule, system, 기타 or 역사 the reading found in one batch only (seen.n < 2) — 「한 번 나옴」:
+ * kept in the world, not put in {{세계}}. Not one that is pinned, that the person wrote, or whose name says it is a law
+ * (법 · 령 · 규칙 · 제도).
  * One counted before v0.5.1 (no seen) is not judged here; recheck counts it.
  */
-const LAW_NAME = /(법|령|규칙|제도)/;
-const onceOnly = (e) => (e?.type === 'rule' || e?.type === 'system') && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(String(e.name || '')) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
+// 「법」 as a law: stuck to the word before (「유지법」), not a how-to (「받는 법」) and not 「마법」
+const LAW_NAME = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)/;
+const WORLD_SYSTEM = /([^\s마]법(\s|$)|령(\s|$)|제도|화폐|통화)/;
+const ONCE_TYPES = new Set(['rule', 'system', 'custom', 'history']);
+const onceOnly = (e) => ONCE_TYPES.has(e?.type) && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(String(e.name || '')) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
 
 function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
@@ -221,7 +225,10 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     const whereKnown = (e) => ruleLike(e) && e.appliesTo && e.appliesTo !== WORLD && byIdAll.has(e.appliesTo);
     const sheetHere = (e) => (e.timetable && (scene.has(e.timetable.ownerId) || here.has(e.timetable.ownerId))) || (e.calendar?.ownerId && (scene.has(e.calendar.ownerId) || here.has(e.calendar.ownerId)));
     const worldCalendar = (e) => e.calendar && !e.calendar.ownerId;
-    const keep = pool.filter((e) => e.pinned || scene.has(e.entityId) || sheetHere(e) || worldCalendar(e) || (ruleLike(e) && (!whereKnown(e) || here.has(e.appliesTo))));
+    // v0.6.4 b: a system for the whole world (「세계 전체」) only when it is pinned, named in the latest messages (the
+    // scene), or a law · 화폐 by name — the know-how of one shop is not in every scene. Rules and 「모름」 as before.
+    const everywhereOk = (e) => e.type !== 'system' || e.appliesTo !== WORLD || e.pinned || scene.has(e.entityId) || WORLD_SYSTEM.test(String(e.name || ''));
+    const keep = pool.filter((e) => e.pinned || scene.has(e.entityId) || sheetHere(e) || worldCalendar(e) || (ruleLike(e) && (!whereKnown(e) || here.has(e.appliesTo)) && everywhereOk(e)));
     skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
     const rank = (e) => (e.pinned ? 0
       : scene.has(e.entityId) && !ruleLike(e) ? 1
@@ -357,4 +364,4 @@ function assembleLooks(entities, scene, { recent = null, budget = LOOKS_CHARS } 
   return { text: lines.length ? `${head}\n${lines.join('\n')}` : '', included, omitted };
 }
 
-module.exports = { onceOnly, LAW_NAME, WORLD, shownName, tailLines, CAST_CHARS, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
+module.exports = { onceOnly, ONCE_TYPES, WORLD_SYSTEM, LAW_NAME, WORLD, shownName, tailLines, CAST_CHARS, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };

@@ -162,8 +162,10 @@ const namesGroup = (text, g) => {
  * the 칸 names no group (or names a place of the world first).
  */
 const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus'];
+/** v0.6.4 f: a vehicle is not 「in」 a group (the school's train goes elsewhere) — a big place of its own. */
+const VEHICLE = /(열차|기차|마차|보트|급행|호차|(^|\s)배(\s|$)|express|train|carriage|coach|boat)/i;
 const groupOfPlace = (place, entities) => {
-  if (place?.type !== 'place') return null;
+  if (place?.type !== 'place' || VEHICLE.test(String(place.name || ''))) return null;
   // 「호그와트 성」: the group's name and a building word — the group's own grounds
   const nm = squashName(place.name);
   const own = (entities || []).find((g) => g.type === 'group' && groupKeys(g).some((k) => GROUP_BUILDING.some((w) => nm === k + w)));
@@ -301,6 +303,17 @@ function aliasOff(e, a, entities) {
   const theirs = animalIn(a).filter((x) => !own.has(x));
   if (theirs.length && (own.size || e.fields?.species)) return { why: `다른 동물(${theirs[0]})` };
   return null;
+}
+
+/**
+ * v0.6.4 c: a story sentence says a profile value (its own words, often English) when more than half of the value's
+ * words longer than three letters are in it. A value with no such word (「52」) is never said this way.
+ */
+function origSaid(orig, sentence) {
+  const words = [...new Set(String(orig || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 3))];
+  if (!words.length) return false;
+  const t = String(sentence || '').toLowerCase();
+  return words.filter((w) => t.includes(w)).length * 2 > words.length;
 }
 
 function cleanAliases(v, name) {
@@ -516,6 +529,7 @@ function validEntity(e) {
     (e.calendar === undefined || CAL.validCalendar(e.calendar)) &&
     (e.nameCheck === undefined || isObject(e.nameCheck)) &&
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
+    (e.origText === undefined || (isObject(e.origText) && Object.values(e.origText).every((v) => typeof v === 'string'))) &&
     (e.differs === undefined || (isObject(e.differs) && Object.values(e.differs).every((d) => isObject(d) && typeof d.value === 'string'))) &&
     (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
@@ -990,7 +1004,7 @@ class Archive {
         const bal = balanceOf(item, meta);
         if (bal.length) entity.extra = bal.map(([label, value]) => ({ label, value, source: 'auto' }));
         doc.entities.push(entity);
-        log({ entityId: entity.entityId, name, type: item.type, action: 'create', evidence });
+        log({ entityId: entity.entityId, name, type: item.type, action: 'create', evidence, ...(isObject(item.fieldEvidence) && Object.keys(item.fieldEvidence).length ? { fieldEvidence: Object.fromEntries(Object.entries(item.fieldEvidence).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, v.slice(0, 300)])) } : {}) });
         continue;
       }
       const e = found;
@@ -2524,11 +2538,7 @@ class Archive {
       const ks = names.map(squashName).filter((k) => k.length >= 2);
       return doc.entities.find((e) => types.includes(e.type) && keysOf(e).some((k) => ks.includes(k))) || null;
     };
-    const told = (e, value, kind) => {
-      if (typeof opts.says !== 'function') return false;
-      const names = keysOf(e);
-      return story.some((x) => names.some((n) => x.q.includes(n)) && opts.says(value, x.s, kind));
-    };
+    const told = (e, orig) => { const names = keysOf(e); return story.some((x) => names.some((n) => x.q.includes(n)) && origSaid(orig, x.s)); };
     const make = (type, name, aliases, evidence) => {
       if (doc.entities.length >= ENTITY_MAX) return null;
       const e = { entityId: randomUUID(), type, name, aliases: aliases.filter((a) => a && squashName(a) !== squashName(name)).slice(0, ALIAS_MAX), description: '', fields: {}, extra: [], pinned: false, sources: {}, status: 'confirmed', provenance: { source: 'auto', by, roomId: opts.roomId ?? null, evidence: String(evidence).slice(0, 300) }, revision: 1, createdAt: t, updatedAt: t };
@@ -2579,8 +2589,9 @@ class Archive {
           if (e.sources[key] === 'manual') continue;
           e.fields = { ...(e.fields || {}), [key]: value };
           e.sources[key] = 'auto';
-          const kind = FIELDS.person.find((f) => f.key === key)?.kind || 'text';
-          const hide = !told(e, value, kind);
+          // v0.6.4 c: the profile's own words kept beside the value (it may be translated later) for recheck
+          e.origText = { ...(e.origText || {}), [key]: String(raw).slice(0, 2000) };
+          const hide = !told(e, raw);
           if (hide) e.hidden = { ...(e.hidden || {}), [key]: true };
           touched.add(e);
           log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before: '', after: value, evidence, ...(hide ? { hidden: true } : {}), why: '프로필 블록' });
@@ -2768,12 +2779,30 @@ class Archive {
       touched.add(e);
       changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: c.action, ...(c.action === 'field' ? { key } : {}), before: current, after: back, evidence: c.evidence, why: '상태줄 근거라 되돌림', statusRevert: c.id });
     }
+    // v0.6.4 g: the reader's sentence numbers in values and memos (「(45.28)」) go
+    if (check.noRefs) {
+      for (const e of doc.entities) {
+        const kv = [...Object.entries(e.fields || {}).map(([k, v]) => [k, v]), ['description', e.description || '']];
+        for (const [key, value] of kv) {
+          if (!value || e.sources?.[key] === 'manual') continue;
+          const clean = check.noRefs(value);
+          if (clean === value) continue;
+          if (key === 'description') e.description = clean; else e.fields[key] = clean;
+          touched.add(e);
+          changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: key === 'description' ? 'memo' : 'field', ...(key === 'description' ? {} : { key }), before: value, after: clean, why: '근거 번호 지움' });
+        }
+      }
+    }
     // ④ hidden again, field by field
     if (Array.isArray(check.story)) {
       const profile = new Set((check.profile || []).map(strip));
       const inProfile = (x) => profile.has(x) || [...profile].some((p) => x.length >= 20 && p.startsWith(x));
       const lastEvidence = new Map(); // `${entityId}.${key}` → the evidence of the change that wrote the field
-      for (const c of history.changes) if (!c.undoneAt && c.action === 'field' && c.after) lastEvidence.set(`${c.entityId}.${c.key}`, c.evidence);
+      for (const c of history.changes) {
+        if (c.undoneAt) continue;
+        if (c.action === 'create' && isObject(c.fieldEvidence)) for (const [k, v] of Object.entries(c.fieldEvidence)) lastEvidence.set(`${c.entityId}.${k}`, v);
+        if (c.action === 'field' && c.after && c.why !== '단어장 표기로' && c.why !== '근거 번호 지움') lastEvidence.set(`${c.entityId}.${c.key}`, c.evidence);
+      }
       const story = check.story.map(strip).filter(Boolean).map((s) => ({ s, q: squashName(s) }));
       for (const e of doc.entities) {
         if (!['person', 'place', 'group'].includes(e.type)) continue;
@@ -2783,20 +2812,27 @@ class Archive {
         const about = story.filter((x) => names.some((n) => x.q.includes(n)));
         for (const [key, value] of Object.entries(e.fields || {})) {
           if (!value || e.sources?.[key] === 'manual') continue;
-          const kind = FIELDS[e.type]?.find((f) => f.key === key)?.kind || 'text';
-          const said = about.find((x) => check.says(value, x.s, kind));
-          if (e.hidden?.[key] && said) {
-            delete e.hidden[key];
-            if (!Object.keys(e.hidden).length) delete e.hidden;
-            touched.add(e);
-            changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'reveal', key, before: '', after: value, evidence: said.s.slice(0, 300), why: '본문에 나옴' });
-          } else if (!e.hidden?.[key] && !said && profile.size) {
-            const ev = pieces(lastEvidence.get(`${e.entityId}.${key}`) ?? (e.provenance?.evidence || ''));
-            if (!ev.length || !ev.every(inProfile)) continue;
-            e.hidden = { ...(e.hidden || {}), [key]: true };
-            touched.add(e);
-            changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'hide', key, after: value, evidence: ev.join(' / ').slice(0, 300), why: '프로필에만 있음' });
+          // v0.6.4 c: hidden only when every evidence sentence of the field is a profile sentence. A field the code
+          // filled from a profile (origText): a story sentence naming the setting that holds most of the profile's
+          // words is its story evidence. A field without its own evidence in the history is left as it is.
+          let hide = null;
+          let ev = '';
+          const orig = e.origText?.[key];
+          if (orig) {
+            const hit = about.find((x) => origSaid(orig, x.s));
+            hide = !hit;
+            ev = hit ? hit.s : orig;
+          } else if (profile.size && lastEvidence.has(`${e.entityId}.${key}`)) {
+            const evs = pieces(lastEvidence.get(`${e.entityId}.${key}`));
+            if (!evs.length) continue;
+            hide = evs.every(inProfile);
+            ev = evs.join(' / ');
           }
+          if (hide === null || Boolean(e.hidden?.[key]) === hide) continue;
+          if (hide) e.hidden = { ...(e.hidden || {}), [key]: true };
+          else { delete e.hidden[key]; if (!Object.keys(e.hidden).length) delete e.hidden; }
+          touched.add(e);
+          changes.push({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: hide ? 'hide' : 'reveal', key, before: '', after: value, evidence: String(ev).slice(0, 300), why: hide ? '프로필에만 있음' : orig ? '본문에 나옴' : '본문 근거가 있음' });
         }
       }
     }
