@@ -2,7 +2,7 @@
 
 Marinara Engine용 독립 세계관 설정 관리 모듈.
 
-> **상태:** 개발판(v0.3.18). 대화를 읽어 새 NPC·장소·규칙과 새로 밝혀진 사실을 설정집에 **자동 반영**하고, 연결한 채팅방의 프롬프트에 넣는다.
+> **상태:** v0.3.18. 대화를 읽어 새 NPC·장소·규칙과 새로 밝혀진 사실을 설정집에 **자동 반영**하고, 연결한 채팅방의 프롬프트에 넣는다.
 > Marinara Engine **2.5.2** 실서버(기억 서재 · 셸 패치와 함께)와 진짜 모델로 확인했다. 2.5.1은 같은 앵커를 쓰지만 실측하지 않았다.
 
 **측정 (2026-11-20):** 긴 RP 방 하나(메시지 177개)를 처음부터 읽는 데 약 46만 토큰 · 5분 반. 설정 500개 세계관에서 `{{세계}}` 한 번 만드는 데 5~6ms, 장면 계산(최근 메시지 30개) 8ms, `{{세계외형}}` 3ms, 메모리 증가 1MB 미만. 최대치 2000개에서는 `{{세계}}` 17ms · 장면 23ms.
@@ -35,14 +35,12 @@ Marinara Engine용 독립 세계관 설정 관리 모듈.
 
 원래 마리나라 파일은 건드리지 않는다. 서버가 켜질 때 메모리에서만 두 곳(매크로 엔진, 서버 앱)에 끼어들고, 버전이 맞지 않으면 그 부분만 꺼지고 마리나라는 원래대로 켜진다. API는 마리나라 로그인·접속 제한을 그대로 따른다(별도 토큰 없음).
 
-## 설치 (개발판)
-
-아직 `main`에 합치지 않았으므로 브랜치를 지정해서 받는다.
+## 설치
 
 **도커 서버** — 서버 터미널에서:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/feature/phase-1-foundation/install.sh | WORLD_ARCHIVE_REF=feature/phase-1-foundation sh
+curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.sh | sh
 ```
 
 기억 서재를 이미 쓰고 있으면, 기억 서재가 만든 `docker-compose.override.yml`에 두 줄(폴더 연결, `NODE_OPTIONS`의 `--require`)만 더한다. 원래 파일은 `docker-compose.override.yml.before-world-archive`로 남기고, 고친 파일을 docker compose가 못 읽으면 원래대로 되돌린 뒤 멈춘다. 모양이 예상과 다른 override 파일은 건드리지 않고 넣을 내용만 알려 준다.
