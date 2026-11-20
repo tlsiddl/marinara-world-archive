@@ -247,3 +247,21 @@ test('소속 between groups: no loop (A→B and B→A are one pair); recheck bri
   assert.equal(s.recheckRelations(w.worldId).length, 0, 'once');
   assert.equal(s.applyRelations(w.worldId, [{ from: id('그리핀도르'), to: id('그리핀도르 1학년 무리'), type: '소속', note: '거꾸로' }]).filter((c) => c.action === 'relation-add').length, 0, 'the reverse is the same pair: no loop');
 });
+
+test('a kind with a direction read the other way round turns to the newer direction (「방향 바뀜」, undoable); manual ones stay', (t) => {
+  const { s, w, id } = world(t);
+  s.applyRelations(w.worldId, [{ from: id('해나'), to: id('어니'), type: '스승·제자', note: '해나가 가르침' }]);
+  const c = s.applyRelations(w.worldId, [{ from: id('어니'), to: id('해나'), type: '스승·제자', note: '어니가 가르침' }]);
+  assert.deepEqual(c.map((x) => x.action), ['relation-flip', 'relation-note']);
+  const [r] = s.listRelations(w.worldId);
+  assert.deepEqual([r.from, r.to, r.note], [id('어니'), id('해나'), '어니가 가르침']);
+  s.undoChange(w.worldId, c[1].id);
+  s.undoChange(w.worldId, c[0].id);
+  const [back] = s.listRelations(w.worldId);
+  assert.deepEqual([back.from, back.to, back.note], [id('해나'), id('어니'), '해나가 가르침']);
+  assert.equal(s.applyRelations(w.worldId, [{ from: id('어니'), to: id('해나'), type: '친구' }]).length, 1, 'kinds without a direction are not flipped');
+  assert.equal(s.applyRelations(w.worldId, [{ from: id('해나'), to: id('어니'), type: '친구' }]).length, 0);
+  const m = s.createRelation(w.worldId, { from: id('부엌'), to: id('호그와트 성'), type: '위치' });
+  assert.equal(s.applyRelations(w.worldId, [{ from: id('호그와트 성'), to: id('부엌'), type: '위치' }]).length, 0, 'the person\'s own relation keeps its direction');
+  assert.equal(s.listRelations(w.worldId).find((x) => x.relationId === m.relationId).from, id('부엌'));
+});

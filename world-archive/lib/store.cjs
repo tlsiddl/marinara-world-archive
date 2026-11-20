@@ -87,6 +87,8 @@ const INJECT_MODES = ['all', 'scene'];
 /** Relations between two settings (사령탑 할 일 3). Matched as an unordered pair + kind. */
 const REL_TYPES = ['가족', '소속', '친구', '적대', '연인', '스승·제자', '위치', '기타'];
 const REL_MAX = 5000;
+/** Kinds with a direction: from is the one inside / belonging / the pupil… (the others read the same both ways). */
+const DIRECTED = new Set(['소속', '위치', '스승·제자']);
 const REL_NOTE = 300;
 const relKey = (r) => [r.from, r.to].sort().join('|') + '|' + r.type;
 /** 「가스파르의 5학년 누나」: a person named by description (someone's relative), not by a name of their own. */
@@ -837,7 +839,7 @@ class Archive {
       const have = new Set(doc.relations.map(relKey));
       const ids = new Set(doc.entities.map((x) => x.entityId));
       for (const r of c.relations || []) if (validRelation(r) && ids.has(r.from) && ids.has(r.to) && !have.has(relKey(r))) doc.relations.push(structuredClone(r));
-    } else if (c.action === 'relation-add' || c.action === 'relation-note' || c.action === 'relation-remove') {
+    } else if (c.action === 'relation-add' || c.action === 'relation-note' || c.action === 'relation-remove' || c.action === 'relation-flip') {
       this.undoRelation(doc, c, later);
     } else if (c.action === 'delete') {
       if (!validEntity(c.entity)) throw broken('변경 기록');
@@ -1180,7 +1182,16 @@ class Archive {
       }
       const same = doc.relations.find((x) => relKey(x) === relKey(raw));
       if (same) {
-        if (same.source === 'manual' || !note || same.note === note) continue;
+        if (same.source === 'manual') continue;
+        // A kind with a direction (소속 · 위치 · 스승·제자) read the other way round: the newer reading wins.
+        if (DIRECTED.has(same.type) && same.from === raw.to && same.to === raw.from) {
+          changes.push({ ...this.relationLog(doc, same, 'relation-flip', by, meta), before: { from: same.from, to: same.to }, after: { from: raw.from, to: raw.to }, evidence });
+          same.from = raw.from;
+          same.to = raw.to;
+          if (evidence) same.evidence = evidence;
+          same.updatedAt = t;
+        }
+        if (!note || same.note === note) continue;
         changes.push({ ...this.relationLog(doc, same, 'relation-note', by, meta), before: same.note, after: note, evidence });
         same.note = note;
         if (evidence) same.evidence = evidence;
@@ -1313,6 +1324,11 @@ class Archive {
       if (!cur) throw new ArchiveError(409, '이미 지워진 관계입니다.');
       if (cur.type !== r.type || (c.by !== 'person' && (cur.source === 'manual' || cur.note !== r.note))) throw new ArchiveError(409, later);
       doc.relations.splice(doc.relations.indexOf(cur), 1);
+    } else if (c.action === 'relation-flip') {
+      if (!cur || cur.from !== c.after?.from || cur.to !== c.after?.to) throw new ArchiveError(409, later);
+      cur.from = c.before.from;
+      cur.to = c.before.to;
+      cur.updatedAt = now();
     } else if (c.action === 'relation-note') {
       if (!cur || cur.note !== c.after) throw new ArchiveError(409, later);
       cur.note = c.before || '';
