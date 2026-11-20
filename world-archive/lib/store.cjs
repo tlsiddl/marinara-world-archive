@@ -10,7 +10,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { findPairs, describedPairs, speciesPairs } = require('./same.cjs');
-const { rosterOf } = require('./roster.cjs');
+const { rosterOf, ROLE_WORDS } = require('./roster.cjs');
+const TT = require('./timetable.cjs');
 const N = require('./names.cjs');
 
 const SCHEMA = 1;
@@ -418,6 +419,7 @@ function validEntity(e) {
     (e.sources === undefined || (isObject(e.sources) && Object.values(e.sources).every((v) => SOURCES.includes(v)))) &&
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
+    (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
@@ -970,6 +972,16 @@ class Archive {
         }
         if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
+      } else if (c.action === 'cell') {
+        // a 시간표 cell back as it was, only while it still holds what this change wrote
+        const cells = e.timetable?.cells;
+        if (!cells) throw new ArchiveError(409, later);
+        if ((cells[c.key]?.value || '') !== (c.after || '')) throw new ArchiveError(409, later);
+        if (c.cellBefore) cells[c.key] = structuredClone(c.cellBefore);
+        else delete cells[c.key];
+      } else if (c.action === 'cell-pending') {
+        const cell = e.timetable?.cells?.[c.key];
+        if (cell?.pending?.value === c.after) delete cell.pending;
       } else if (c.action === 'alias-move') {
         // the other name goes back to the setting it was taken from (the new group keeps its own name)
         if (!e.aliases.includes(c.alias)) {
@@ -998,6 +1010,141 @@ class Archive {
     c.undoneAt = now();
     this.writeJson(this.historyFile(worldId), history);
     return { undone: true, changeId };
+  }
+
+  // ---------------------------------------------------------------- 시간표 (v0.5.0 B)
+
+  /** The owner's 시간표 setting (a schedule with a timetable), or null. */
+  timetableOf(doc, ownerId) {
+    return doc.entities.find((e) => e.type === 'schedule' && e.timetable?.ownerId === ownerId) || null;
+  }
+
+  /**
+   * Cells the reader (or 「시간표로 모으기」) found: [{ ownerId, day, slot, value, evidence }]. The owner's sheet is made
+   * when there is none (「○○ 시간표」). A new value for a cell: the old one is kept as 「이전」 (PAST_MAX); a cell the person
+   * wrote is not written over — 「대화에서는 ○○예요 [적용] [무시]」 (pending) instead. Each change is in the history
+   * ('cell', undoable). Returns the changes.
+   */
+  applyTimetable(worldId, cells, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
+    const t = now();
+    const changes = [];
+    const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
+    for (const raw of Array.isArray(cells) ? cells : []) {
+      const owner = doc.entities.find((e) => e.entityId === raw?.ownerId && (e.type === 'group' || e.type === 'person'));
+      const day = TT.normDay(raw?.day);
+      const slot = TT.normSlot(raw?.slot);
+      const value = String(raw?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, TT.CELL_MAX);
+      if (!owner || !day || !slot || !value) continue;
+      const evidence = typeof raw.evidence === 'string' ? raw.evidence.slice(0, 300) : '';
+      let sheet = this.timetableOf(doc, owner.entityId);
+      if (!sheet) {
+        if (doc.entities.length >= ENTITY_MAX) continue;
+        sheet = {
+          entityId: randomUUID(), type: 'schedule', name: owner.name + ' 시간표', aliases: [], description: '',
+          fields: { when: '매주', who: owner.name }, extra: [], pinned: false, sources: { when: 'auto', who: 'auto' }, status: 'confirmed',
+          provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, timetable: { ownerId: owner.entityId, cells: {} },
+          revision: 1, createdAt: t, updatedAt: t,
+        };
+        doc.entities.push(sheet);
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create', evidence });
+      }
+      const key = TT.cellKey(day, slot);
+      const cell = sheet.timetable.cells[key];
+      if (cell?.value === value) continue;
+      if (cell?.source === 'manual') {
+        if (cell.pending?.value === value) continue;
+        cell.pending = { value, evidence, at: t };
+        sheet.revision++;
+        sheet.updatedAt = t;
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell-pending', key, after: value, evidence });
+        continue;
+      }
+      const before = cell ? structuredClone(cell) : null;
+      const past = cell?.value ? [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX) : cell?.past;
+      sheet.timetable.cells[key] = { day, slot, value, evidence, source: 'auto', at: t, ...(past?.length ? { past } : {}) };
+      sheet.revision++;
+      sheet.updatedAt = t;
+      log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence });
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * A cell the person writes (value '' takes it away). Theirs from then on: the reader only offers its value. To make
+   * a sheet for someone: ownerId without entityId. Recorded ('cell', by person) and undoable.
+   */
+  setCell(worldId, body = {}) {
+    this.getWorld(worldId);
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
+    const doc = this.readEntities(worldId);
+    const day = TT.normDay(body.day);
+    const slot = TT.normSlot(body.slot);
+    if (!day) throw new ArchiveError(400, '요일은 월 · 화 · 수 · 목 · 금 · 토 · 일 · 평일 · 매일 중 하나입니다.');
+    if (!slot) throw new ArchiveError(400, `시간은 1~${TT.SLOT_MAX}자로 적어 주세요(예: 1교시, 오전, 09:00–10:30).`);
+    const value = cleanText(body.value ?? '', TT.CELL_MAX, '칸 내용').replace(/\s+/g, ' ').trim();
+    let sheet = body.entityId ? doc.entities.find((e) => e.entityId === body.entityId && e.timetable) : this.timetableOf(doc, body.ownerId);
+    const t = now();
+    const changes = [];
+    if (!sheet) {
+      const owner = doc.entities.find((e) => e.entityId === body.ownerId && (e.type === 'group' || e.type === 'person'));
+      if (!owner) throw new ArchiveError(404, body.entityId ? '시간표를 찾지 못했습니다.' : '시간표의 주인(집단이나 인물)을 찾지 못했습니다.');
+      if (!value) throw new ArchiveError(400, '칸 내용을 적어 주세요.');
+      if (doc.entities.length >= ENTITY_MAX) throw new ArchiveError(400, `설정은 ${ENTITY_MAX}개까지입니다.`);
+      sheet = {
+        entityId: randomUUID(), type: 'schedule', name: owner.name + ' 시간표', aliases: [], description: '',
+        fields: { when: '매주', who: owner.name }, extra: [], pinned: false, sources: { name: 'manual' }, status: 'confirmed',
+        provenance: { source: 'manual' }, timetable: { ownerId: owner.entityId, cells: {} }, revision: 1, createdAt: t, updatedAt: t,
+      };
+      doc.entities.push(sheet);
+      changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create' });
+    }
+    if (body.revision !== undefined && sheet.revision !== body.revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
+    const key = TT.cellKey(day, slot);
+    const cell = sheet.timetable.cells[key];
+    if ((cell?.value || '') === value && cell?.source === 'manual') return { entity: sheet, changed: false };
+    if (!cell && !value) throw new ArchiveError(404, '그 칸은 비어 있습니다.');
+    const before = cell ? structuredClone(cell) : null;
+    if (value) {
+      const past = cell?.value && cell.value !== value ? [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX) : cell?.past;
+      sheet.timetable.cells[key] = { day, slot, value, evidence: '', source: 'manual', at: t, ...(past?.length ? { past } : {}) };
+    } else delete sheet.timetable.cells[key];
+    sheet.revision++;
+    sheet.updatedAt = t;
+    changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before });
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return { entity: sheet, changed: true };
+  }
+
+  /** 「대화에서는 ○○예요」 on a cell the person wrote: [적용] (the story's value, the person's one kept as 「이전」) or [무시]. */
+  applyCellPending(worldId, entityId, key, { discard = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const sheet = doc.entities.find((e) => e.entityId === entityId && e.timetable);
+    const cell = sheet?.timetable.cells[key];
+    if (!cell?.pending) throw new ArchiveError(404, '대화에서 온 값이 없습니다.');
+    const t = now();
+    const before = structuredClone(cell);
+    const p = cell.pending;
+    delete cell.pending;
+    if (!discard) {
+      cell.past = [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX);
+      cell.value = p.value;
+      cell.evidence = p.evidence || '';
+      cell.at = t;
+      // still the person's: they chose this value
+    }
+    sheet.revision++;
+    sheet.updatedAt = t;
+    this.writeJson(this.entityFile(worldId), doc);
+    if (!discard) this.pushHistory(worldId, [{ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before.value, after: cell.value, cellBefore: before, evidence: cell.evidence }]);
+    return sheet;
   }
 
   // ---------------------------------------------------------------- names from the translation glossary
@@ -1426,7 +1573,7 @@ class Archive {
           words = words.slice(k);
         }
         const r = words.join(' ');
-        if (squashName(r).length < 2 || !GROUPISH.test(r) || !/\p{Script=Hangul}/u.test(r) || covered(r) || isOther(r)) continue;
+        if (squashName(r).length < 2 || !GROUPISH.test(r) || ROLE_WORDS.test(words.at(-1)) || !/\p{Script=Hangul}/u.test(r) || covered(r) || isOther(r)) continue;
         const key = squashName(r);
         const it = pieces.get(key) || { name: r, people: new Set(), prefixes: new Map() };
         it.people.add(p.entityId);
@@ -1939,6 +2086,7 @@ class Archive {
 }
 
 module.exports = {
+  namesGroup,
   Archive,
   ArchiveError,
   SCHEMA,

@@ -168,6 +168,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
 .sec{padding:16px 0 4px;border-top:1px dashed var(--wa-line);margin-top:14px}
 .sec small,.state small{display:block;font:10px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted);margin-bottom:6px}
 .sec p,.state p{margin:0;white-space:pre-wrap;text-align:justify;overflow-wrap:anywhere}
+.tt-wrap{overflow-x:auto;margin:4px 0 8px}.tt{border-collapse:collapse;font-size:13px;min-width:100%}.tt th,.tt td{border:1px solid var(--wa-line);padding:6px 8px;vertical-align:top;text-align:left}.tt thead th{font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}.tt td small{display:block}.tt-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}.tt-form input{min-width:0;flex:1 1 120px}
 .roster-add{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.roster-add select{max-width:100%}
 .state{margin-top:18px;padding:14px 16px;border:1.5px dashed var(--wa-ink);border-radius:3px}
 .meta{margin-top:20px;font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}
@@ -355,6 +356,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   async function loadEntities() {
     st.entities = st.worldId ? (await api('GET', `/worlds/${st.worldId}/entities`)).entities || [] : [];
     st.relations = st.worldId ? (await api('GET', `/worlds/${st.worldId}/relations`).catch(() => ({ relations: [] }))).relations || [] : [];
+    st.rosters = {};
     try { st.pairs = st.worldId ? (await api('GET', `/worlds/${st.worldId}/duplicates`)).pairs || [] : []; } catch { st.pairs = []; }
     try { st.groupSuggest = st.worldId ? (await api('GET', `/worlds/${st.worldId}/group-suggestions`)).suggestions || [] : []; } catch { st.groupSuggest = []; }
     if (st.detail && !st.entities.some((e) => e.entityId === st.detail)) st.detail = null;
@@ -571,6 +573,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
         <button class="primary" type="button" data-act="new" data-type="${type}">새 ${k.label}</button>
       </div>
       ${type === 'group' && st.groupSuggest?.length ? `<p class="sub" style="margin:-6px 0 14px">소속 칸에만 있는 이름 · ${st.groupSuggest.map((g) => `<button class="quiet" type="button" data-act="group-make" data-name="${esc(g.name)}" title="${esc(g.people.join(', '))}의 소속 칸${g.owner ? ` · 지금은 「${esc(g.owner)}」의 다른 이름` : ''}">${esc(g.name)} · 집단으로 만들기</button>`).join(' ')}</p>` : ''}
+      ${type === 'schedule' && !st.readOnly ? `<p class="sub" style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="tt-gather" title="요일·시간이 정해진 수업·일과 일정을 그 집단·사람의 시간표 칸으로 옮깁니다. 코드로 먼저 하고, 안 되는 것만 작은 호출 한 번">시간표로 모으기</button></p>` : ''}
       ${type === 'person' && st.pairs.length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">같은 사람일 수 있음 ${st.pairs.length}쌍</button></p>` : ''}
       ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
         : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
@@ -582,33 +585,69 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     return c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 ? '이에요' : '예요';
   }
 
-  /** 구성원 명단 (v0.5.0) — the same walk as world-archive/lib/roster.cjs: 소속 relations, smaller groups' people too. */
-  function rosterOf(groupId) {
-    const byId = new Map(st.entities.map((x) => [x.entityId, x]));
-    const aff = (st.relations || []).filter((r) => r.type === '소속');
-    const order = [groupId];
-    const seen = new Set(order);
-    const at = new Map();
-    for (let i = 0; i < order.length; i++) {
-      for (const r of aff) {
-        const other = r.from === order[i] ? r.to : r.to === order[i] ? r.from : null;
-        const o = other && byId.get(other);
-        if (!o) continue;
-        if (o.type === 'person') at.set(other, order[i]);
-        else if (o.type === 'group' && r.from === other && !seen.has(other)) { seen.add(other); order.push(other); }
-      }
-    }
-    const rank = new Map(order.map((id, i) => [id, i]));
-    return [...at].map(([pid, gid]) => ({ entityId: pid, name: byId.get(pid).name, viaId: gid === groupId ? null : gid, via: gid === groupId ? null : byId.get(gid).name }))
-      .sort((a, b) => rank.get(a.viaId || groupId) - rank.get(b.viaId || groupId) || a.name.localeCompare(b.name, 'ko'));
+  /**
+   * 구성원 명단 (v0.5.0) — from the server (world-archive/lib/roster.cjs), so the screen and {{세계}} agree. Three parts:
+   * 구성원 · 맡은 사람 · 지난 구성원; a name that is a description gets 「(이름 모름)」.
+   */
+  async function loadRoster(id) {
+    st.rosters = st.rosters || {};
+    if (st.rosters[id]) return;
+    st.rosters[id] = { loading: true };
+    try { st.rosters[id] = await api('GET', `/worlds/${st.worldId}/entities/${id}/members`); } catch { st.rosters[id] = { members: [], failed: true }; }
+    if (st.detail === id) render();
   }
   function rosterHtml(g) {
-    const list = rosterOf(g.entityId);
+    const r = st.rosters?.[g.entityId];
+    if (!r || r.loading) { if (!r) void loadRoster(g.entityId); return '<div class="sec"><small>구성원 명단</small><p class="sub">불러오는 중…</p></div>'; }
+    const list = r.members || [];
     const inList = new Set(list.map((m) => m.entityId));
-    const rows = list.map((m) => `<button class="quiet" type="button" data-act="open" data-id="${esc(m.entityId)}">${esc(m.name)}${m.via ? ` <small>· ${esc(m.via)}</small>` : ''}</button><button class="quiet" type="button" data-act="member-off" data-group="${esc(m.viaId || g.entityId)}" data-id="${esc(m.entityId)}" title="${esc(m.via || g.name)}의 명단에서 빼기 — 그 인물의 소속 칸에서 이 이름을 지웁니다" aria-label="${esc(m.name)} 빼기">×</button>`).join('');
+    const chip = (m) => `<button class="quiet" type="button" data-act="open" data-id="${esc(m.entityId)}">${esc(m.name)}${m.unnamed ? ' <small>(이름 모름)</small>' : ''}${m.via ? ` <small>· ${esc(m.via)}</small>` : ''}</button><button class="quiet" type="button" data-act="member-off" data-group="${esc(m.viaId || g.entityId)}" data-id="${esc(m.entityId)}" title="${esc(m.via || g.name)}의 명단에서 빼기 — 그 인물의 소속 칸에서 이 이름을 지웁니다" aria-label="${esc(m.name)} 빼기">×</button>`;
+    const part = (kind, label) => {
+      const rows = list.filter((m) => m.kind === kind);
+      return rows.length ? `<p><small>${label} ${rows.length}</small><br>${rows.map(chip).join('')}</p>` : '';
+    };
+    const named = list.filter((m) => !m.unnamed).length;
     const others = st.entities.filter((x) => x.type === 'person' && !inList.has(x.entityId)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     const add = others.length ? `<span class="roster-add"><select id="rosterPick" aria-label="명단에 더할 인물">${others.map((x) => `<option value="${esc(x.entityId)}">${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="member-add" data-group="${esc(g.entityId)}">명단에 더하기</button></span>` : '';
-    return `<div class="sec"><small>구성원 명단 · ${list.length}명 · 인물마다 적힌 소속으로 모음</small><p>${rows || '<span class="sub">아직 이 집단에 소속된 인물이 없습니다.</span>'}</p>${add}</div>`;
+    const body = list.length ? part('member', '구성원') + part('staff', '맡은 사람') + part('past', '지난 구성원') : '<p class="sub">아직 이 집단에 소속된 인물이 없습니다.</p>';
+    return `<div class="sec"><small>구성원 명단 · ${list.length}명${named !== list.length ? ` (이름 아는 사람 ${named}명)` : ''} · 인물마다 적힌 소속으로 모음</small>${body}${add}</div>`;
+  }
+
+  /**
+   * 시간표 (v0.5.0 B): weekday × time, one cell per lesson or round. The same order as world-archive/lib/timetable.cjs
+   * (월…일, 평일, 매일; 교시 by number, times by clock, words by the day). A cell from the story has 「· 자동」; one the person
+   * wrote is theirs, and a value the story gives for it waits with [적용] [무시].
+   */
+  const TT_DAYS = ['월', '화', '수', '목', '금', '토', '일', '평일', '매일'];
+  function ttSlotRank(s) {
+    const t = String(s);
+    let m = t.match(/^(\d+)\s*교시/);
+    if (m) return Number(m[1]) * 100;
+    m = t.match(/^(\d{1,2}):(\d{2})/);
+    if (m) return Number(m[1]) * 60 + Number(m[2]);
+    m = t.match(/^(\d{1,2})\s*시/);
+    if (m) return Number(m[1]) * 60;
+    const w = ['새벽', '아침', '오전', '점심', '오후', '저녁', '밤', '자정'].findIndex((x) => t.startsWith(x));
+    return w >= 0 ? [300, 420, 540, 720, 840, 1080, 1260, 1440][w] : 2000;
+  }
+  function timetableHtml(e) {
+    const cells = Object.entries(e.timetable?.cells || {});
+    const days = TT_DAYS.filter((d) => cells.some(([, c]) => c.day === d));
+    const slots = [...new Set(cells.map(([, c]) => c.slot))].sort((a, b) => ttSlotRank(a) - ttSlotRank(b) || a.localeCompare(b, 'ko'));
+    const cellHtml = (day, slot) => {
+      const key = `${day}|${slot}`;
+      const c = e.timetable.cells[key];
+      if (!c) return '<td></td>';
+      const past = c.past?.[0] ? `<small class="past">이전: ${esc(c.past[0].value)}</small>` : '';
+      const wait = c.pending ? `<small class="pending">대화에서는 「${esc(c.pending.value)}」${copula(c.pending.value)} <button class="quiet" type="button" data-act="cell-pending" data-id="${esc(e.entityId)}" data-key="${esc(key)}">적용</button><button class="quiet" type="button" data-act="cell-pending" data-id="${esc(e.entityId)}" data-key="${esc(key)}" data-discard="1">무시</button></small>` : '';
+      return `<td title="${esc(c.evidence || '')}">${esc(c.value)}${c.source === 'auto' ? '<span class="auto-tag">· 자동</span>' : ''}${past}${wait}</td>`;
+    };
+    const table = cells.length
+      ? `<div class="tt-wrap"><table class="tt"><thead><tr><th></th>${days.map((d) => `<th>${esc(d)}</th>`).join('')}</tr></thead><tbody>${slots.map((sl) => `<tr><th>${esc(sl)}</th>${days.map((d) => cellHtml(d, sl)).join('')}</tr>`).join('')}</tbody></table></div>`
+      : '<p class="sub">아직 칸이 없습니다.</p>';
+    const owner = st.entities.find((x) => x.entityId === e.timetable.ownerId);
+    const form = st.readOnly ? '' : `<div class="tt-form"><select id="ttDay" aria-label="요일">${TT_DAYS.map((d) => `<option>${d}</option>`).join('')}</select><input id="ttSlot" maxlength="24" placeholder="때(1교시 · 오전 · 09:00–10:30)" aria-label="때"><input id="ttValue" maxlength="80" placeholder="내용(비우면 그 칸을 지움)" aria-label="내용"><button class="quiet" type="button" data-act="cell-save" data-id="${esc(e.entityId)}">칸 저장</button></div>`;
+    return `<div class="sec"><small>시간표${owner ? ` · ${esc(owner.name)}` : ''} · 칸 ${cells.length}</small>${table}${form}</div>`;
   }
 
   function detailHtml(e) {
@@ -646,7 +685,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
-        ${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
+        ${e.timetable ? timetableHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
         ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
@@ -820,6 +859,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     'relation-note': (c) => `관계 <b>${esc(c.name)}</b> · ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
     'relation-flip': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 방향 바뀜`,
     'relation-remove': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 끝남`,
+    cell: (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: ${c.before ? `${esc(c.before)} → ` : ''}${c.after ? esc(c.after) : '지움'}`,
+    'cell-pending': (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: 대화에서는 「${esc(c.after)}」`,
     'alias-move': (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.alias)}」을(를) 새 집단 「${esc(c.to)}」(으)로 옮김`,
     delete: (c) => `<b>${esc(c.name)}</b> 지움${c.relations?.length ? ` · 관계 ${c.relations.length}개도 함께` : ''}`,
   };
@@ -1128,6 +1169,24 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await api('POST', `/rooms/${encodeURIComponent(activeChatId())}/scores/${encodeURIComponent(b.dataset.id)}/undo`, { undo: b.dataset.undo === '1' });
       await loadScores();
       await loadRoom();
+    }),
+    // v0.5.0 B 시간표
+    'cell-save': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      await api('PUT', `/worlds/${st.worldId}/timetable/cell`, { entityId: e.entityId, revision: e.revision, day: root.getElementById('ttDay')?.value, slot: root.getElementById('ttSlot')?.value, value: root.getElementById('ttValue')?.value || '' });
+      await loadEntities();
+    }, '칸을 저장했습니다. 직접 쓴 칸은 대화가 덮어쓰지 않습니다.'),
+    'cell-pending': (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.id}/timetable/pending`, { key: b.dataset.key, discard: b.dataset.discard === '1' });
+      await loadEntities();
+    }),
+    'tt-gather': () => run(async () => {
+      const r = await api('POST', `/worlds/${st.worldId}/timetable-gather`, {});
+      await loadEntities();
+      st.bad = false;
+      st.msg = r.moved.length
+        ? `시간표로 옮겼습니다(${r.moved.length}개): ${r.moved.map((m) => m.name).join(', ')}${r.left.length ? ` · 못 옮긴 것 ${r.left.length}개: ${r.left.join(', ')}` : ''}. 기록에서 되돌릴 수 있습니다.`
+        : `옮길 수업·일과 일정이 없습니다${r.left.length ? `(요일·시간이나 주인을 모르는 것 ${r.left.length}개: ${r.left.join(', ')})` : ''}.`;
     }),
     'species-fill': () => run(async () => {
       const r = await api('POST', `/worlds/${st.worldId}/species-fill`);

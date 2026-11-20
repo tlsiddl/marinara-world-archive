@@ -36,7 +36,7 @@ test('a group\'s list is its people and the people of the smaller groups in it, 
   assert.equal(rel?.to, id('은사슴 기숙사'), '「은사슴 1학년」 is in 「은사슴 기숙사」 by its name');
   assert.equal(rel.evidence, '이름: 은사슴 1학년');
   assert.deepEqual(list('은사슴 1학년'), ['도겸', '하윤']);
-  assert.deepEqual(list('은사슴 기숙사'), ['서림', '도겸·은사슴 1학년', '하윤·은사슴 1학년'], 'direct first, then the smaller group, each by name');
+  assert.deepEqual(list('은사슴 기숙사'), ['도겸·은사슴 1학년', '하윤·은사슴 1학년', '서림'], 'members first (the people of the smaller group), then 서림 — 「반장」 is 맡은 사람');
   assert.deepEqual(list('청매 기숙사'), []);
   assert.deepEqual(s.roster(w.worldId, id('은사슴 기숙사')).groups.map((g) => g.name), ['은사슴 1학년']);
   assert.throws(() => s.roster(w.worldId, id('하윤')), (e) => e.status === 404, 'only a group has a list');
@@ -72,7 +72,7 @@ test('the list follows the 소속 칸: a transfer moves the person; the reader\'
   const out = s.linkAffiliations(w.worldId, null, { was: { [id('도겸')]: was } });
   assert.deepEqual(out.filter((c) => c.action === 'relation-remove').map((c) => c.why), ['affiliation changed', 'affiliation changed']);
   assert.deepEqual(list('청매 기숙사'), ['도겸']);
-  assert.deepEqual(list('은사슴 기숙사'), ['서림', '하윤·은사슴 1학년']);
+  assert.deepEqual(list('은사슴 기숙사'), ['하윤·은사슴 1학년', '서림']);
   // the removals are in the history and can be undone one by one
   const h = s.listHistory(w.worldId).filter((c) => c.action === 'relation-remove');
   assert.equal(h.length, 2);
@@ -155,7 +155,7 @@ test('A-2: a group two 소속 칸 name is made — from a rule\'s other name (ta
   assert.deepEqual(up('은사슴 1학년'), ['은사슴 기숙사'], 'by its name');
   assert.equal(id('은사슴 1학년 남학생 기숙사') && s.listEntities(w.worldId).find((e) => e.name === '은사슴 1학년 남학생 기숙사').type, 'place', 'a place stays a place');
   const names = (n) => s.roster(w.worldId, id(n)).members.map((m) => m.name + (m.via ? '·' + m.via : ''));
-  assert.deepEqual(names('은사슴 기숙사'), ['서림', '도겸·은사슴 1학년', '무진·은사슴 1학년', '이안·은사슴 1학년', '하윤·은사슴 1학년'], 'the place 「은사슴 1학년 남학생 기숙사」 in their 소속 칸 names 은사슴 1학년');
+  assert.deepEqual(names('은사슴 기숙사'), ['도겸·은사슴 1학년', '무진·은사슴 1학년', '이안·은사슴 1학년', '하윤·은사슴 1학년', '서림'], 'the place 「은사슴 1학년 남학생 기숙사」 in their 소속 칸 names 은사슴 1학년');
   assert.ok(names('별시계 학원').includes('서림·은사슴 기숙사'), 'the school list has the house people too');
   // 청매: one person only → offered, not made
   const plan = s.planGroups(s.readEntities(w.worldId));
@@ -183,4 +183,22 @@ test('A-2: 「집단으로 만들기」 makes the offered one (the person\'s); u
 test('A-2: the reader is told to make the group a 소속 칸 names when it is not there', () => {
   const text = fs.readFileSync(path.join(__dirname, '../world-archive/lib/extract.cjs'), 'utf8');
   assert.match(text, /affiliation에 적은 집단이 \[이미 있는 항목\]에 없으면 그 집단도 집단 항목으로 같이 만든다/);
+});
+
+test('the list in three parts — 구성원 · 맡은 사람 · 지난 구성원 — and 「(이름 모름)」 for a name that is a description', (t) => {
+  const { s, w, id } = world(t);
+  s.applyAuto(w.worldId, [
+    { type: 'person', name: '노을 교수', fields: { affiliation: '은사슴 기숙사 사감' } },
+    { type: 'person', name: '청운', fields: { affiliation: '은사슴 기숙사 출신, 학원 창립자' } },
+    { type: 'person', name: '도겸의 사촌', fields: { affiliation: '은사슴 1학년' } },
+    { type: 'person', name: '쌍둥이 중 한 명', fields: { affiliation: '은사슴 1학년' } },
+  ]);
+  s.linkAffiliations(w.worldId);
+  const r = s.roster(w.worldId, id('은사슴 기숙사'));
+  const by = (k) => r.members.filter((m) => m.kind === k).map((m) => m.name);
+  assert.deepEqual(by('staff').sort(), ['노을 교수', '서림'].sort(), '사감 · 반장');
+  assert.deepEqual(by('past'), ['청운'], '출신 · 창립자');
+  assert.deepEqual(r.members.filter((m) => m.unnamed).map((m) => m.name).sort(), ['도겸의 사촌', '쌍둥이 중 한 명'].sort());
+  assert.equal(r.counts.named, r.members.length - 2, 'a description is not a name known');
+  assert.deepEqual(by('member').sort(), ['도겸', '도겸의 사촌', '쌍둥이 중 한 명', '하윤'].sort());
 });

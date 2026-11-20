@@ -270,7 +270,7 @@ test('scheduleRoom does nothing for rooms that are not linked or not switched on
 
 test('readReply keeps the whole items of a reply cut off at the length limit', () => {
   const full = '{"items":[{"type":"rule","name":"가","evidence":[{"n":"1.1"}]}]}';
-  assert.deepEqual(X.readReply(full, real.parseJsonObject), { items: [{ type: 'rule', name: '가', evidence: [{ n: '1.1' }] }], relations: [], scores: [], cut: false });
+  assert.deepEqual(X.readReply(full, real.parseJsonObject), { items: [{ type: 'rule', name: '가', evidence: [{ n: '1.1' }] }], relations: [], timetable: [], scores: [], cut: false });
   const cut = '```json\n{"items":[{"type":"person","name":"수위","fields":{"age":{"v":"사십 대","n":["1.2"]}},"evidence":[{"n":"1.2","q":"}{"}]},{"type":"rule","name":"문은 세 번","memo":"두 번은 안 \\"열\\"림"},{"type":"place","name":"등대","fields":{"use":{"v":"등';
   const got = X.readReply(cut, real.parseJsonObject);
   assert.equal(got.cut, true);

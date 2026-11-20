@@ -1,5 +1,6 @@
 'use strict';
 const { FIELDS } = require('./store.cjs');
+const TT = require('./timetable.cjs');
 // What {{세계}} becomes. Pure functions: no files, no engine.
 // Budget handling follows the idea of the Memory Module's renderMemorySource (tlsiddl/marinara-memory-module
 // refactor/modular e873fd1): whole items only, most important first, never cut in the middle of a line.
@@ -38,6 +39,8 @@ const oneLine = (t) => String(t).replace(/\s*\n+\s*/g, ' / ').trim();
 const was = (e, k) => (e.pastInPrompt?.[k] && e.past?.[k]?.[0]?.value ? ` (과거: ${oneLine(e.past[k][0].value)})` : '');
 
 function entityLine(e) {
+  // v0.5.0 B: a 시간표 is its cells on one line
+  if (e.timetable) return sanitize(`- ${e.name}\n  시간표: ${TT.timetableLine(e) || '(비어 있음)'}`);
   const aliases = e.aliases?.length ? ` (다른 이름: ${e.aliases.join(', ')})` : '';
   const lines = [`- ${e.name}${aliases}`];
   const defs = FIELDS[e.type] || [];
@@ -93,7 +96,10 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   let pool = entities || [];
   let skipped = 0;
   if (world.injectMode === 'scene' && scene) {
-    const keep = pool.filter((e) => e.pinned || ALWAYS.has(e.type) || scene.has(e.entityId));
+    // v0.5.0 B: a 시간표 when its owner is in the scene, or a group a person in the scene belongs to (소속)
+    const sceneGroups = new Set((relations || []).filter((r) => r.type === '소속' && scene.has(r.from)).map((r) => r.to));
+    const sheetHere = (e) => e.timetable && (scene.has(e.timetable.ownerId) || sceneGroups.has(e.timetable.ownerId));
+    const keep = pool.filter((e) => e.pinned || ALWAYS.has(e.type) || scene.has(e.entityId) || sheetHere(e));
     skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
     pool = keep;
   }
