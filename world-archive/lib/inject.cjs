@@ -70,7 +70,7 @@ function orderEntities(entities, scene = null) {
  * included / omitted are entity IDs. An item that does not fit is left out whole; smaller ones after it can
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null } = {}) {
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [] } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
@@ -112,12 +112,29 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     included.push(e.entityId);
   }
 
+  // Scene mode: relations of people in the scene whose other end is in the scene too, one line each, if they fit.
+  const relLines = [];
+  if (world.injectMode === 'scene' && scene && Array.isArray(relations) && relations.length) {
+    const shown = new Map(ordered.filter((e) => included.includes(e.entityId)).map((e) => [e.entityId, e]));
+    for (const r of relations) {
+      const a = shown.get(r.from);
+      const b = shown.get(r.to);
+      if (!a || !b || !scene.has(a.entityId) || !scene.has(b.entityId) || (a.type !== 'person' && b.type !== 'person')) continue;
+      const line = sanitize(`- ${a.name} — ${b.name}: ${r.note || r.type}`);
+      const cost = (relLines.length ? 0 : '\n\n[관계]'.length) + 1 + line.length;
+      if (used + cost > budget) continue;
+      used += cost;
+      relLines.push(line);
+    }
+  }
+
   const parts = [head + (desc ? '\n' + desc : '')];
   // Sections appear in kind order; inside each, the order chosen above (pinned first).
   for (const type of TYPE_ORDER) {
     const lines = byType.get(type);
     if (lines) parts.push(`[${TYPE_LABEL[type]}]\n${lines.join('\n')}`);
   }
+  if (relLines.length) parts.push(`[관계]\n${relLines.join('\n')}`);
   const text = parts.join('\n\n');
   return { text, chars: text.length, budget, included, omitted, skipped };
 }

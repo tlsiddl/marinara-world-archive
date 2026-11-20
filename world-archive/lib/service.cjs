@@ -121,7 +121,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
   const worldId = s.roomWorldId(roomId);
   if (!worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
   const world = s.getWorld(worldId);
-  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, renamed: 0, dropped: 0, fieldsDropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
+  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, renamed: 0, relations: 0, dropped: 0, fieldsDropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
   jobs.set(roomId, job);
   // 「처음부터 다시 읽기」: only where the room was read is forgotten. Settings stay; what is read again is applied (and
   // recorded) the usual way, so a person's own fields are still never written over.
@@ -188,6 +188,20 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         if (glossary) job.renamed += s.alignGlossary(worldId, glossary, { roomId, ids: touchedIds(worldId, items, changes) }).filter((c) => c.action === 'rename').length;
         job.dropped += dropped.length;
         job.fieldsDropped += droppedFields.length;
+        // Relations: both ends must be settings by now (existing, or made from this batch's items).
+        const meta = { roomId, messageIds: part.batch.map((x) => x.id) };
+        const rel = X.checkRelations(parsed, part, cast);
+        const ents = s.readEntities(worldId).entities;
+        const resolved = [];
+        for (const r of rel.relations) {
+          const from = s.findByName(ents, r.from);
+          const to = s.findByName(ents, r.to);
+          if (from && to && from.entityId !== to.entityId) resolved.push({ ...r, from: from.entityId, to: to.entityId });
+          else rel.dropped.push({ name: r.from + ' — ' + r.to, why: 'no such setting' });
+        }
+        const relChanges = [...s.applyRelations(worldId, resolved, meta), ...s.linkAffiliations(worldId, null, meta)];
+        job.relations += relChanges.filter((c) => c.action === 'relation-add').length;
+        if (rel.dropped.length) log(`chat ${roomId}: left out relations ${rel.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
         s.setRoomRead(roomId, { lastId: part.batch.at(-1).id, count: part.end });
         if (dropped.length) log(`chat ${roomId}: left out ${dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
         if (droppedFields.length) log(`chat ${roomId}: left out fields ${droppedFields.map((d) => `${d.name}.${d.key} (${d.why})`).join(', ')}`);
@@ -198,7 +212,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
     job.state = 'done';
     job.stage = '';
     const secs = ((Date.now() - Date.parse(job.startedAt)) / 1000).toFixed(1);
-    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.renamed} renamed by the glossary, ${job.dropped} left out, ${job.fieldsDropped} field(s) left out`);
+    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.renamed} renamed by the glossary, ${job.relations} relation(s), ${job.dropped} left out, ${job.fieldsDropped} field(s) left out`);
   } catch (error) {
     job.state = 'error';
     job.error = error?.message || String(error);
@@ -288,8 +302,9 @@ function preview(roomId) {
   if (!world) return { roomId, worldId: null, text: '', chars: 0, budget: 0, included: [], omitted: [], skipped: 0 };
   // A scene worked out for another world (the room was relinked since) does not count.
   const known = scenes.get(roomId);
+  const doc = s.readEntities(worldId);
   const scene = known?.worldId === worldId ? known.ids : null;
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, ...assembleWorld(world, s.readEntities(worldId).entities, world.injectChars, { scene }) };
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations }) };
 }
 
 const reported = new Set();
@@ -345,7 +360,16 @@ async function routes(r) {
 
   r.get('/worlds/:worldId/entities', handle(async (req) => ({ entities: s().listEntities(req.params.worldId) })));
   r.post('/worlds/:worldId/entities', handle(async (req) => s().createEntity(req.params.worldId, body(req))));
-  r.patch('/worlds/:worldId/entities/:entityId', handle(async (req) => s().updateEntity(req.params.worldId, req.params.entityId, body(req))));
+  r.patch('/worlds/:worldId/entities/:entityId', handle(async (req) => {
+    const e = s().updateEntity(req.params.worldId, req.params.entityId, body(req));
+    // 소속 칸이 설정집의 집단을 가리키면 소속 관계도 (코드로, 모델 없이).
+    if (e.type === 'person') s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation' });
+    return e;
+  }));
+  r.get('/worlds/:worldId/relations', handle(async (req) => ({ relations: s().listRelations(req.params.worldId) })));
+  r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
+  r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));
+  r.delete('/worlds/:worldId/relations/:relationId', handle(async (req) => s().deleteRelation(req.params.worldId, req.params.relationId)));
   r.delete('/worlds/:worldId/entities/:entityId', handle(async (req) =>
     s().deleteEntity(req.params.worldId, req.params.entityId, body(req).revision ?? Number(req.query?.revision))));
 

@@ -84,6 +84,17 @@ const AUTO_EVERY = { min: 2, max: 50, default: 6 };
 const HISTORY_MAX = 1000;
 const SOURCES = ['manual', 'auto'];
 const INJECT_MODES = ['all', 'scene'];
+/** Relations between two settings (사령탑 할 일 3). Matched as an unordered pair + kind. */
+const REL_TYPES = ['가족', '소속', '친구', '적대', '연인', '스승·제자', '위치', '기타'];
+const REL_MAX = 5000;
+const REL_NOTE = 300;
+const relKey = (r) => [r.from, r.to].sort().join('|') + '|' + r.type;
+function validRelation(r) {
+  return (
+    r !== null && typeof r === 'object' && typeof r.relationId === 'string' && ID_RE.test(r.from || '') && ID_RE.test(r.to || '') &&
+    r.from !== r.to && REL_TYPES.includes(r.type) && typeof r.note === 'string' && SOURCES.includes(r.source)
+  );
+}
 function cleanMode(v) {
   if (v === undefined) return 'all';
   if (!INJECT_MODES.includes(v)) throw new ArchiveError(400, `넣는 방식은 ${INJECT_MODES.join(', ')} 중 하나입니다.`);
@@ -411,6 +422,7 @@ class Archive {
       () => ({ schemaVersion: SCHEMA, worldId, entities: [] }),
       (d) => {
         if (d.worldId !== worldId || !Array.isArray(d.entities)) return false;
+        if (d.relations !== undefined && !(Array.isArray(d.relations) && d.relations.every(validRelation))) return false;
         const ids = new Set();
         for (const e of d.entities) {
           if (!validEntity(e) || ids.has(e.entityId)) return false;
@@ -430,6 +442,7 @@ class Archive {
       if (e.extra === undefined) e.extra = [];
       if (e.sources === undefined) e.sources = {};
     }
+    if (doc.relations === undefined) doc.relations = [];
     return doc;
   }
 
@@ -608,9 +621,13 @@ class Archive {
     const index = doc.entities.findIndex((x) => x.entityId === entityId);
     if (index < 0) throw new ArchiveError(404, '설정을 찾지 못했습니다.');
     if (doc.entities[index].revision !== revision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
-    doc.entities.splice(index, 1);
+    const [gone] = doc.entities.splice(index, 1);
+    // Its relations go with it; the history keeps both so 되돌리기 brings them back together.
+    const relations = doc.relations.filter((r) => r.from === entityId || r.to === entityId);
+    doc.relations = doc.relations.filter((r) => r.from !== entityId && r.to !== entityId);
     this.writeJson(this.entityFile(worldId), doc);
-    return { deleted: true, entityId };
+    this.pushHistory(worldId, [{ id: randomUUID(), at: now(), by: 'person', roomId: null, messageIds: [], entityId, name: gone.name, type: gone.type, action: 'delete', entity: structuredClone(gone), index, relations }]);
+    return { deleted: true, entityId, relations: relations.length };
   }
 
   // ---------------------------------------------------------------- automatic updates
@@ -631,6 +648,14 @@ class Archive {
   listHistory(worldId, limit = 200) {
     this.getWorld(worldId);
     return this.readHistory(worldId).changes.slice(-limit).reverse();
+  }
+
+  pushHistory(worldId, changes) {
+    if (!changes.length) return;
+    const history = this.readHistory(worldId);
+    history.changes.push(...changes);
+    if (history.changes.length > HISTORY_MAX) history.changes.splice(0, history.changes.length - HISTORY_MAX);
+    this.writeJson(this.historyFile(worldId), history);
   }
 
   /**
@@ -766,13 +791,29 @@ class Archive {
       doc.entities[index] = { ...structuredClone(c.before), revision: e.revision + 1, updatedAt: now() };
       const at = Number.isSafeInteger(c.dropIndex) ? Math.min(Math.max(c.dropIndex, 0), doc.entities.length) : doc.entities.length;
       doc.entities.splice(at, 0, structuredClone(c.dropped));
+      if (Array.isArray(c.relationsBefore)) {
+        const touched = (r) => [r.from, r.to].some((x) => x === c.entityId || x === c.dropId);
+        doc.relations = doc.relations.filter((r) => !touched(r)).concat(c.relationsBefore.filter(validRelation).map((r) => structuredClone(r)));
+      }
+    } else if (c.action === 'relation-add' || c.action === 'relation-note' || c.action === 'relation-remove') {
+      this.undoRelation(doc, c, later);
+    } else if (c.action === 'delete') {
+      if (!validEntity(c.entity)) throw broken('변경 기록');
+      if (doc.entities.some((x) => x.entityId === c.entity.entityId)) throw new ArchiveError(409, '그 설정이 이미 있습니다.');
+      if (doc.entities.length >= ENTITY_MAX) throw new ArchiveError(409, '설정이 ' + ENTITY_MAX + '개라 되살릴 자리가 없습니다.');
+      const at = Number.isSafeInteger(c.index) ? Math.min(Math.max(c.index, 0), doc.entities.length) : doc.entities.length;
+      doc.entities.splice(at, 0, structuredClone(c.entity));
+      const ids = new Set(doc.entities.map((x) => x.entityId));
+      const have = new Set(doc.relations.map(relKey));
+      for (const r of c.relations || []) if (validRelation(r) && ids.has(r.from) && ids.has(r.to) && !have.has(relKey(r))) doc.relations.push(structuredClone(r));
     } else if (c.action === 'create') {
       if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
       if (Object.values(e.sources || {}).includes('manual')) throw new ArchiveError(409, '직접 고친 칸이 있는 설정이라 지우지 않았습니다. 지우려면 설정에서 지워 주세요.');
       // Removing the setting would also throw away what was read into it afterwards: undo those first.
-      const after = history.changes.slice(history.changes.indexOf(c) + 1).filter((x) => x.entityId === c.entityId && !x.undoneAt).length;
+      const after = history.changes.slice(history.changes.indexOf(c) + 1).filter((x) => (x.entityId === c.entityId || x.entityIds?.includes(c.entityId)) && !x.undoneAt).length;
       if (after) throw new ArchiveError(409, `그 뒤 자동으로 ${after}번 바뀌었어요. 최근 기록부터 되돌리거나 설정에서 지워 주세요.`);
       doc.entities.splice(index, 1);
+      doc.relations = doc.relations.filter((r) => r.from !== c.entityId && r.to !== c.entityId);
     } else {
       if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
       if (c.action === 'field' || c.action === 'memo') {
@@ -963,15 +1004,198 @@ class Archive {
     const dropped = structuredClone(drop);
     doc.entities[keepIndex] = merged;
     doc.entities.splice(dropIndex, 1);
+    // Relations follow the kept setting: the dropped one's are pointed at it (no self-links, no doubles).
+    const relationsBefore = structuredClone(doc.relations.filter((r) => [r.from, r.to].some((x) => x === keepId || x === dropId)));
+    const seen = new Set();
+    const moved = [];
+    for (const r of doc.relations) {
+      const n = { ...r, from: r.from === dropId ? keepId : r.from, to: r.to === dropId ? keepId : r.to };
+      if (n.from === n.to || seen.has(relKey(n))) continue;
+      seen.add(relKey(n));
+      moved.push(n);
+    }
+    doc.relations = moved;
     this.writeJson(this.entityFile(worldId), doc);
     history.changes.push({
       id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [],
       entityId: keepId, name: merged.name, type: merged.type, action: 'merge',
-      dropId, dropName: drop.name, before, dropped, dropIndex, afterRevision: merged.revision,
+      dropId, dropName: drop.name, before, dropped, dropIndex, afterRevision: merged.revision, relationsBefore,
     });
     if (history.changes.length > HISTORY_MAX) history.changes.splice(0, history.changes.length - HISTORY_MAX);
     this.writeJson(this.historyFile(worldId), history);
     return merged;
+  }
+
+  // ---------------------------------------------------------------- relations
+
+  listRelations(worldId) {
+    this.getWorld(worldId);
+    return this.readEntities(worldId).relations;
+  }
+
+  /** The setting a name (or other name) belongs to, compared without spaces and case; null when none or unsure. */
+  findByName(entities, name) {
+    const key = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
+    const k = key(name);
+    if (!k) return null;
+    const hits = entities.filter((e) => [e.name, ...e.aliases].some((n) => key(n) === k));
+    return hits.length === 1 ? hits[0] : hits.find((e) => key(e.name) === k) || null;
+  }
+
+  relationInput(doc, body, base) {
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
+    const out = { ...base };
+    for (const k of ['from', 'to']) {
+      if (body[k] === undefined && base) continue;
+      if (!doc.entities.some((e) => e.entityId === body[k])) throw new ArchiveError(400, '이을 설정을 찾지 못했습니다.');
+      out[k] = body[k];
+    }
+    if (out.from === out.to) throw new ArchiveError(400, '서로 다른 두 설정을 골라 주세요.');
+    if (body.type !== undefined || !base) {
+      if (!REL_TYPES.includes(body.type)) throw new ArchiveError(400, '관계는 ' + REL_TYPES.join(', ') + ' 중 하나입니다.');
+      out.type = body.type;
+    }
+    if (body.note !== undefined || !base) out.note = cleanText(body.note ?? '', REL_NOTE, '관계 메모');
+    return out;
+  }
+
+  /** A relation the person adds (source manual: the reader never changes it). */
+  createRelation(worldId, body = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    if (doc.relations.length >= REL_MAX) throw new ArchiveError(400, '관계는 ' + REL_MAX + '개까지 넣을 수 있습니다.');
+    const t = now();
+    const r = { relationId: randomUUID(), ...this.relationInput(doc, body, null), evidence: '', source: 'manual', createdAt: t, updatedAt: t };
+    if (doc.relations.some((x) => relKey(x) === relKey(r))) throw new ArchiveError(409, '같은 관계가 이미 있습니다.');
+    doc.relations.push(r);
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, [this.relationLog(doc, r, 'relation-add', 'person', {})]);
+    return r;
+  }
+
+  updateRelation(worldId, relationId, body = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const r = doc.relations.find((x) => x.relationId === relationId);
+    if (!r) throw new ArchiveError(404, '관계를 찾지 못했습니다.');
+    const before = structuredClone(r);
+    Object.assign(r, this.relationInput(doc, body, r), { source: 'manual', updatedAt: now() });
+    if (doc.relations.some((x) => x !== r && relKey(x) === relKey(r))) throw new ArchiveError(409, '같은 관계가 이미 있습니다.');
+    this.writeJson(this.entityFile(worldId), doc);
+    if (before.note !== r.note && before.type === r.type) {
+      this.pushHistory(worldId, [{ ...this.relationLog(doc, r, 'relation-note', 'person', {}), before: before.note, after: r.note }]);
+    }
+    return r;
+  }
+
+  deleteRelation(worldId, relationId) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const i = doc.relations.findIndex((x) => x.relationId === relationId);
+    if (i < 0) throw new ArchiveError(404, '관계를 찾지 못했습니다.');
+    const [r] = doc.relations.splice(i, 1);
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, [this.relationLog(doc, r, 'relation-remove', 'person', {})]);
+    return { deleted: true, relationId };
+  }
+
+  relationLog(doc, r, action, by, meta) {
+    const nameOf = (id) => doc.entities.find((e) => e.entityId === id)?.name || '';
+    return {
+      id: randomUUID(), at: now(), by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [],
+      entityId: r.from, entityIds: [r.from, r.to], name: nameOf(r.from) + ' — ' + nameOf(r.to), type: 'relation', action,
+      relation: structuredClone(r), evidence: r.evidence || '',
+    };
+  }
+
+  /**
+   * Relations the reader found, endpoints already resolved to ids: [{ from, to, type, note, was?, evidence }].
+   * Both settings must exist. Same pair and kind: only the note is renewed. was (an earlier kind between the two that
+   * has ended, e.g. 연인 → 헤어짐): that relation goes and the new note keeps 「과거에는 ○○」. The person's relations
+   * (source manual) are never changed. Every change is in the history and can be undone.
+   */
+  applyRelations(worldId, rels, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const ids = new Set(doc.entities.map((e) => e.entityId));
+    const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
+    const changes = [];
+    const t = now();
+    for (const raw of Array.isArray(rels) ? rels : []) {
+      if (!isObject(raw) || !ids.has(raw.from) || !ids.has(raw.to) || raw.from === raw.to || !REL_TYPES.includes(raw.type)) continue;
+      let note = typeof raw.note === 'string' ? raw.note.trim().slice(0, REL_NOTE) : '';
+      const evidence = typeof raw.evidence === 'string' ? raw.evidence.slice(0, 300) : '';
+      if (REL_TYPES.includes(raw.was) && raw.was !== raw.type) {
+        const old = doc.relations.find((x) => relKey(x) === relKey({ ...raw, type: raw.was }));
+        if (old && old.source !== 'manual') {
+          doc.relations.splice(doc.relations.indexOf(old), 1);
+          changes.push(this.relationLog(doc, old, 'relation-remove', by, meta));
+          const past = '과거에는 ' + raw.was;
+          if (!note.includes(past)) note = (note ? note + ' · ' + past : past).slice(0, REL_NOTE);
+        }
+      }
+      const same = doc.relations.find((x) => relKey(x) === relKey(raw));
+      if (same) {
+        if (same.source === 'manual' || !note || same.note === note) continue;
+        changes.push({ ...this.relationLog(doc, same, 'relation-note', by, meta), before: same.note, after: note, evidence });
+        same.note = note;
+        if (evidence) same.evidence = evidence;
+        same.updatedAt = t;
+        continue;
+      }
+      if (doc.relations.length >= REL_MAX) continue;
+      const r = { relationId: randomUUID(), from: raw.from, to: raw.to, type: raw.type, note, evidence, source: 'auto', createdAt: t, updatedAt: t };
+      doc.relations.push(r);
+      changes.push(this.relationLog(doc, r, 'relation-add', by, meta));
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * 소속 칸 → 소속 관계, by code (no model): a person whose affiliation names a group of this world (its name or other
+   * name, whole) gets a 소속 relation to it unless one exists. ids: only these people (all when omitted).
+   */
+  linkAffiliations(worldId, ids = null, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const squashed = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
+    const groups = doc.entities.filter((e) => e.type === 'group');
+    const exists = new Set(doc.relations.map(relKey));
+    const found = [];
+    for (const p of doc.entities) {
+      if (p.type !== 'person' || (ids && !ids.includes(p.entityId))) continue;
+      const text = squashed(p.fields?.affiliation);
+      if (!text) continue;
+      for (const g of groups) {
+        if (!g.name || ![g.name, ...g.aliases].some((n) => squashed(n).length >= 2 && text.includes(squashed(n)))) continue;
+        const r = { from: p.entityId, to: g.entityId, type: '소속', note: '', evidence: '소속: ' + p.fields.affiliation };
+        if (!exists.has(relKey(r))) found.push(r);
+      }
+    }
+    return this.applyRelations(worldId, found, { ...meta, by: meta.by || 'affiliation' });
+  }
+
+  undoRelation(doc, c, later) {
+    const r = c.relation;
+    if (!validRelation(r)) throw broken('변경 기록');
+    const cur = doc.relations.find((x) => x.relationId === r.relationId);
+    if (c.action === 'relation-add') {
+      if (!cur) throw new ArchiveError(409, '이미 지워진 관계입니다.');
+      if (cur.type !== r.type || (c.by !== 'person' && (cur.source === 'manual' || cur.note !== r.note))) throw new ArchiveError(409, later);
+      doc.relations.splice(doc.relations.indexOf(cur), 1);
+    } else if (c.action === 'relation-note') {
+      if (!cur || cur.note !== c.after) throw new ArchiveError(409, later);
+      cur.note = c.before || '';
+      cur.updatedAt = now();
+    } else {
+      if (cur || doc.relations.some((x) => relKey(x) === relKey(r))) throw new ArchiveError(409, '같은 관계가 이미 있습니다.');
+      const ids = new Set(doc.entities.map((e) => e.entityId));
+      if (!ids.has(r.from) || !ids.has(r.to)) throw new ArchiveError(409, '이을 설정이 지워져서 되돌리지 않았습니다.');
+      doc.relations.push(structuredClone(r));
+    }
   }
 
   // ---------------------------------------------------------------- rooms
@@ -1062,4 +1286,5 @@ module.exports = {
   BUDGET_MAX,
   ROOM_RE,
   AUTO_EVERY,
+  REL_TYPES,
 };
