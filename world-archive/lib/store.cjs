@@ -82,13 +82,15 @@ const FIELDS = {
   place: [
     { key: 'location', label: '위치·소속', kind: 'line' },
     { key: 'use', label: '시설·용도', kind: 'line' },
-    { key: 'layout', label: '내부 구조', kind: 'text' },
+    { key: 'layout', label: '배치·내부 구조', kind: 'text' },
     { key: 'access', label: '출입구·연결', kind: 'text' },
     { key: 'limits', label: '제약', kind: 'text' },
   ],
   group: [
     { key: 'kind', label: '종류', kind: 'line', hint: '가문, 학교, 기숙사, 조직 같은 것' },
     { key: 'members', label: '구성원', kind: 'text' },
+    // v0.5.1 J: how many there are in all (「아홉 명」) — the 명단 shows 「이름 아는 사람 M명 / 전체 N명」
+    { key: 'size', label: '전체 인원', kind: 'line' },
     { key: 'hierarchy', label: '위계·역할', kind: 'text' },
   ],
   // rule: what must be obeyed. system: how the world works (magic, abilities, economy, points).
@@ -118,6 +120,10 @@ const BUDGET_MAX = 20000;
 const BUDGET_DEFAULT = 3000;
 const AUTO_EVERY = { min: 2, max: 50, default: 6 };
 const HISTORY_MAX = 1000;
+/** v0.5.1 T: 균형 볼 칸 a world may have (default 성별). */
+const BALANCE_MAX = 4;
+/** v0.5.1 T: the 균형 볼 칸 values the reader gave for a person — only the labels the world asks for (meta.balance). */
+const balanceOf = (item, meta) => (item.type === 'person' && isObject(item.balance) && Array.isArray(meta.balance) ? Object.entries(item.balance).filter(([k, v]) => meta.balance.includes(k) && typeof v === 'string' && v.trim()).map(([k, v]) => [k, v.trim().slice(0, 120)]) : []);
 const SOURCES = ['manual', 'auto'];
 const INJECT_MODES = ['all', 'scene'];
 /** Relations between two settings (사령탑 할 일 3). Matched as an unordered pair + kind. */
@@ -433,6 +439,8 @@ function validWorld(w) {
     (w.auto === undefined || isObject(w.auto)) &&
     (w.yearStart === undefined || (Number.isInteger(w.yearStart) && w.yearStart >= 1 && w.yearStart <= 12)) &&
     (w.nameStyle === undefined || ['auto', 'ko', 'original'].includes(w.nameStyle)) &&
+    (w.tail === undefined || isObject(w.tail)) &&
+    (w.balance === undefined || (Array.isArray(w.balance) && w.balance.every((x) => typeof x === 'string'))) &&
     typeof w.createdAt === 'string' &&
     typeof w.updatedAt === 'string' &&
     Number.isSafeInteger(w.revision) &&
@@ -462,6 +470,8 @@ function validEntity(e) {
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
     (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
+    (e.maybe === undefined || (Array.isArray(e.maybe) && e.maybe.every((m) => isObject(m) && typeof m.id === 'string'))) &&
+    (e.room === undefined || e.room === null || (typeof e.room === 'string' && ID_RE.test(e.room))) &&
     (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
@@ -638,6 +648,17 @@ class Archive {
     if (body.nameStyle !== undefined) {
       if (!['auto', 'ko', 'original'].includes(body.nameStyle)) throw new ArchiveError(400, '이름 표기는 auto · ko · original 중 하나입니다.');
       next.nameStyle = body.nameStyle;
+      changed = true;
+    }
+    // v0.5.1 T: the two last lines of {{세계}} (on by default) and the 균형 볼 칸 (default 성별)
+    if (body.tail !== undefined) {
+      if (!isObject(body.tail) || Object.entries(body.tail).some(([k, v]) => !['cast', 'balance'].includes(k) || typeof v !== 'boolean')) throw new ArchiveError(400, 'tail은 { cast, balance } 켜기/끄기(true · false)입니다.');
+      next.tail = { ...(world.tail || {}), ...body.tail };
+      changed = true;
+    }
+    if (body.balance !== undefined) {
+      if (!Array.isArray(body.balance) || body.balance.length > BALANCE_MAX || body.balance.some((x) => typeof x !== 'string' || !x.trim() || x.trim().length > 20)) throw new ArchiveError(400, `균형 볼 칸은 1~20자 이름 ${BALANCE_MAX}개까지입니다.`);
+      next.balance = [...new Set(body.balance.map((x) => x.trim()))];
       changed = true;
     }
     if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
@@ -849,6 +870,8 @@ class Archive {
     const changes = [];
     const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
     let anyTouched = false;
+    // v0.5.1 T: which batch this is — a setting spoken of in two batches or more comes back (반복 등장)
+    const batchKey = Array.isArray(meta.messageIds) && meta.messageIds.length ? String(meta.messageIds[0]) : null;
     const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
     const norm = (x) => String(x || '').normalize('NFC').trim().toLowerCase();
     const findEntity = (item) => {
@@ -913,6 +936,9 @@ class Archive {
           entity.appliesTo = item.appliesTo;
           entity.sources.appliesTo = 'auto';
         }
+        if (batchKey) entity.seen = { n: 1, last: batchKey };
+        const bal = balanceOf(item, meta);
+        if (bal.length) entity.extra = bal.map(([label, value]) => ({ label, value, source: 'auto' }));
         doc.entities.push(entity);
         log({ entityId: entity.entityId, name, type: item.type, action: 'create', evidence });
         continue;
@@ -920,6 +946,18 @@ class Archive {
       const e = found;
       e.sources = e.sources || {};
       let touched = false;
+      // v0.5.1 T: one more batch spoke of it (반복 등장: two or more) — not a change of the setting, no revision
+      if (batchKey && e.seen?.last !== batchKey) { e.seen = { n: (e.seen?.n || 1) + 1, last: batchKey }; anyTouched = true; }
+      // v0.5.1 T: 균형 볼 칸 the world added (the person's 추가 칸) — an entry the person wrote is never written over
+      for (const [label, value] of balanceOf(item, meta)) {
+        e.extra = Array.isArray(e.extra) ? e.extra : [];
+        const x = e.extra.find((y) => y.label === label);
+        if (x && (x.source !== 'auto' || x.value === value)) continue;
+        const before = x ? x.value : '';
+        if (x) x.value = value; else e.extra.push({ label, value, source: 'auto' });
+        touched = true;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'extra', key: label, before, after: value, evidence });
+      }
       for (const [key, value] of Object.entries(fields)) {
         if (e.type !== item.type && !FIELDS[e.type].some((f) => f.key === key)) continue;
         const before = e.fields[key] || '';
@@ -1077,6 +1115,15 @@ class Archive {
         else { delete e.rumors[c.key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
       } else if (c.action === 'reveal') {
         e.hidden = { ...(e.hidden || {}), [c.key]: true };
+      } else if (c.action === 'extra') {
+        const x = (e.extra || []).find((y) => y.label === c.key);
+        if (!x || x.value !== c.after || x.source !== 'auto') throw new ArchiveError(409, later);
+        if (c.before) x.value = c.before; else e.extra = e.extra.filter((y) => y !== x);
+      } else if (c.action === 'room') {
+        if ((e.room || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.room = c.before; else delete e.room;
+        if (c.roomPast) e.roomPast = structuredClone(c.roomPast); else delete e.roomPast;
+        if (c.by === 'person') delete e.sources?.room;
       } else if (c.action === 'base') {
         if ((e.base || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.base = c.before; else delete e.base;
@@ -1166,6 +1213,55 @@ class Archive {
     this.writeJson(this.entityFile(worldId), doc);
     const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
     const c = { id: randomUUID(), at: g.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: groupId, entityIds: [groupId, after || before].filter(Boolean), name: g.name, type: 'group', action: 'base', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
+    this.pushHistory(worldId, [c]);
+    return c;
+  }
+
+  /**
+   * v0.5.1 T: the people who come back (반복 등장) — pinned, or spoken of in two batches or more. Settings from before
+   * v0.5.1 have no count yet: their history's batches (the first message of each change) are counted instead.
+   */
+  recurringIds(worldId) {
+    const doc = this.readEntities(worldId);
+    const people = doc.entities.filter((e) => e.type === 'person');
+    const batches = new Map();
+    if (people.some((e) => !e.seen && !e.pinned)) {
+      for (const c of this.readHistory(worldId).changes) {
+        if (!c.messageIds?.length || !c.entityId) continue;
+        if (!batches.has(c.entityId)) batches.set(c.entityId, new Set());
+        batches.get(c.entityId).add(String(c.messageIds[0]));
+      }
+    }
+    return new Set(people.filter((e) => e.pinned || (e.seen ? e.seen.n >= 2 : (batches.get(e.entityId)?.size || 0) >= 2)).map((e) => e.entityId));
+  }
+
+  /**
+   * v0.5.1 I: a person's 지내는 곳 (방 배정 · 숙소) — the place they stay now. Only the current one counts: a new one
+   * takes its place and the one before is kept as 「이전」 (roomPast, up to 3). Like 본거지: the reader's value never goes
+   * over the person's; recorded ('room', undoable). placeId null: none.
+   */
+  setRoom(worldId, personId, placeId, meta = {}, { force = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const p = doc.entities.find((x) => x.entityId === personId && x.type === 'person');
+    if (!p) throw new ArchiveError(404, '인물을 찾지 못했습니다.');
+    if (placeId != null && !doc.entities.some((x) => x.entityId === placeId && x.type === 'place')) throw new ArchiveError(400, '지내는 곳은 장소여야 합니다.');
+    if (!force && p.sources?.room === 'manual') return null;
+    const before = p.room || null;
+    const after = placeId || null;
+    if (before === after && !(force && p.sources?.room !== 'manual')) return null;
+    const roomPast = p.roomPast ? structuredClone(p.roomPast) : null;
+    if (before && before !== after) p.roomPast = [{ placeId: before, until: now() }, ...(p.roomPast || []).filter((x) => x.placeId !== before && x.placeId !== after)].slice(0, 3);
+    if (after) p.room = after; else delete p.room;
+    p.sources = { ...(p.sources || {}) };
+    if (force) p.sources.room = 'manual';
+    else if (after) p.sources.room = 'auto';
+    else delete p.sources.room;
+    p.revision++;
+    p.updatedAt = now();
+    this.writeJson(this.entityFile(worldId), doc);
+    const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
+    const c = { id: randomUUID(), at: p.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: personId, entityIds: [personId, after || before].filter(Boolean), name: p.name, type: 'person', action: 'room', before, after, beforeName: nameOf(before), afterName: nameOf(after), roomPast, evidence: meta.evidence || '' };
     this.pushHistory(worldId, [c]);
     return c;
   }
@@ -1529,7 +1625,7 @@ class Archive {
       sheet.timetable.cells[key] = { day, slot, value, evidence, source: 'auto', at: t, ...TT.cellExtras(raw), ...(past?.length ? { past } : {}) };
       sheet.revision++;
       sheet.updatedAt = t;
-      log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence });
+      log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence, ...(raw.moved ? { moved: raw.moved } : {}) });
     }
     if (!changes.length) return [];
     for (const e of doc.entities) if (e.timetable) TT.refresh(e);
@@ -1736,6 +1832,22 @@ class Archive {
     );
   }
 
+  /**
+   * v0.5.1 N: the reader was not sure a new setting is one the world had — kept on the new one (maybe: [{ id, why }],
+   * up to 5) and shown first in 「같은 것일 수 있음」; merging or 「다른 것이에요」 is the person's.
+   */
+  markMaybe(worldId, newId, oldId, why = '') {
+    this.getWorld(worldId);
+    if (newId === oldId) return false;
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === newId);
+    const o = doc.entities.find((x) => x.entityId === oldId);
+    if (!e || !o || e.type !== o.type || (e.maybe || []).some((m) => m.id === oldId)) return false;
+    e.maybe = [...(e.maybe || []), { id: oldId, why: String(why).slice(0, 200), at: now() }].slice(-5);
+    this.writeJson(this.entityFile(worldId), doc);
+    return true;
+  }
+
   /** People who may be one person: [{ a, b, why }]. Only a suggestion; nothing is merged without mergeEntities. */
   listDuplicates(worldId) {
     this.getWorld(worldId);
@@ -1743,7 +1855,9 @@ class Archive {
     const doc = this.readEntities(worldId);
     const skip = (a, b) => gone.has(pairKey(a, b));
     const seen = new Set();
-    return [...findPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...describedPairs(doc.entities, doc.relations, skip).map((x) => ({ ...x, type: 'person' })), ...speciesPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...thingPairs(doc.entities, doc.relations, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
+    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+    const unsure = doc.entities.flatMap((e) => (e.maybe || []).filter((m) => byId.get(m.id)?.type === e.type && m.id !== e.entityId && !skip(e.entityId, m.id)).map((m) => ({ a: m.id, b: e.entityId, why: `자동 반영이 같은 것인지 헷갈려 했어요${m.why ? ` — 「${m.why}」` : ''}`, type: e.type, unsure: true })));
+    return [...unsure,...findPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...describedPairs(doc.entities, doc.relations, skip).map((x) => ({ ...x, type: 'person' })), ...speciesPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...thingPairs(doc.entities, doc.relations, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
   }
 
   /** 「다른 사람이에요」: the pair is not suggested again (by id, so renaming either does not bring it back). */
@@ -1789,6 +1903,7 @@ class Archive {
     if (keep.type !== drop.type) throw new ArchiveError(400, '같은 종류의 설정끼리만 합칠 수 있습니다.');
     const t = now();
     const merged = { ...mergeInto(keep, drop), revision: keep.revision + 1, updatedAt: t };
+    if (merged.type === 'person' && !merged.room && drop.room) { merged.room = drop.room; merged.sources = { ...(merged.sources || {}), room: drop.sources?.room || 'auto' }; } // v0.5.1 I
     if (body.preview === true) return merged;
     const history = this.readHistory(worldId);
     const before = structuredClone(keep);
@@ -1802,6 +1917,7 @@ class Archive {
     for (const e of doc.entities) {
       if (e.appliesTo === dropId) e.appliesTo = keepId; // v0.5.0 C
       if (e.base === dropId) e.base = keepId; // v0.5.0 E
+      if (e.room === dropId) e.room = keepId; // v0.5.1 I
       if (e.timetable?.ownerId === dropId) e.timetable.ownerId = keepId; // v0.5.0 B
     }
     for (const r of doc.relations) {

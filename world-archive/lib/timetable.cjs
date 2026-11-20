@@ -43,7 +43,12 @@ function slotRank(s) {
 const sortCells = (cells) => Object.values(cells || {}).sort((a, b) => DAY_RANK(a.day) - DAY_RANK(b.day) || slotRank(a.slot) - slotRank(b.slot) || a.slot.localeCompare(b.slot, 'ko'));
 
 const TIME = /(\d+\s*교시|\d{1,2}:\d{2}(?:\s*[~\-–—]\s*\d{1,2}:\d{2})?|\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?(?:\s*[~\-–—]\s*\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?)?|새벽|아침|오전|점심|오후|저녁|밤|자정)/;
-const DAY_IN_TEXT = /(월|화|수|목|금|토|일)요일|매일|날마다|평일/g;
+// v0.5.1 H: days that share one time — 「월요일 · 수요일 오후」, 「월·수 오후」, 「토/일」 (single letters only in a list,
+// never inside a word: 「수업」 · 「통일」 are not days)
+const DAY_WORD = '(?:월|화|수|목|금|토|일)요일|매일|날마다|평일';
+const DAY_GROUP = new RegExp(`(?:${DAY_WORD})(?:\\s*(?:[·,/]|및)\\s*(?:${DAY_WORD}))*|(?<![가-힣])[월화수목금토일](?:\\s*[·/,]\\s*[월화수목금토일])+(?:요일)?(?![가-힣])`, 'g');
+const DAY_ONE = /(월|화|수|목|금|토|일)요일|매일|날마다|평일|[월화수목금토일]/g;
+const daysOf = (group) => [...new Set([...group.matchAll(DAY_ONE)].map((m) => normDay(m[0])).filter(Boolean))];
 /**
  * The cells a 「언제」 text names, by code: 「금요일 아침 9시」 → 금 · 아침 9시? no — the first time phrase after the day:
  * 「금요일 아침」 → [금, 아침]; 「월요일 09:00–15:00, 화요일 09:00–15:00」 → two cells. A day without a time, or a date
@@ -52,13 +57,14 @@ const DAY_IN_TEXT = /(월|화|수|목|금|토|일)요일|매일|날마다|평일
 function parseWhen(text) {
   const t = String(text || '');
   const out = [];
-  const hits = [...t.matchAll(DAY_IN_TEXT)];
+  const hits = [...t.matchAll(DAY_GROUP)];
   const TIME_ALL = new RegExp(TIME.source, 'g');
   for (let i = 0; i < hits.length; i++) {
-    const day = normDay(hits[i][0]);
+    const days = daysOf(hits[i][0]);
     const rest = t.slice(hits[i].index + hits[i][0].length, hits[i + 1]?.index ?? t.length);
     const times = [...rest.matchAll(TIME_ALL)];
-    if (!day || !times.length || rest.slice(0, times[0].index).replace(/[\s,]/g, '').length > 6) continue;
+    if (!days.length || !times.length || rest.slice(0, times[0].index).replace(/[\s,]/g, '').length > 6) continue;
+    const at = [];
     // 「09:00–12:15 및 15:30–17:00 비행」: a cell per time; what follows a time (up to the next one) is what happens
     for (let j = 0; j < times.length; j++) {
       let slotText = times[j][0];
@@ -73,12 +79,42 @@ function parseWhen(text) {
       let after = rest.slice(end, times[j + 1]?.index ?? rest.length);
       // 「1시 30분까지」 is a time up to then, not a lesson called 「까지」
       if (/^\s*까지/.test(after)) slotText += '까지';
-      after = after.replace(/^\s*(까지|부터|에|경|쯤)/, '').split(/[,，]/)[0].replace(/(^|\s)및\s*$/, '').replace(/^[\s,]+|[\s,.]+$/g, '').trim();
+      after = after.replace(/^\s*(까지|부터|에|경|쯤)/, '').split(/[,，;；\n]|(?<=[.。])\s/)[0].replace(/(^|\s)및\s*$/, '').replace(/^[\s,]+|[\s,.]+$/g, '').trim();
       const slot = normSlot(slotText);
-      if (slot) out.push({ day, slot, after });
+      if (slot) at.push({ slot, after });
     }
+    for (const day of days) for (const c of at) out.push({ day, ...c });
   }
   return out;
+}
+
+/**
+ * v0.5.1 H: a field's text split into its timetable part and the rest — 「월·수 오후 도서관 당번, 책을 좋아함」 →
+ * cells 월 · 수 오후 「도서관 당번」, moved 「월·수 오후 도서관 당번」, rest 「책을 좋아함」. A piece (between commas,
+ * semicolons, lines or sentences) is timetable when it names a cell, or is only a time following one (「…, 2교시 약초학」);
+ * days alone (「월요일, 수요일 오후 …」) go with the piece after them. Returns { cells, moved, rest }.
+ */
+function splitWhen(text) {
+  const t = String(text || '').trim();
+  const cells = parseWhen(t);
+  if (!cells.length) return { cells, moved: '', rest: t };
+  const parts = t.split(/\s*[,，;；\n]+\s*|(?<=[.。])\s+/).map((x) => x.trim()).filter(Boolean);
+  const onlyDays = (p) => new RegExp(DAY_GROUP.source).test(p) && !p.replace(new RegExp(DAY_GROUP.source, 'g'), '').replace(/[\s·,/및]/g, '');
+  const startsWithTime = new RegExp(`^(?:${TIME.source})`);
+  const keep = [];
+  const moved = [];
+  let carry = '';
+  let last = false;
+  for (const p0 of parts) {
+    const p = carry ? `${carry}, ${p0}` : p0;
+    if (onlyDays(p)) { carry = p; continue; }
+    carry = '';
+    last = parseWhen(p).length > 0 || (last && startsWithTime.test(p));
+    (last ? moved : keep).push(p);
+  }
+  if (carry) keep.push(carry);
+  const join = (list) => list.reduce((s, p) => (s ? s + (/[.。]$/.test(s) ? ' ' : ', ') + p : p), '');
+  return { cells, moved: join(moved), rest: join(keep) };
 }
 
 /**
@@ -180,4 +216,4 @@ function validTimetable(t) {
     && (c.placeId === undefined || typeof c.placeId === 'string') && (c.hours === undefined || (Number.isInteger(c.hours) && c.hours >= 1 && c.hours <= 12)));
 }
 
-module.exports = { DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, span, lookTogether, refresh, cellExtras, subjectOf, hoursOf, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };
+module.exports = { DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, splitWhen, span, lookTogether, refresh, cellExtras, subjectOf, hoursOf, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };

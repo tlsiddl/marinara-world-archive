@@ -19,6 +19,29 @@ function unnamed(name) {
 }
 
 /**
+ * v0.5.1 J: how many people a text says — 「40명」, 「아홉 명」, 「열두 명」, 「스물다섯 명」, 「남학생 다섯 명, 여학생 네 명」
+ * (added up: 9), 「총 30명 중 여학생 12명」 (the total said: 30). Only with 명 · 사람 (「다섯」 alone is not a head count).
+ * Returns the number, or null when none is said (「수십 명」 · 「많다」).
+ */
+const KO_ONES = { 한: 1, 하나: 1, 두: 2, 둘: 2, 세: 3, 셋: 3, 석: 3, 네: 4, 넷: 4, 넉: 4, 다섯: 5, 여섯: 6, 일곱: 7, 여덟: 8, 아홉: 9 };
+const KO_TENS = { 열: 10, 스물: 20, 스무: 20, 서른: 30, 마흔: 40, 쉰: 50, 예순: 60, 일흔: 70, 여든: 80, 아흔: 90 };
+const COUNT_RE = new RegExp(`(총|전체|모두|합계|통틀어|도합)?\\s*(?:(\\d{1,5})|(${Object.keys(KO_TENS).join('|')})?\\s?(${Object.keys(KO_ONES).sort((a, b) => b.length - a.length).join('|')})?)\\s*(?:명|사람|people|students|members)`, 'g');
+function counts(text) {
+  const out = [];
+  for (const m of String(text || '').matchAll(COUNT_RE)) {
+    const n = m[2] ? Number(m[2]) : (KO_TENS[m[3]] || 0) + (KO_ONES[m[4]] || 0);
+    if (n > 0) out.push({ n, total: !!m[1] });
+  }
+  return out;
+}
+function headcount(text) {
+  const list = counts(text);
+  if (!list.length) return null;
+  const said = list.find((x) => x.total);
+  return said ? said.n : list.reduce((a, x) => a + x.n, 0);
+}
+
+/**
  * @returns {null | { groupId, members: { entityId, name, via, viaId, kind: 'member'|'staff'|'past', unnamed }[],
  *   groups: { entityId, name, parentId }[], counts: { member, staff, past, named } }}
  */
@@ -58,7 +81,9 @@ function rosterOf(entities, relations, groupId) {
   const KIND_RANK = { member: 0, staff: 1, past: 2 };
   members.sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || rank.get(a.viaId || groupId) - rank.get(b.viaId || groupId) || a.name.localeCompare(b.name, 'ko'));
   const count = (k) => members.filter((m) => m.kind === k).length;
-  return { groupId, members, groups, counts: { member: count('member'), staff: count('staff'), past: count('past'), named: members.filter((m) => !m.unnamed).length } };
+  // v0.5.1 J: 「이름 아는 사람 M명 / 전체 N명」 — known: the named people now (not 지난 구성원); total: the 전체 인원 칸, read by code
+  const known = members.filter((m) => !m.unnamed && m.kind !== 'past').length;
+  return { groupId, members, groups, counts: { member: count('member'), staff: count('staff'), past: count('past'), named: members.filter((m) => !m.unnamed).length, known, total: headcount(byId.get(groupId).fields?.size) } };
 }
 
-module.exports = { rosterOf, unnamed, ROLE_WORDS, PAST_WORDS };
+module.exports = { rosterOf, unnamed, headcount, counts, ROLE_WORDS, PAST_WORDS };

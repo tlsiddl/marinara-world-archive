@@ -216,7 +216,13 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         // v0.5.0 R: 「○○의 누나」 whose sentence names another person the world has: 「이름 확인 필요」
         const peopleNow = before.filter((e) => e.type === 'person');
         for (const it of items) if (it.type === 'person') { const c = X.whoseCheck(it.name, it.evidence, peopleNow); if (c) it.nameCheck = c; }
-        const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
+        // v0.5.1 H: a timetable in a field of a place, rule … (no owner): a schedule for 「시간표로 모으기」 to place
+        const homeless = [];
+        for (const it of items) for (const m of it.toTimetable || []) {
+          if (it.type === 'group' || it.type === 'person') continue;
+          homeless.push({ type: 'schedule', name: `${it.name} ${m.label}`, aliases: [], match: null, fields: { when: m.text, ...(it.type === 'place' ? { where: it.name } : {}) }, fieldEvidence: { when: m.evidence }, hidden: {}, rumors: {}, corrections: {}, memo: `「${it.name}」의 ${m.label} 칸에서 시간표로 옮김 — 「시간표로 모으기」가 주인을 찾아요`, where: '', base: '', evidence: m.evidence, evidenceAt: it.evidenceAt });
+        }
+        const changes = s.applyAuto(worldId, [...items, ...homeless], { roomId, messageIds: part.batch.map((x) => x.id), balance: X.customBalance(world) });
         const afterSave = s.readEntities(worldId).entities;
         for (const it of items) {
           // v0.5.0 E: a group's 본거지 — a place the world has (now)
@@ -224,6 +230,20 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           const pl = s.findByName(afterSave, it.base);
           const g = pl?.type === 'place' && afterSave.find((x) => x.type === 'group' && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.match || it.name)));
           if (g) s.setBase(worldId, g.entityId, pl.entityId, { roomId, by: 'reader', evidence: it.evidence });
+        }
+        for (const it of items) {
+          // v0.5.1 N: not sure it is that one — both stay, the pair is shown for the person to merge or keep apart
+          if (!it.maybe) continue;
+          const mine = afterSave.find((x) => x.type === it.type && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.name)));
+          const old = s.findByName(afterSave.filter((x) => x.type === it.type), it.maybe);
+          if (mine && old && mine.entityId !== old.entityId && s.markMaybe(worldId, mine.entityId, old.entityId, it.evidence)) job.unsure = (job.unsure || 0) + 1;
+        }
+        for (const it of items) {
+          // v0.5.1 I: a person's 지내는 곳 — a place the world has (now); only the current one counts
+          if (it.type !== 'person' || !it.room) continue;
+          const pl = s.findByName(afterSave, it.room);
+          const p = pl?.type === 'place' && afterSave.find((x) => x.type === 'person' && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.match || it.name)));
+          if (p) s.setRoom(worldId, p.entityId, pl.entityId, { roomId, by: 'reader', evidence: it.evidence });
         }
         for (const it of items) {
           if (!it.where || it.appliesTo) continue;
@@ -261,6 +281,12 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         const tt = X.checkTimetable(parsed, part, cast);
         const owners = s.readEntities(worldId).entities.filter((e) => e.type === 'group' || e.type === 'person');
         const cells = [];
+        // v0.5.1 H: 「시간표로 옮김」 — a field's timetable goes to its own group's or person's 시간표
+        for (const it of items) for (const m of it.toTimetable || []) {
+          if (it.type !== 'group' && it.type !== 'person') continue;
+          const self = owners.find((x) => x.type === it.type && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.match || it.name)));
+          if (self) for (const c of m.cells) cells.push({ ...c, ownerId: self.entityId, evidence: m.evidence, moved: { type: it.type, key: m.key } });
+        }
         for (const c of tt.cells) {
           const owner = s.findByName(owners, c.owner);
           const where = c.place ? s.findByName(owners.concat(s.readEntities(worldId).entities.filter((e) => e.type === 'place')), c.place) : null;
@@ -430,7 +456,7 @@ function preview(roomId) {
   // 이름 표기: the world's choice; 「자동」 — the original name first in a room in English
   const latin = known?.latin ?? s.getRoom(roomId).latin ?? false;
   const names = world.nameStyle === 'original' ? 'original' : world.nameStyle === 'ko' ? 'ko' : latin ? 'original' : 'ko';
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names }) };
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names }) };
 }
 
 /** 할 일 12: what one room's {{세계외형}} would be right now. */
@@ -626,6 +652,12 @@ async function routes(r) {
   r.post('/worlds/:worldId/tidy/keep', handle(async (req) => s().keepTidy(req.params.worldId, String(body(req).entityId || ''), body(req).key || null)));
   r.post('/worlds/:worldId/location-fill', handle(async (req) => fillPlaces(req.params.worldId, { model: body(req).model !== false })));
   r.post('/worlds/:worldId/applies-fill', handle(async (req) => fillApplies(req.params.worldId)));
+  r.put('/worlds/:worldId/entities/:entityId/room', handle(async (req) => {
+    const b = body(req).room;
+    if (b !== null && typeof b !== 'string') throw new ArchiveError(400, 'room(장소 id, 없애려면 null)를 보내 주세요.');
+    s().setRoom(req.params.worldId, req.params.entityId, b, {}, { force: true });
+    return s().listEntities(req.params.worldId).find((e) => e.entityId === req.params.entityId);
+  }));
   r.put('/worlds/:worldId/entities/:entityId/base', handle(async (req) => {
     const b = body(req).base;
     if (b !== null && typeof b !== 'string') throw new ArchiveError(400, 'base(장소 id, 없애려면 null)를 보내 주세요.');
@@ -683,7 +715,7 @@ const compact = (e) => ({ entityId: e.entityId, type: e.type, name: e.name, alia
  * server has, and a screen panel copied into another module (world-panel.js) compares its own number with it.
  */
 const CONTRACT = 2;
-const CONTRACT_FEATURES = ['relations', 'species', 'entity', 'roster', 'timetable', 'calendar', 'appliesTo', 'base'];
+const CONTRACT_FEATURES = ['relations', 'species', 'entity', 'roster', 'timetable', 'calendar', 'appliesTo', 'base', 'room'];
 /** Relations that make two people know each other from the start (연동 v2). 소속 · 위치 · 기타 do not. */
 const KNOW_TYPES = ['가족', '친구', '연인', '스승·제자', '적대'];
 const PAST_RE = /과거에는\s*(가족|친구|연인|스승·제자|적대)/g;
@@ -768,7 +800,7 @@ async function gatherTimetables(worldId, { model = true } = {}) {
   const strip = (name) => String(name).replace(/(?<=^|[\s·,])((월|화|수|목|금|토|일)요일|매일|평일|새벽|아침|오전|점심|오후|저녁|자정|\d+\s*교시|\d{1,2}:\d{2}|\d{1,2}\s*시)(?=$|[\s·,])/g, ' ').replace(/[·,]/g, ' ').replace(/\s+/g, ' ').trim();
   const out = { moved: [], left: [], calls: 0, tokens: {} };
   const manual = (e) => e.provenance?.source === 'manual' || Object.values(e.sources || {}).includes('manual');
-  const candidates = doc.entities.filter((e) => e.type === 'schedule' && !e.timetable && /(월|화|수|목|금|토|일)요일|매일|평일/.test(String(e.fields?.when || '') + ' ' + e.name));
+  const candidates = doc.entities.filter((e) => e.type === 'schedule' && !e.timetable && (/(월|화|수|목|금|토|일)요일|매일|평일/.test(String(e.fields?.when || '') + ' ' + e.name) || TT.parseWhen(e.fields?.when || '').length > 0));
   const asks = [];
   for (const e of candidates) {
     const found = TT.parseWhen(e.fields?.when || '').length ? TT.parseWhen(e.fields?.when || '') : TT.parseWhen(e.name);

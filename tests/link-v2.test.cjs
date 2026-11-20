@@ -92,7 +92,7 @@ test('entity by id, the contract level in status and on the api', async (t) => {
   assert.equal((await call('GET', `${A}/rooms/room/entities/00000000-0000-4000-8000-000000000000`)).data.entity, null);
   const status = (await call('GET', `${A}/status`)).data;
   assert.equal(status.contract, 2);
-  assert.deepEqual(status.features, ['relations', 'species', 'entity', 'roster', 'timetable', 'calendar', 'appliesTo', 'base'], 'v0.5.0 adds, never takes away');
+  assert.deepEqual(status.features, ['relations', 'species', 'entity', 'roster', 'timetable', 'calendar', 'appliesTo', 'base', 'room'], 'v0.5.0 · v0.5.1 add, never take away');
   assert.ok(status.fields.person.some((f) => f.key === 'species' && f.label === '종'));
   const api = globalThis.__marinaraWorldArchive.api;
   assert.equal(api.version, 1, 'v2 only adds: old modules keep working');

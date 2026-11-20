@@ -6,6 +6,7 @@
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
 const { TYPES, FIELDS, REL_TYPES, relationFits } = require('./store.cjs');
 const TT = require('./timetable.cjs');
+const R = require('./roster.cjs');
 const CAL = require('./calendar.cjs');
 const { speciesName } = require('./same.cjs');
 const S = require('./vendor/sentences.cjs');
@@ -134,6 +135,9 @@ function fieldGuide() {
  * The messages for one batch. world: { name, description }; entities: the world's settings; cast: names to skip;
  * glossary: the room's translation glossary pairs [{ from, to }] — only those named in the batch go in.
  */
+/** v0.5.1 T: the 균형 볼 칸 the world added that are not person fields — asked only with evidence. */
+const customBalance = (world) => (Array.isArray(world?.balance) ? world.balance : []).filter((l) => !FIELDS.person.some((f) => f.label === l));
+const balanceGuide = (world) => { const c = customBalance(world); return c.length ? `\n인물의 균형 볼 칸(근거가 있을 때만, 없으면 적지 않는다): ${c.join(', ')} — 인물 항목에 "balance":{"${c[0]}":{"v":"값","n":["근거 문장 번호"]}}로 적는다.` : ''; };
 function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
   // 할 일 11: only a world with a board asks for score events (the model never adds them up).
   const board = world.scoreboard?.name ? world.scoreboard : null;
@@ -167,13 +171,15 @@ ${KIND_GUIDE}
 - rule·system·history 구별: 지켜야 하는 것(어기면 벌·꾸중을 받는 법·제도·학교 규칙)은 rule, 세계가 그렇게 돌아가는 원리(마법·능력이 작동하는 방식, 화폐·경제, 점수가 매겨지는 방식)는 system, 이야기 전에 이미 끝난 과거의 일은 history다. 예: 「밤 10시 이후 기숙사 밖 금지」는 rule, 「마법은 지팡이 없이 쓰면 힘이 흩어진다」는 system, 「100년 전 두 왕국의 전쟁」은 history.
 - rule·system에는 where(적용되는 곳)를 적는다: 그 규칙·원리가 특정 장소나 집단에서만 통하면 그 장소·집단 이름([이미 있는 항목]이나 items의 이름 그대로 — 예: 기숙사 암호는 그 기숙사, 교실 규칙은 그 학교), 세계 어디서나 통한다는 게 분명하면(법·화폐·마법의 원리처럼) "세계 전체", 어디 것인지 근거로 알 수 없으면 빈 문자열. 이름이 같아도 적용되는 곳이 다르면 다른 항목이다.
 - group에는 근거가 있으면 base(본거지)를 적는다: 그 집단이 머무는 장소 이름(예: 기숙사 → 그 기숙사 건물, 가문 → 그 저택). 없으면 빈 문자열.
+- person에는 근거가 있으면 room(지내는 곳)을 적는다: 그 인물에게 배정된 방 · 숙소 · 침실처럼 지금 묵으며 지내는 장소 이름(예: 슬리데린 1학년 여학생 기숙사, 3층 7호실). 잠깐 들른 곳은 아니다. 방을 옮겼으면 새 곳만 적는다(이전 곳은 프로그램이 남긴다). 없으면 빈 문자열. 그 장소가 [이미 있는 항목]에 없으면 장소 항목으로 같이 만든다.
+- place의 layout(배치·내부 구조)에는 안에 무엇이 어디 있는지(침대 다섯 개, 창가에 책상, 계단 아래 문), use(시설·용도)에는 무슨 곳이고 어떤 시설이 있는지만 적는다. 그곳에서 지켜야 하는 것은 rule로 따로, 누가 지내는지는 그 인물의 room으로 적는다.
 - custom(기타)은 위 어디에도 안 맞을 때만 쓴다. 무리·행렬·조직은 group, 지켜야 하는 관례·금기·법은 rule, 작동 원리는 system, 정해진 때에 돌아오는 날·행사는 schedule, 이야기 전의 과거 일은 history다.
 
 각 항목:
-{"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
+{"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","maybe":"같은 것인지 애매한 이미 있는 항목 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
 
 칸 키 (이것 말고는 쓰지 마):
-${fieldGuide()}
+${fieldGuide()}${balanceGuide(world)}
 
 칸 쓰는 법:
 - 칸마다 그 값이 나온 문장 번호를 n에 1~3개 적는다. 그 칸의 내용이 실제로 쓰인 문장이어야 한다(다른 사실이 쓰인 문장을 대지 마).
@@ -191,9 +197,9 @@ ${fieldGuide()}
 - 등장인물이 한 말 · 소문 · 추측(「○○ 말로는」, 「~라던데」, 「아마」)은 확정된 사실이 아니다. 그런 칸은 {"v":"값","n":["번호"],"rumor":"누구의 말(모르면 소문)"}로 적는다. 확정된 사실을 덮지 않는다.
 - 칸 값이 시간이 지나 바뀐 것(이사 · 승진 · 전학)이 아니라 전에 틀리게 적힌 것을 바로잡는 것이면(「사실은 처음부터 ○○였다」) 그 칸에 "fix":true를 적는다.
 - [프로필] 표시가 붙은 문장은 답변에 붙은 프로필 블록(<npc_profile> · <world_profile>)이다. 이야기에 아직 나오지 않았어도 확정된 설정으로 받는다. 칸은 이렇게 맞춘다: 이름/나이/성별 → name · age · gender, 외형과 옷차림 → appearance, 태도와 주요 성격 → personality, 그 밖에 눈에 띄는 것 → background나 memo(며칠 뒤에도 사실일 것만). 같은 사실이 본문과 프로필에 둘 다 있으면 항목 · 칸을 하나로 적고 n에 둘 다 적는다. 이미 있는 항목이면 match로 잇는다.
-- 집단의 members(구성원)에는 규모·구성(예: 1학년 다섯 명, 여학생 둘)만 쓰고 사람 이름을 늘어놓지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
+- 집단의 members(구성원)에는 구성(예: 남학생 다섯 명, 여학생 네 명)만 쓰고 사람 이름을 늘어놓지 않는다. size(전체 인원)에는 근거가 있으면 그 집단의 전체 인원 수를 「N명」으로 적는다(나뉘어 적혀 있으면 합친 수, 예: 9명). 이름을 아는 사람 수가 아니라 전체 수다. 수가 안 나오면(「많다」, 「수십 명」) 적지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
 
-같은 사람 잇기: [이미 있는 항목]의 인물을 성만, 이름만, 직함(반장, 사감, 교수)으로 부르면 새로 만들지 말고 match에 그 인물 이름을 적고, 그 호칭은 aliases에 넣는다. 같은 사람인지 애매하면 이번에는 만들지 않는다(다음 대화에서 다시 본다).
+같은 사람 잇기: [이미 있는 항목]의 인물을 성만, 이름만, 직함(반장, 사감, 교수)으로 부르면 새로 만들지 말고 match에 그 인물 이름을 적고, 그 호칭은 aliases에 넣는다. 같은 사람인지 애매하면(장소 · 집단 · 규칙 같은 것도) 버리지 말고 새 항목으로 적되 maybe에 그 이미 있는 항목 이름을 적는다 — 프로그램이 「같은 것일 수 있음」으로 띄우고 사용자가 합칠지 고른다. 확실하면 match를 쓴다.
 
 규칙·시스템·일정·역사·기타는 이름을 설명형으로 지어도 된다(예: "밤에는 문을 세 번 두드린다", "기숙사 점수", "북부 전쟁"). 이미 있는 규칙·시스템·일정·역사·기타와 같은 내용이면 새로 만들지 말고 match에 그 이름을 그대로 적는다.
 
@@ -203,7 +209,7 @@ ${fieldGuide()}
 {"from":"항목 이름","to":"항목 이름","type":"${REL_TYPES.join('|')}","note":"짧은 설명(예: 남매, 기숙사 사감)","was":"전에 있던 관계가 끝났으면 그 종류(예: 연인), 아니면 null","evidence":[{"n":"12.3","q":"핵심 구절"}]}
 - 두 항목 이름은 [이미 있는 항목]이나 items에 있는 이름 그대로 쓴다. 근거 문장에는 두 항목 중 하나 이상의 이름이 나와야 한다. 「○○의 누나」처럼 이름 없이 설명으로만 불린 사람과의 관계는 적지 않는다. 카드가 있는 인물과의 관계는 적지 않는다.
 - 새 장소(place)를 적을 때 그 장소가 다른 장소 안에 있다는 근거가 있으면 위치 관계(from이 안쪽)를 꼭 함께 적는다. 바깥이 학교·가문 같은 집단뿐이면 그 집단의 본거지 장소를 바깥으로 쓴다.
-- 위치는 A(from)가 B(to) 안에 있을 때만(이어져 있거나 가깝거나 통로로 통하는 것은 위치가 아니다), 소속은 인물이 집단에 속하거나 작은 무리가 큰 집단에 속할 때(from이 작은 쪽) 쓴다. 인물이 어떤 장소에서 일하거나 사는 것은 관계가 아니라 그 인물의 소속·배경 칸에 쓴다. 가족·연인·스승·제자는 인물끼리만. 한 번 같이 있었던 것은 관계가 아니다.
+- 위치는 A(from)가 B(to) 안에 있을 때만(이어져 있거나 가깝거나 통로로 통하는 것은 위치가 아니다), 소속은 인물이 집단에 속하거나 작은 무리가 큰 집단에 속할 때(from이 작은 쪽) 쓴다. 인물이 어떤 장소에서 지내는(방 배정 · 숙소) 것은 관계가 아니라 그 인물의 room에, 일하는 것은 소속·배경 칸에 쓴다. 가족·연인·스승·제자는 인물끼리만. 한 번 같이 있었던 것은 관계가 아니다.
 - 관계가 바뀌었으면(헤어짐, 등 돌림) 지금 관계를 적고 was에 끝난 관계를 적는다.
 
 값은 원문의 언어 그대로, 짧고 사실만. 칸 값은 그 항목의 지금 시점 기준 전체 사실로 쓴다(예: 나이가 바뀌었으면 새 나이).
@@ -315,8 +321,9 @@ function checkFields(type, raw, index, itemFound = []) {
   const hidden = {};
   const rumors = {};
   const corrections = {};
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections };
-  for (const [key, given] of Object.entries(raw)) {
+  const moved = [];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections, moved };
+  for (let [key, given] of Object.entries(raw)) {
     // 종 is for a being that is not a person: "사람" (or the like) stays empty, which means unknown.
     if (type === 'person' && key === 'species' && HUMAN_SPECIES.test(String((typeof given === 'string' ? given : given?.v) || '').trim())) {
       droppedFields.push({ key, why: 'a person (species is only for other beings)' });
@@ -335,14 +342,28 @@ function checkFields(type, raw, index, itemFound = []) {
     }
     const said = found.map((p) => p.text).join(' ');
     const kind = FIELDS[type]?.find((f) => f.key === key)?.kind || 'text';
-    if (!CLASS_FIELDS.has(`${type}.${key}`) && isKorean(given.v) && isKorean(said) && overlap(given.v, said) < FIELD_OVERLAP[kind]) {
+    // v0.5.1 J: 전체 인원 — the number has to be in the sentence (one of its counts, or all of them added up)
+    if (type === 'group' && key === 'size') {
+      const n = R.headcount(given.v);
+      const c = R.counts(said);
+      if (!n || !(c.some((x) => x.n === n) || c.reduce((a, x) => a + x.n, 0) === n)) { droppedFields.push({ key, why: 'not in its evidence' }); continue; }
+      given = { ...given, v: `${n}명` };
+    } else if (!CLASS_FIELDS.has(`${type}.${key}`) && isKorean(given.v) && isKorean(said) && overlap(given.v, said) < FIELD_OVERLAP[kind]) {
       droppedFields.push({ key, why: 'not in its evidence' });
       continue;
     }
-    // v0.5.0 H: a timetable written into a field belongs in "timetable"
-    if (type !== 'schedule' && TT.parseWhen(given.v).length >= 2) {
-      droppedFields.push({ key, why: 'a timetable in a field' });
-      continue;
+    // v0.5.1 H: a timetable written into a field (two cells or more) is not thrown away — it moves to a 시간표
+    // (「시간표로 옮김」: the item's own when it is a group or person, a 「시간표로 모으기」 candidate otherwise); the field
+    // keeps the rest of its text, or stays empty when nothing is left
+    if (type !== 'schedule') {
+      const sw = TT.splitWhen(given.v);
+      if (sw.cells.length >= 2) {
+        const label = FIELDS[type]?.find((f) => f.key === key)?.label || key;
+        const cells = sw.cells.map((c) => ({ day: c.day, slot: c.slot, value: clip(c.after || label, TT.CELL_MAX) }));
+        moved.push({ key, label, text: sw.moved, cells, evidence: clip(said, 300) });
+        if (!sw.rest) continue;
+        given = { ...given, v: sw.rest };
+      }
     }
     // v0.5.0 L: what someone says, a rumour — kept apart, never over a settled fact
     if (typeof given.rumor === 'string' && given.rumor.trim()) {
@@ -356,7 +377,7 @@ function checkFields(type, raw, index, itemFound = []) {
     // v0.5.0 S: only a profile block says it (not the story yet) — 「아직 드러나지 않음」
     if (found.every((p) => p.block)) hidden[key] = true;
   }
-  return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections };
+  return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections, moved };
 }
 
 /**
@@ -399,6 +420,9 @@ function checkItems(parsed, part, cast) {
     // v0.5.0 P: a passing thing (not used again) is not kept
     if (['rule', 'system', 'schedule'].includes(it.type) && it.lasting === false) { dropped.push({ name, why: 'not lasting' }); continue; }
     const f = checkFields(it.type, it.fields, index, found);
+    // v0.5.1 T: 균형 볼 칸 the world added — each with its own evidence, like a field
+    const bal = it.type === 'person' && it.balance && typeof it.balance === 'object' && !Array.isArray(it.balance) ? checkFields('balance', it.balance, index, found) : null;
+    if (bal) for (const d of bal.droppedFields) droppedFields.push({ name, ...d, key: `balance.${d.key}` });
 
     for (const d of f.droppedFields) droppedFields.push({ name, ...d });
     items.push({
@@ -406,16 +430,22 @@ function checkItems(parsed, part, cast) {
       name,
       aliases,
       match: typeof it.match === 'string' && it.match.trim() ? it.match.trim() : null,
+      // v0.5.1 N: not sure it is that one — made, and shown as 「같은 것일 수 있음」
+      maybe: typeof it.maybe === 'string' && it.maybe.trim() && !(typeof it.match === 'string' && it.match.trim()) ? clip(it.maybe.trim(), 80) : null,
       fields: f.fields,
       fieldEvidence: f.fieldEvidence,
       hidden: f.hidden,
       rumors: f.rumors,
       corrections: f.corrections,
+      ...(bal && Object.keys(bal.fields).length ? { balance: bal.fields } : {}),
+      ...(f.moved.length ? { toTimetable: f.moved } : {}),
       memo: typeof it.memo === 'string' ? it.memo : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
       // v0.5.0 E: group — the place it is at (본거지), a name
       base: it.type === 'group' && typeof it.base === 'string' ? clip(it.base.trim(), 80) : '',
+      // v0.5.1 I: person — the place they stay (방 배정 · 숙소), a name
+      room: it.type === 'person' && typeof it.room === 'string' ? clip(it.room.trim(), 80) : '',
       evidence: clip(found.map((p) => p.text).join(' / '), 300),
       evidenceAt: found.map((p) => ({ messageId: p.messageId, sentence: p.sentence })),
     });
@@ -565,4 +595,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
