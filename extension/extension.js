@@ -3,8 +3,14 @@
  * (paper grain, ticket notches, ink shadows); the motif here is a star chart instead of a record. */
 (() => {
   'use strict';
-  if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.3.18';
+  // 연동 v2: also built into 기억 서재's screen as its 「세계관」 tab — 기억 서재's build.py wraps this file with
+  // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
+  const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
+  if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
+  const VERSION = '0.4.0';
+  /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
+  const PANEL_CONTRACT = 2;
+  const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --wa-grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -236,11 +242,19 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
 }
 .mobile-only{display:none}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+/* 기억 서재의 「세계관」 칸 안: no button, no backdrop, the window fills the tab */
+:host([data-embedded]){display:block;height:100%}
+:host([data-embedded]) #launch,:host([data-embedded]) #backdrop,:host([data-embedded]) #close{display:none!important}
+:host([data-embedded]) #panel{position:relative;left:auto;top:auto;transform:none;width:100%;height:100%;min-height:560px;z-index:auto;box-shadow:none;border-radius:0}
 `;
 
   // ------------------------------------------------------------------ mount
+  // One screen per call: on its own (target null: the floating button and window, as before) or inside a box that
+  // 기억 서재 gives (embedded). Everything below belongs to that one screen.
+  function boot(target, opts = {}) {
   const host = document.createElement('div');
-  host.id = 'marinara-world-archive-root';
+  host.id = target ? 'marinara-world-archive-tab' : 'marinara-world-archive-root';
+  if (target) host.setAttribute('data-embedded', '');
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>${CSS}</style>
     <button id="launch" type="button" aria-label="세계관 설정집 열기" aria-expanded="false">${LAUNCH_ICON}</button>
@@ -250,7 +264,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       <div class="work"><div class="top"></div><main></main></div>
       <aside class="rail"></aside>
     </section>`;
-  (document.body || document.documentElement).append(host);
+  (target || document.body || document.documentElement).append(host);
   const $ = (s) => root.querySelector(s);
   const el = { launch: $('#launch'), backdrop: $('#backdrop'), panel: $('#panel'), side: $('.side'), top: $('.top'), main: $('main'), rail: $('.rail') };
 
@@ -261,7 +275,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   };
 
   const st = {
-    theme: store.get('world-archive-theme') || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+    theme: opts.theme || store.get('world-archive-theme') || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+    readOnly: false, // the server's contract level is not the one this screen was made for
     fields: {},
     worlds: [],
     worldId: store.get('world-archive-world') || null,
@@ -290,6 +305,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   const world = () => st.worlds.find((w) => w.worldId === st.worldId) || null;
 
   async function api(method, path, body) {
+    if (st.readOnly && method !== 'GET') throw Error(UPDATE_MSG);
     const init = { method, credentials: 'same-origin', cache: 'no-store', headers: { 'x-marinara-csrf': '1' } };
     if (method !== 'GET') {
       init.headers['content-type'] = 'application/json';
@@ -387,6 +403,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     const status = await api('GET', '/status');
     st.fields = status.fields || {};
     st.serverVersion = status.version || null; // 할 일 8: the screen and the server module should be the same version
+    st.readOnly = Number(status.contract || 1) !== PANEL_CONTRACT; // 연동 v2: another contract level — look, do not change
     await loadRoom();
     if (followRoom && st.room?.worldId) st.worldId = st.room.worldId;
     await loadWorlds();
@@ -843,10 +860,12 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     el.rail.innerHTML = railHtml();
     const screen = `${st.view}|${st.worldId}|${st.detail}|${st.editing}|${st.dupes}`;
     const keep = screen === lastScreen ? el.main.scrollTop : 0;
-    const skew = st.serverVersion && st.serverVersion !== VERSION
+    const skew = st.readOnly
+      ? `<p class="msg bad" role="status">${esc(UPDATE_MSG)}</p>`
+      : !target && st.serverVersion && st.serverVersion !== VERSION
       ? `<p class="msg bad" role="status">서버 쪽 World Archive(v${esc(st.serverVersion)})와 이 화면(v${esc(VERSION)})의 판이 달라요. 서버 쪽을 업데이트해 주세요 — 서버에서 설치 명령을 다시 실행하면 됩니다.</p>`
       : '';
-    el.main.innerHTML = skew + (st.msg ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + mainHtml();
+    el.main.innerHTML = skew + (st.msg && !(st.readOnly && st.msg === UPDATE_MSG) ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + mainHtml();
     el.main.scrollTop = keep;
     lastScreen = screen;
     if (st.query) filterCards();
@@ -1119,14 +1138,14 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     if (ev.target.id === 'q') { st.query = ev.target.value; runSearch(); }
   });
   el.backdrop.addEventListener('click', () => toggle(false));
-  root.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !el.panel.hidden) toggle(false); });
+  root.addEventListener('keydown', (ev) => { if (!target && ev.key === 'Escape' && !el.panel.hidden) toggle(false); });
 
   let watch = null;
   let lastChat = '';
   function toggle(open = el.panel.hidden) {
     el.panel.hidden = !open;
     el.backdrop.hidden = !open;
-    el.launch.hidden = open;
+    el.launch.hidden = open || tabShown();
     el.launch.setAttribute('aria-expanded', String(open));
     clearInterval(watch);
     clearTimeout(pollTimer);
@@ -1140,5 +1159,14 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       if (now !== lastChat && !st.busy) { lastChat = now; run(loadRoom); }
     }, 1000);
   }
-  render();
+  // On its own: while 기억 서재 shows its 「세계관」 tab, this floating button hides (the same screen twice is too many).
+  function tabShown() { return !target && document.documentElement.dataset.memoryWorldTab === 'on'; }
+  if (!target) setInterval(() => { if (el.panel.hidden) el.launch.hidden = tabShown(); }, 2000);
+  if (target) toggle(true);
+  else render();
+  return { host, setTheme(t) { if (t === 'dark' || t === 'light') { st.theme = t; render(); } } };
+  }
+
+  if (EMBEDDED) globalThis.__memoryWorldPanel = { version: VERSION, contract: PANEL_CONTRACT, start: (target, opts) => boot(target, opts) };
+  else boot(null);
 })();
