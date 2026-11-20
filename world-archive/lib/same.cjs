@@ -258,7 +258,13 @@ function speciesPairs(entities, skip = () => false) {
 const THING_TYPES = new Set(['place', 'group', 'rule', 'system', 'schedule', 'custom']);
 const SAME_WORD = new Map([['특급', '급행'], ['특급열차', '급행열차'], ['여자', '여학생'], ['남자', '남학생'], ['침실', '기숙사'], ['숙소', '기숙사'], ['기숙사방', '기숙사'], ['지하실', '지하'], ['지하감옥', '지하'], ['감옥', '지하'], ['express', '급행열차']]);
 const PLAIN_WORDS = new Set(['기숙사', '학교', '마법학교', '건물', '본관', '교실', '전용', '공용', '의']);
-const thingWords = (name) => String(name || '').normalize('NFC').toLowerCase().replace(/[()「」『』"'“”‘’·,.]/g, ' ').split(/\s+/).filter(Boolean).map((w) => SAME_WORD.get(w) || w);
+/** Word ends that are words of their own when they stick to the word before (「급행열차」 → 급행 · 열차). */
+const TAIL_WORDS = ['열차', '기숙사', '휴게실', '교실', '침실', '지하실', '감옥', '선착장', '도서관', '사무실'];
+const splitWord = (w) => {
+  const t = TAIL_WORDS.find((x) => w.length > x.length && w.endsWith(x));
+  return t ? [w.slice(0, -t.length), t] : [w];
+};
+const thingWords = (name) => String(name || '').normalize('NFC').toLowerCase().replace(/[()「」『』"'“”‘’·,.]/g, ' ').split(/\s+/).filter(Boolean).flatMap(splitWord).map((w) => SAME_WORD.get(w) || w);
 function thingPairs(entities, relations = [], skip = () => false) {
   const linked = new Set((relations || []).filter((r) => r.type === '위치' || r.type === '소속').flatMap((r) => [r.from + '|' + r.to, r.to + '|' + r.from]));
   const filled = (e) => Object.values(e.fields || {}).filter(Boolean).length + (e.description ? 1 : 0) + (e.aliases || []).length;

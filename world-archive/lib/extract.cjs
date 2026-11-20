@@ -183,6 +183,9 @@ ${fieldGuide()}
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
   좋은 예: "오른팔이 부러져 붕대를 감고 다님", "기사단에서 쫓겨나 항구 창고에서 지냄"
 - 각 칸의 뜻에 맞는 값만 넣는다(위계 칸에는 위계·역할만, 위치 칸에는 위치만).
+- 주제마다 따로 적는다: 명단 · 임무(반장 임무 같은 것) · 배치 · 시설 · 시간표 · 규칙은 서로 다른 항목이다. 큰 곳의 규칙을 작은 방 항목의 칸에 넣지 말고 rule로 따로 적고 where에 그곳을 적는다. 집단 · 장소 · 인물 칸에 시간표를 넣지 말고 timetable로 적는다. 한 문단이나 블록에 여러 주제가 섞여 있으면 주제별로 나눠 적는다.
+- 등장인물이 한 말 · 소문 · 추측(「○○ 말로는」, 「~라던데」, 「아마」)은 확정된 사실이 아니다. 그런 칸은 {"v":"값","n":["번호"],"rumor":"누구의 말(모르면 소문)"}로 적는다. 확정된 사실을 덮지 않는다.
+- 칸 값이 시간이 지나 바뀐 것(이사 · 승진 · 전학)이 아니라 전에 틀리게 적힌 것을 바로잡는 것이면(「사실은 처음부터 ○○였다」) 그 칸에 "fix":true를 적는다.
 - [프로필] 표시가 붙은 문장은 답변에 붙은 프로필 블록(<npc_profile> · <world_profile>)이다. 이야기에 아직 나오지 않았어도 확정된 설정으로 받는다. 칸은 이렇게 맞춘다: 이름/나이/성별 → name · age · gender, 외형과 옷차림 → appearance, 태도와 주요 성격 → personality, 그 밖에 눈에 띄는 것 → background나 memo(며칠 뒤에도 사실일 것만). 같은 사실이 본문과 프로필에 둘 다 있으면 항목 · 칸을 하나로 적고 n에 둘 다 적는다. 이미 있는 항목이면 match로 잇는다.
 - 집단의 members(구성원)에는 규모·구성(예: 1학년 다섯 명, 여학생 둘)만 쓰고 사람 이름을 늘어놓지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
 
@@ -303,7 +306,9 @@ function checkFields(type, raw, index, itemFound = []) {
   const fieldEvidence = {};
   const droppedFields = [];
   const hidden = {};
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields, hidden };
+  const rumors = {};
+  const corrections = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections };
   for (const [key, given] of Object.entries(raw)) {
     // 종 is for a being that is not a person: "사람" (or the like) stays empty, which means unknown.
     if (type === 'person' && key === 'species' && HUMAN_SPECIES.test(String((typeof given === 'string' ? given : given?.v) || '').trim())) {
@@ -327,12 +332,24 @@ function checkFields(type, raw, index, itemFound = []) {
       droppedFields.push({ key, why: 'not in its evidence' });
       continue;
     }
+    // v0.5.0 H: a timetable written into a field belongs in "timetable"
+    if (type !== 'schedule' && TT.parseWhen(given.v).length >= 2) {
+      droppedFields.push({ key, why: 'a timetable in a field' });
+      continue;
+    }
+    // v0.5.0 L: what someone says, a rumour — kept apart, never over a settled fact
+    if (typeof given.rumor === 'string' && given.rumor.trim()) {
+      rumors[key] = { value: given.v.trim(), by: clip(given.rumor.trim(), 40), evidence: clip(found.map((p) => p.text).join(' / '), 300) };
+      continue;
+    }
+    // v0.5.0 M: a correction (it was wrong) — no 「이전」
+    if (given.fix === true) corrections[key] = true;
     fields[key] = given.v;
     fieldEvidence[key] = clip(found.map((p) => p.text).join(' / '), 300);
     // v0.5.0 S: only a profile block says it (not the story yet) — 「아직 드러나지 않음」
     if (found.every((p) => p.block)) hidden[key] = true;
   }
-  return { fields, fieldEvidence, droppedFields, hidden };
+  return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections };
 }
 
 /**
@@ -382,6 +399,8 @@ function checkItems(parsed, part, cast) {
       fields: f.fields,
       fieldEvidence: f.fieldEvidence,
       hidden: f.hidden,
+      rumors: f.rumors,
+      corrections: f.corrections,
       memo: typeof it.memo === 'string' ? it.memo : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',

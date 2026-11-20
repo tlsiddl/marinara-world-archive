@@ -432,6 +432,7 @@ function validEntity(e) {
     (e.pending === undefined || validPending(e.pending)) &&
     (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
+    (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
     (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
@@ -858,6 +859,9 @@ class Archive {
           createdAt: t,
           updatedAt: t,
         };
+        // v0.5.0 L: rumours of a new setting
+        const rum = isObject(item.rumors) ? Object.entries(item.rumors).filter(([k, r]) => isObject(r) && typeof r.value === 'string' && r.value.trim() && FIELDS[item.type].some((f) => f.key === k)) : [];
+        if (rum.length) entity.rumors = Object.fromEntries(rum.map(([k, r]) => [k, { value: r.value.slice(0, 300), by: String(r.by || '소문').slice(0, 40), evidence: String(r.evidence || '').slice(0, 300), at: t }]));
         // v0.5.0 S: fields only a profile block says
         const hid = isObject(item.hidden) ? Object.keys(item.hidden).filter((k) => item.hidden[k] === true && entity.fields[k]) : [];
         if (hid.length) entity.hidden = Object.fromEntries(hid.map((k) => [k, true]));
@@ -898,13 +902,26 @@ class Archive {
           }
           continue;
         }
-        // 실시간 반영: the newer value replaces the old one; the old one is kept below as 「이전: ○○」.
-        if (before) e.past = { ...(e.past || {}), [key]: [{ value: before, until: t, evidence: said }, ...((e.past || {})[key] || [])].slice(0, PAST_MAX) };
+        // 실시간 반영: the newer value replaces the old one; the old one is kept below as 「이전: ○○」 — not for a
+        // correction (v0.5.0 M: it was wrong, so it is not 「이전」; 기록 says 정정됨).
+        const corrected = isObject(item.corrections) && item.corrections[key] === true;
+        if (before && !corrected) e.past = { ...(e.past || {}), [key]: [{ value: before, until: t, evidence: said }, ...((e.past || {})[key] || [])].slice(0, PAST_MAX) };
         e.fields[key] = value;
         e.sources[key] = 'auto';
         if (fromBlock) e.hidden = { ...(e.hidden || {}), [key]: true };
         touched = true;
-        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said, ...(fromBlock ? { hidden: true } : {}) });
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said, ...(fromBlock ? { hidden: true } : {}), ...(corrected && before ? { correction: true } : {}) });
+        // a rumour the story now says as a fact goes
+        if (e.rumors?.[key] && e.rumors[key].value === value) { delete e.rumors[key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
+      }
+      // v0.5.0 L: what someone says — 「확인 안 됨 · ○○의 말」, beside the fact, never over it
+      for (const [key, r] of Object.entries(isObject(item.rumors) ? item.rumors : {})) {
+        if (!isObject(r) || typeof r.value !== 'string' || !r.value.trim() || !FIELDS[e.type].some((f) => f.key === key)) continue;
+        if ((e.fields[key] || '') === r.value || e.rumors?.[key]?.value === r.value) continue;
+        const prev = e.rumors?.[key] || null;
+        e.rumors = { ...(e.rumors || {}), [key]: { value: r.value.slice(0, 300), by: String(r.by || '소문').slice(0, 40), evidence: String(r.evidence || '').slice(0, 300), at: t } };
+        touched = true;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'rumor', key, before: prev?.value || '', after: r.value, by2: r.by, prevRumor: prev, evidence: r.evidence || '' });
       }
       const known = new Set([e.name, ...e.aliases].map(norm));
       for (const a of [name, ...aliases]) {
@@ -1010,6 +1027,10 @@ class Archive {
         }
         if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
+      } else if (c.action === 'rumor') {
+        if (e.rumors?.[c.key]?.value !== c.after) throw new ArchiveError(409, later);
+        if (c.prevRumor) e.rumors[c.key] = structuredClone(c.prevRumor);
+        else { delete e.rumors[c.key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
       } else if (c.action === 'reveal') {
         e.hidden = { ...(e.hidden || {}), [c.key]: true };
       } else if (c.action === 'base') {

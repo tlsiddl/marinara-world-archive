@@ -67,3 +67,13 @@ test('an English other name left on a rule goes to the group its glossary pair n
   assert.ok(!by('은사슴 기숙사').aliases.includes('Silver Stag'));
   void id;
 });
+
+test('a word stuck to the next is cut by the same-word list: 「특급 열차」 ~ 「급행열차」, but not 「급행열차 노선」', () => {
+  const { thingPairs } = require('../world-archive/lib/same.cjs');
+  const E = [
+    { entityId: 'a', type: 'system', name: '별시계 특급 열차', aliases: [] },
+    { entityId: 'b', type: 'system', name: '별시계 급행열차', aliases: [] },
+    { entityId: 'c', type: 'system', name: '별시계 급행열차 노선', aliases: [] },
+  ];
+  assert.deepEqual(thingPairs(E).map((p) => [p.a, p.b].sort().join('')), ['ab']);
+});

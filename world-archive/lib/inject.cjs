@@ -55,6 +55,8 @@ function entityLine(e, nameOf = () => '') {
   if (short.length) lines.push('  ' + short.join(' / '));
   for (const d of defs) if (d.kind === 'text' && fields[d.key]) lines.push(`  ${d.label}: ${oneLine(fields[d.key])}${veiled(d.key)}${was(e, d.key)}`);
   for (const x of e.extra || []) if (x.value) lines.push(`  ${x.label}: ${oneLine(x.value)}`);
+  // v0.5.0 L: what someone says, short, marked
+  for (const [k, r] of Object.entries(e.rumors || {})) { const d = defs.find((x) => x.key === k); if (d && r?.value) lines.push(`  ${d.label}: ${oneLine(r.value).slice(0, 120)} (소문)`); }
   if (e.description) lines.push(`  ${defs.length ? '메모: ' : ''}${oneLine(e.description)}`);
   return sanitize(lines.join('\n'));
 }
