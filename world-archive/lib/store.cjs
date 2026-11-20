@@ -228,6 +228,29 @@ function cleanText(v, max, what) {
   return x;
 }
 
+/**
+ * Whether an other name is a name, not a piece of a sentence (v0.5.0 O): 「Professor Snape pulls the bolt back」 ·
+ * 「oil the pivot pin」 · 「Kneazles know when someone's lying」 are not; 「Hogwarts School of Witchcraft and Wizardry」 ·
+ * 「the dungeons」 · 「Madam Malkin's Robes for All Occasions」 are.
+ */
+const NAME_FUNC = new Set(['of', 'the', 'and', 'for', 'a', 'an', 'in', 'on', 'at', 'to', 'de', 'du', 'da', 'del', 'di', 'van', 'von', 'le', 'la', 'des', 'since', 'with', 'from', 'by', 'or']);
+function nameLike(alias) {
+  const a = String(alias || '').trim();
+  if (!a) return false;
+  if (/["“”「」『』]/.test(a)) return false;
+  const latin = /^[A-Za-z0-9]/.test(a) && !/[가-힣]/.test(a);
+  const words = a.split(/\s+/);
+  if (!latin) return words.length <= 5 && !/[.!?…。]$/.test(a);
+  if (/[!?…]$/.test(a) || (/\.$/.test(a) && !/(?:^|\s|\.)[A-Z]\.$/.test(a))) return false;
+  if (/,/.test(a)) return false;
+  const lower = words.filter((w) => /^[a-z]/.test(w) && !NAME_FUNC.has(w.toLowerCase()));
+  if (lower.length >= 3) return false;
+  // a verb before its object: 「pulls the bolt」 · 「register every litter」
+  if (/\b(?!of\b|in\b|on\b|at\b|to\b|for\b|with\b|from\b|by\b|into\b|under\b|over\b|and\b|or\b)[a-z]{2,}\s+(the|a|an|every|his|her|its|their|my|your|our)\s/.test(a + ' ') && !/^the\s/i.test(a)) return false;
+  if (words.length > 5 && lower.length >= 2) return false;
+  return true;
+}
+
 function cleanAliases(v, name) {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v)) throw new ArchiveError(400, '다른 이름은 목록으로 보내 주세요.');
@@ -435,6 +458,7 @@ function validEntity(e) {
     (e.pending === undefined || validPending(e.pending)) &&
     (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
     (e.calendar === undefined || CAL.validCalendar(e.calendar)) &&
+    (e.nameCheck === undefined || isObject(e.nameCheck)) &&
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
     (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
@@ -736,8 +760,11 @@ class Archive {
     const next = this.entityInput(rest, entity);
     // What the person changed by hand becomes theirs: automatic updates never write over it again.
     next.sources = markManual(entity.sources || {}, entity, next);
+    if (JSON.stringify(next.aliases) !== JSON.stringify(entity.aliases)) next.sources.aliases = 'manual'; // v0.5.0 O: kept by 「관계 다시 보기」
     // A name the person typed is theirs too: the glossary only suggests its own form from then on.
     if (next.name !== entity.name) {
+      delete next.nameCheck; // v0.5.0 R: the person named them
+      delete entity.nameCheck;
       next.sources.name = 'manual';
       delete next.glossaryName;
       delete entity.glossaryName;
@@ -852,7 +879,7 @@ class Archive {
       } catch {}
       let aliases = [];
       try {
-        aliases = cleanAliases(Array.isArray(item.aliases) ? item.aliases.filter((a) => typeof a === 'string' && a.trim()).slice(0, ALIAS_MAX) : [], name);
+        aliases = cleanAliases(Array.isArray(item.aliases) ? item.aliases.filter((a) => typeof a === 'string' && a.trim() && nameLike(a)).slice(0, ALIAS_MAX) : [], name);
       } catch {}
       const evidence = typeof item.evidence === 'string' ? item.evidence.slice(0, 300) : '';
       const found = findEntity({ ...item, aliases });
@@ -874,6 +901,8 @@ class Archive {
           createdAt: t,
           updatedAt: t,
         };
+        // v0.5.0 R: a described name the sentence does not back
+        if (isObject(item.nameCheck) && typeof item.nameCheck.said === 'string') entity.nameCheck = { said: item.nameCheck.said.slice(0, 60) };
         // v0.5.0 L: rumours of a new setting
         const rum = isObject(item.rumors) ? Object.entries(item.rumors).filter(([k, r]) => isObject(r) && typeof r.value === 'string' && r.value.trim() && FIELDS[item.type].some((f) => f.key === k)) : [];
         if (rum.length) entity.rumors = Object.fromEntries(rum.map(([k, r]) => [k, { value: r.value.slice(0, 300), by: String(r.by || '소문').slice(0, 40), evidence: String(r.evidence || '').slice(0, 300), at: t }]));
@@ -1077,6 +1106,8 @@ class Archive {
       } else if (c.action === 'cell-pending') {
         const cell = e.timetable?.cells?.[c.key];
         if (cell?.pending?.value === c.after) delete cell.pending;
+      } else if (c.action === 'alias-remove') {
+        if (!e.aliases.includes(c.alias) && e.aliases.length < ALIAS_MAX) e.aliases.push(c.alias);
       } else if (c.action === 'alias-move') {
         // the other name goes back to the setting it was taken from (and leaves the one it went to, when that one is not new)
         const went = c.toId && doc.entities.find((x) => x.entityId === c.toId);
@@ -2102,6 +2133,46 @@ class Archive {
     return { created: made.map(({ entity }) => entity.name), moved: changes.filter((c) => c.action === 'alias-move').map((c) => ({ from: c.name, alias: c.alias })), relations: rels };
   }
 
+  /** v0.5.0 R: 「이름 확인 필요」 on a person (a mark only; the person renaming them takes it off). */
+  setNameCheck(worldId, entityId, check) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === entityId && x.type === 'person');
+    if (!e) return null;
+    e.nameCheck = { said: String(check?.said || '').slice(0, 60) };
+    this.writeJson(this.entityFile(worldId), doc);
+    return e;
+  }
+
+  /** v0.5.0 P · Q: the world's latest 「잡다한 설정 정리」 candidates (nothing deleted until the person picks). */
+  tidyFile(worldId) {
+    return path.join(this.dir, 'tidy', `${needId(worldId)}.json`);
+  }
+  saveTidy(worldId, out) {
+    this.getWorld(worldId);
+    fs.mkdirSync(path.join(this.dir, 'tidy'), { recursive: true });
+    this.writeJson(this.tidyFile(worldId), { schemaVersion: SCHEMA, at: out.at, items: out.items, fields: out.fields });
+  }
+  readTidy(worldId) {
+    this.getWorld(worldId);
+    const f = this.tidyFile(worldId);
+    if (!fs.existsSync(f)) return { schemaVersion: SCHEMA, at: null, items: [], fields: [] };
+    const doc = this.readJson(f, () => ({ schemaVersion: SCHEMA, at: null, items: [], fields: [] }), (x) => Array.isArray(x.items) && Array.isArray(x.fields), '정리 후보');
+    // what is gone or was emptied since is no longer offered
+    const ents = new Map(this.readEntities(worldId).entities.map((e) => [e.entityId, e]));
+    doc.items = doc.items.filter((x) => ents.has(x.entityId));
+    doc.fields = doc.fields.filter((x) => { const e = ents.get(x.entityId); return e && (x.key === 'description' ? e.description : e.fields?.[x.key]); });
+    return doc;
+  }
+  /** 「남기기」: a candidate taken off the list (nothing changes in the world). */
+  keepTidy(worldId, entityId, key = null) {
+    const doc = this.readTidy(worldId);
+    if (key) doc.fields = doc.fields.filter((x) => !(x.entityId === entityId && x.key === key));
+    else doc.items = doc.items.filter((x) => x.entityId !== entityId);
+    this.writeJson(this.tidyFile(worldId), doc);
+    return doc;
+  }
+
   /** 구성원 명단 of a group (v0.5.0): gathered from the 소속 relations by code; see roster.cjs. */
   roster(worldId, groupId) {
     this.getWorld(worldId);
@@ -2166,6 +2237,30 @@ class Archive {
       const gone = doc.relations.filter((r) => (r.from === e.entityId || r.to === e.entityId) && r.source !== 'manual' && !relationFits(r.type, typeOf(r.from), typeOf(r.to)));
       doc.relations = doc.relations.filter((r) => !gone.includes(r));
       changes.push({ id: randomUUID(), at: t, by: meta.by || 'retype', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: e.entityId, name: e.name, type: 'group', action: 'retype', before, after: 'group', afterRevision: e.revision, relations: gone });
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * v0.5.0 O: other names that are not names (pieces of sentences, descriptions) taken off — not the ones the person
+   * wrote (sources.aliases 'manual'). Recorded ('alias-remove', undoable). Returns the changes.
+   */
+  tidyAliases(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const t = now();
+    const changes = [];
+    for (const e of doc.entities) {
+      if (e.sources?.aliases === 'manual') continue;
+      const off = (e.aliases || []).filter((a) => !nameLike(a));
+      if (!off.length) continue;
+      e.aliases = e.aliases.filter((a) => nameLike(a));
+      e.revision++;
+      e.updatedAt = t;
+      for (const a of off) changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'alias-remove', alias: a });
     }
     if (!changes.length) return [];
     this.writeJson(this.entityFile(worldId), doc);
@@ -2541,6 +2636,7 @@ class Archive {
 }
 
 module.exports = {
+  nameLike,
   namesGroup,
   Archive,
   ArchiveError,

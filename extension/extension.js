@@ -680,6 +680,15 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     return `<div class="sec"><small>학사일정 · ${list.length}</small>${rows ? `<ul class="hist">${rows}</ul>` : '<p class="sub">아직 일정이 없습니다.</p>'}</div>`;
   }
 
+  /** 「잡다한 설정 정리」 candidates (v0.5.0 P · Q): the person picks — 휴지통 (undoable) · 칸 비우기 · 남기기. */
+  function tidyHtml() {
+    const t = st.tidy;
+    if (!t || (!t.items.length && !t.fields.length)) return '';
+    const items = t.items.map((x) => `<li><b>${esc(x.name)}</b> <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-trash" data-id="${esc(x.entityId)}">휴지통으로</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}">남기기</button></li>`).join('');
+    const fields = t.fields.map((x) => `<li><b>${esc(x.name)}</b> · ${x.key === 'description' ? '메모' : '성격'}: ${esc(x.value)} <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-clear" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">칸 비우기</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">남기기</button></li>`).join('');
+    return `<div class="paper"><h2>잡다한 설정 정리 · 후보 ${t.items.length + t.fields.length}</h2><p class="hint">지우지 않았습니다. 고른 것만 휴지통으로 가고 기록에서 되돌릴 수 있습니다.</p>${items ? `<ul class="hist">${items}</ul>` : ''}${fields ? `<ul class="hist">${fields}</ul>` : ''}</div>`;
+  }
+
   function detailHtml(e) {
     const k = KIND[e.type];
     const d = defs(e.type);
@@ -714,7 +723,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
             ${e.aliases.length ? `<p class="al">다른 이름 · ${esc(e.aliases.join(', '))}</p>` : ''}
             ${e.glossaryName && e.glossaryName !== e.name ? `<p class="sub" style="margin:6px 0 0">번역 단어장에는 「${esc(e.glossaryName)}」${copula(e.glossaryName)} <button class="quiet" type="button" data-act="glossary-name" data-id="${esc(e.entityId)}">적용</button></p>` : ''}
           </div>
-          ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}
+          ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}${e.nameCheck ? `<span class="pill" title="근거 문장에는 「${esc(e.nameCheck.said)}」이(가) 나옵니다. 이름을 확인해 주세요(고치면 사라집니다).">이름 확인 필요</span>` : ''}
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
         ${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
@@ -866,7 +875,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       <div class="paper">
         <h2>인물 종 채우기 <small>추가 기능</small></h2>
         <p class="sub" style="margin:0 0 12px">「종」 칸이 생기기 전에 읽은 인물은 종이 비어 있습니다. 누를 때만, 종이 빈 인물의 이름 · 다른 이름 · 외형 · 메모를 모아 100명씩 작은 호출로 묻고, 사람이 아닌 존재(반려동물 · 마법 생물 같은)에만 종을 적습니다. 직접 고친 칸은 건드리지 않고, 기록에서 하나씩 되돌릴 수 있습니다. 자동 반영 연결을 씁니다.</p>
-        <div class="row"><button type="button" data-act="species-fill">인물 종 채우기</button><button type="button" data-act="applies-fill" title="적용되는 곳이 빈 규칙·시스템을 이름·분류·내용만으로 한 번에 묻습니다(작은 호출). 근거가 없으면 모름으로 둡니다.">규칙 적용되는 곳 채우기</button><button type="button" data-act="location-fill" title="아직 어느 장소 안에도 없는 장소를 위치 칸으로 먼저 잇고, 남은 것만 작은 호출로 묻습니다.">장소 위치 채우기</button></div>
+        ${tidyHtml()}
+        <div class="row"><button type="button" data-act="tidy" title="한 번 스친 물건·주문 같은 규칙·시스템·일정과, 성격·메모에 섞인 사건을 후보로만 고릅니다(작은 호출). 지우지는 않습니다.">잡다한 설정 정리</button><button type="button" data-act="species-fill">인물 종 채우기</button><button type="button" data-act="applies-fill" title="적용되는 곳이 빈 규칙·시스템을 이름·분류·내용만으로 한 번에 묻습니다(작은 호출). 근거가 없으면 모름으로 둡니다.">규칙 적용되는 곳 채우기</button><button type="button" data-act="location-fill" title="아직 어느 장소 안에도 없는 장소를 위치 칸으로 먼저 잇고, 남은 것만 작은 호출로 묻습니다.">장소 위치 채우기</button></div>
       </div>
       <div class="paper">
         <h2>백업 · 복원</h2>
@@ -904,6 +914,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     base: (c) => `<b>${esc(c.name)}</b> · 본거지: ${esc(c.beforeName || '없음')} → ${esc(c.afterName || '없음')}`,
     reveal: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: 이야기에 드러남`,
     applies: (c) => `<b>${esc(c.name)}</b> · 적용되는 곳: ${esc(c.beforeName || '세계 전체')} → ${esc(c.afterName || '세계 전체')}`,
+    'alias-remove': (c) => `<b>${esc(c.name)}</b> · 이름이 아닌 다른 이름 「${esc(c.alias)}」 뗌`,
     'alias-move': (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.alias)}」을(를) 새 집단 「${esc(c.to)}」(으)로 옮김`,
     delete: (c) => `<b>${esc(c.name)}</b> 지움${c.relations?.length ? ` · 관계 ${c.relations.length}개도 함께` : ''}`,
   };
@@ -1271,6 +1282,27 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await api('PUT', `/worlds/${st.worldId}/entities/${b.dataset.id}/base`, { base: root.getElementById('basePick')?.value || null });
       await loadEntities();
     }, '본거지를 바꿨습니다.'),
+    // v0.5.0 P · Q
+    tidy: () => run(async () => {
+      st.tidy = await api('POST', `/worlds/${st.worldId}/tidy`, {});
+      st.bad = false;
+      st.msg = `후보 ${st.tidy.items.length + st.tidy.fields.length}개를 골랐습니다(호출 ${st.tidy.calls}번). 아래에서 하나씩 고르세요. 지운 것은 없습니다.`;
+    }),
+    'tidy-trash': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      if (e) await api('DELETE', `/worlds/${st.worldId}/entities/${e.entityId}`, { revision: e.revision });
+      await loadEntities();
+      st.tidy = await api('GET', `/worlds/${st.worldId}/tidy`);
+    }, '휴지통으로 보냈습니다. 기록에서 되돌릴 수 있습니다.'),
+    'tidy-clear': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      if (e) await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, b.dataset.key === 'description' ? { description: '', revision: e.revision } : { fields: { ...e.fields, [b.dataset.key]: '' }, revision: e.revision });
+      await loadEntities();
+      st.tidy = await api('GET', `/worlds/${st.worldId}/tidy`);
+    }, '칸을 비웠습니다. 기록에서 되돌릴 수 있습니다.'),
+    'tidy-keep': (b) => run(async () => {
+      st.tidy = await api('POST', `/worlds/${st.worldId}/tidy/keep`, { entityId: b.dataset.id, key: b.dataset.key || null });
+    }),
     'species-fill': () => run(async () => {
       const r = await api('POST', `/worlds/${st.worldId}/species-fill`);
       await loadEntities();

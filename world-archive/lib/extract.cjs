@@ -184,6 +184,9 @@ ${fieldGuide()}
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
   좋은 예: "오른팔이 부러져 붕대를 감고 다님", "기사단에서 쫓겨나 항구 창고에서 지냄"
 - 각 칸의 뜻에 맞는 값만 넣는다(위계 칸에는 위계·역할만, 위치 칸에는 위치만).
+- rule · system · schedule에는 lasting을 적는다: 다음 장면에서도 다시 쓸 일이면 true, 한 장면에서 한 번 스친 물건 · 주문 · 질문 · 행동이면 false(예: true — 기숙사 암호, 마법사 화폐, 통로 여는 법 / false — 첫 수업의 질문 하나, 욕실 수도꼭지, 의상실 재봉, 열차 방음 주문). false인 것은 프로그램이 버린다.
+- personality(성격)에는 버릇 · 기질만 적는다. 그 장면에서 한 행동(「~에게 겁을 줌」, 「~를 구경함」)은 적지 않는다(그건 기억 서재 몫이다). memo에는 오래가는 사실만 적는다.
+- aliases에는 원문에서 그 대상을 부른 이름 · 호칭만 넣는다. 문장 조각이나 묘사(「pulls the bolt back」, 「키 큰 검은 머리 소녀」)는 넣지 않는다.
 - 주제마다 따로 적는다: 명단 · 임무(반장 임무 같은 것) · 배치 · 시설 · 시간표 · 규칙은 서로 다른 항목이다. 큰 곳의 규칙을 작은 방 항목의 칸에 넣지 말고 rule로 따로 적고 where에 그곳을 적는다. 집단 · 장소 · 인물 칸에 시간표를 넣지 말고 timetable로 적는다. 한 문단이나 블록에 여러 주제가 섞여 있으면 주제별로 나눠 적는다.
 - 등장인물이 한 말 · 소문 · 추측(「○○ 말로는」, 「~라던데」, 「아마」)은 확정된 사실이 아니다. 그런 칸은 {"v":"값","n":["번호"],"rumor":"누구의 말(모르면 소문)"}로 적는다. 확정된 사실을 덮지 않는다.
 - 칸 값이 시간이 지나 바뀐 것(이사 · 승진 · 전학)이 아니라 전에 틀리게 적힌 것을 바로잡는 것이면(「사실은 처음부터 ○○였다」) 그 칸에 "fix":true를 적는다.
@@ -393,7 +396,10 @@ function checkItems(parsed, part, cast) {
     const raw = Array.isArray(it.evidence) ? it.evidence : it.evidence ? [it.evidence] : [];
     const found = S.resolveEvidence(raw.map((e) => (typeof e === 'string' ? { q: e } : e)), index).slice(0, 3);
     if (!found.length) { dropped.push({ name, why: 'no evidence sentence' }); continue; }
+    // v0.5.0 P: a passing thing (not used again) is not kept
+    if (['rule', 'system', 'schedule'].includes(it.type) && it.lasting === false) { dropped.push({ name, why: 'not lasting' }); continue; }
     const f = checkFields(it.type, it.fields, index, found);
+
     for (const d of f.droppedFields) droppedFields.push({ name, ...d });
     items.push({
       type: it.type,
@@ -445,6 +451,30 @@ function checkRelations(parsed, part, cast) {
     });
   }
   return { relations, dropped };
+}
+
+/**
+ * v0.5.0 R: for a person named by description (「가스파르의 5학년 누나」), what the evidence says: when the sentence
+ * gives the relative's own name with the same kin word for someone else (「Daphne … a fifth-year sister」 has no
+ * 가스파르 but names 다프네) — { said: that name }; null when it agrees or cannot tell.
+ */
+const KIN = /(누나|언니|형|오빠|동생|여동생|남동생|사촌|아버지|어머니|아들|딸|삼촌|이모|고모|숙모|할머니|할아버지|sister|brother|cousin|father|mother|son|daughter|uncle|aunt)/i;
+function whoseCheck(name, said, people = []) {
+  const m = String(name || '').match(/^(.+?)의\s/);
+  if (!m || !KIN.test(name)) return null;
+  const owner = m[1].trim();
+  const text = String(said || '');
+  if (!text || squash(text).includes(squash(owner))) return null;
+  // another person the world has, named in that sentence (by a name or other name of two letters or more)
+  for (const p of people) {
+    // the 「○○」 itself (가스파르 → 가스파르 셀윈 · Gaspard): not another person
+    if (!p || [p.name, ...(p.aliases || [])].some((n) => squash(n).startsWith(squash(owner)) || squash(owner).startsWith(squash(n)))) continue;
+    const own = [p.name, ...(p.aliases || [])].map(squash);
+    if (people.some((q) => q !== p && [q.name, ...(q.aliases || [])].some((n) => squash(n).startsWith(squash(owner))) && [q.name, ...(q.aliases || [])].some((n) => own.includes(squash(n))))) continue;
+    const hit = [p.name, ...(p.aliases || [])].find((n) => String(n).length >= 2 && new RegExp(`(^|[^\\p{L}])${String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}]|$)`, 'iu').test(text));
+    if (hit) return { said: p.name };
+  }
+  return null;
 }
 
 /**
@@ -535,4 +565,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { HUMAN_SPECIES, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
