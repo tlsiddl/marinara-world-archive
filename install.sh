@@ -14,7 +14,7 @@ set -e
 REPO="tlsiddl/marinara-world-archive"
 REF="${WORLD_ARCHIVE_REF:-main}"
 ACTION="${1:-install}"
-FILES="world-archive/marinara-world-archive-runtime.cjs world-archive/lib/store.cjs world-archive/lib/inject.cjs world-archive/lib/service.cjs world-archive/lib/extract.cjs world-archive/lib/same.cjs world-archive/lib/names.cjs world-archive/lib/search.cjs world-archive/lib/roster.cjs world-archive/lib/timetable.cjs world-archive/lib/vendor/engine.cjs world-archive/lib/vendor/sentences.cjs world-archive/lib/vendor/glossary.cjs world-archive/lib/vendor/storydate.cjs world-archive/lib/calendar.cjs"
+FILES="world-archive/marinara-world-archive-runtime.cjs world-archive/lib/store.cjs world-archive/lib/inject.cjs world-archive/lib/service.cjs world-archive/lib/extract.cjs world-archive/lib/same.cjs world-archive/lib/names.cjs world-archive/lib/search.cjs world-archive/lib/roster.cjs world-archive/lib/timetable.cjs world-archive/lib/vendor/engine.cjs world-archive/lib/vendor/sentences.cjs world-archive/lib/vendor/glossary.cjs world-archive/lib/vendor/storydate.cjs world-archive/lib/calendar.cjs world-archive/lib/profile.cjs"
 RUNTIME_IN_DOCKER="/app/world-archive/marinara-world-archive-runtime.cjs"
 REQUIRE_OPT="--require=$RUNTIME_IN_DOCKER"
 VOLUME_LINE="./world-archive:/app/world-archive:ro"
