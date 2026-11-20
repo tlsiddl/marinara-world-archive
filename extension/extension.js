@@ -766,6 +766,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     'relation-remove': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 끝남`,
     delete: (c) => `<b>${esc(c.name)}</b> 지움${c.relations?.length ? ` · 관계 ${c.relations.length}개도 함께` : ''}`,
   };
+  /** An evidence sentence in “ ”, without the quote marks it may already carry (the reader often keeps the line's own). */
+  const quoted = (t) => `“${esc(String(t).trim().replace(/^["“”'「『]+|["“”'」』]+$/g, ''))}”`;
   const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${fmtDate(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 
   function historyHtml() {
@@ -777,7 +779,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       ${list.length ? `<div class="paper"><ul class="hist">${list.map((c) => `
         <li class="${c.undoneAt ? 'undone' : ''}">
           <div class="what">${(ACTION_TEXT[c.action] || (() => esc(c.action)))(c)}</div>
-          ${c.evidence ? `<div class="ev">“${esc(c.evidence)}”</div>` : ''}
+          ${c.evidence ? `<div class="ev">${quoted(c.evidence)}</div>` : ''}
           <div class="when">${fmtTime(c.at)}${c.undoneAt ? ' · 되돌림' : ''}</div>
           <div class="side-act">${c.undoneAt ? '' : `<button class="quiet" type="button" data-act="undo" data-id="${esc(c.id)}">되돌리기</button>`}</div>
         </li>`).join('')}</ul></div>`
@@ -809,7 +811,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     const list = sc.events.length ? `<div class="paper"><h2>기록 ${sc.events.length}</h2><ul class="hist">${sc.events.map((e) => `
         <li class="${e.undoneAt || e.gone ? 'undone' : ''}">
           <div class="what"><b>${esc(e.target)}</b> ${e.delta > 0 ? '+' : ''}${e.delta}${unit}${e.reason ? ` · ${esc(e.reason)}` : ''}${e.by === 'person' ? ' · 직접' : ''}</div>
-          ${e.evidence ? `<div class="ev">“${esc(e.evidence)}”</div>` : ''}
+          ${e.evidence ? `<div class="ev">${quoted(e.evidence)}</div>` : ''}
           <div class="when">${fmtTime(e.at)}${e.gone ? ' · 메시지가 사라져 합계에서 뺌' : ''}${e.undoneAt ? ' · 되돌림' : ''}</div>
           <div class="side-act">${e.undoneAt ? `<button class="quiet" type="button" data-act="score-undo" data-id="${esc(e.eventId)}" data-undo="0">다시 넣기</button>` : `<button class="quiet" type="button" data-act="score-undo" data-id="${esc(e.eventId)}" data-undo="1">되돌리기</button>`}</div>
         </li>`).join('')}</ul></div>` : '';
