@@ -204,3 +204,38 @@ test('② rules and systems: 「같은 것일 수 있음」 across the two kinds
   assert.equal(kept[0].type, 'rule');
   assert.match(kept[0].description, /작동 방식: 마법부 명부에 적는다/);
 });
+
+test('⑤ ⑩ other names: a small phrase, a lone title, another setting\'s name (「같은 것일 수 있음」), another animal go; glossary words in values', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [
+    { type: 'person', name: '로웨나 셀린', aliases: ['Rowena Selin'] },
+    { type: 'person', name: '보보', fields: { species: '니즐' } },
+    { type: 'person', name: '은빛 불사조', fields: { species: '불사조' } },
+    { type: 'place', name: '여관 1층 바', fields: { location: '은사슴 여관 east wing' } },
+  ]);
+  // what an older reading left (written straight into the file)
+  const doc = s.readEntities(w.worldId);
+  const by = (n) => doc.entities.find((e) => e.name === n);
+  by('보보').aliases = ['로웨나 셀린', 'Kneazle'];
+  by('은빛 불사조').aliases = ['은색 표범', 'Phoenix'];
+  by('여관 1층 바').aliases = ['the bar', 'Professor'];
+  s.writeJson(s.entityFile(w.worldId), doc);
+  const off = s.tidyAliases(w.worldId);
+  const E = s.listEntities(w.worldId);
+  const of = (n) => E.find((e) => e.name === n);
+  assert.deepEqual(of('보보').aliases, ['Kneazle'], 'its own animal in English stays');
+  assert.deepEqual(of('은빛 불사조').aliases, ['Phoenix']);
+  assert.deepEqual(of('여관 1층 바').aliases, []);
+  assert.ok(off.some((c) => c.alias === '은색 표범' && /다른 동물/.test(c.why)));
+  assert.ok((of('보보').maybe || []).some((m) => m.id === of('로웨나 셀린').entityId), '「같은 것일 수 있음」');
+  // a reading that names it so again does not put it back
+  s.applyAuto(w.worldId, [{ type: 'person', name: '보보', match: '보보', aliases: ['로웨나 셀린', 'the little one'] }]);
+  assert.deepEqual(s.listEntities(w.worldId).find((e) => e.name === '보보').aliases, ['Kneazle']);
+  // ⑤ glossary words in a Korean value
+  const g = s.glossaryValues(w.worldId, [{ from: 'east wing', to: '동쪽 별채' }]);
+  assert.equal(g.length, 1);
+  assert.equal(s.listEntities(w.worldId).find((e) => e.name === '여관 1층 바').fields.location, '은사슴 여관 동쪽 별채');
+});

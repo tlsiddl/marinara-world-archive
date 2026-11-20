@@ -645,14 +645,17 @@ async function routes(r) {
     s().applyPending(req.params.worldId, req.params.entityId, req.params.key, body(req).revision, { discard: body(req).discard === true })));
   // The current rules applied again by code to what was already read (no model): crowds become groups, misfit relations go.
   r.post('/worlds/:worldId/relations/recheck', handle(async (req) => {
+    // v0.6.2: the rooms' messages, read from the engine (no model) — for ② ③ ④ ⑤ ⑨
+    const sentences = await roomSentences(req.params.worldId);
     const retyped = s().convertGroups(req.params.worldId, null, { by: 'recheck' });
     const removed = s().recheckRelations(req.params.worldId, { by: 'recheck' });
     // v0.5.0 O: other names that are pieces of sentences
     const aliasesOff = s().tidyAliases(req.params.worldId, { by: 'recheck' });
+    // v0.6.2 ⑤: English words in Korean field values that the rooms' glossaries have
+    const glossed = sentences?.glossary?.length ? s().glossaryValues(req.params.worldId, sentences.glossary, { by: 'recheck' }).length : 0;
     // v0.6.2 ②: 「한 번 나옴」 — the batches each setting was spoken of in, counted again from the history
     const seenMoved = s().recountSeen(req.params.worldId);
     // v0.6.2 ③ ④: status lines as evidence go back; 「아직 드러나지 않음」 again field by field, against the rooms' sentences
-    const sentences = await roomSentences(req.params.worldId);
     // v0.6.2 ⑨: the rooms' profile blocks read by code (empty fields, people left out, 「서로 다른 말을 해요」)
     const fromProfiles = sentences ? s().applyProfiles(req.params.worldId, sentences.profiles, { pairs: sentences.glossary, story: sentences.story, says: X.saysValue, by: 'recheck' }) : [];
     const fieldsBack = s().recheckFields(req.params.worldId, { isStatus: (x) => X.STATUS_LINE.test(String(x).trim()), says: X.saysValue, ...(sentences || {}) }, { by: 'recheck' });
@@ -665,7 +668,7 @@ async function routes(r) {
     s().linkSubgroups(req.params.worldId, { by: 'recheck' });
     const filled = s().fillGroups(req.params.worldId, { by: 'recheck' });
     s().linkAffiliations(req.params.worldId, null, { by: 'recheck' });
-    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
+    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
   }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));

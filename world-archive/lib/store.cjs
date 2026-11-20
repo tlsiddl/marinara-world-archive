@@ -9,7 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { findPairs, describedPairs, speciesPairs, thingPairs } = require('./same.cjs');
+const { findPairs, describedPairs, speciesPairs, thingPairs, TITLE_WORDS } = require('./same.cjs');
 const { rosterOf, ROLE_WORDS } = require('./roster.cjs');
 const TT = require('./timetable.cjs');
 const CAL = require('./calendar.cjs');
@@ -264,9 +264,19 @@ function cleanText(v, max, what) {
  * 「the dungeons」 · 「Madam Malkin's Robes for All Occasions」 are.
  */
 const NAME_FUNC = new Set(['of', 'the', 'and', 'for', 'a', 'an', 'in', 'on', 'at', 'to', 'de', 'du', 'da', 'del', 'di', 'van', 'von', 'le', 'la', 'des', 'since', 'with', 'from', 'by', 'or']);
+/** v0.6.2 ⑤: one word that is a title or a common word, not someone's name (「Professor」 · 「Goblin」 · 「Madam」). */
+const COMMON_ALONE = new Set([...TITLE_WORDS, 'goblin', 'wizard', 'witch', 'boy', 'girl', 'man', 'woman', 'child', 'kid', 'headmaster', 'headmistress', 'prefect', 'butler', 'maid', 'nanny', 'governess', 'cook', 'coachman', 'footman', 'student', 'teacher', 'master', 'mistress', 'duke', 'duchess', 'father', 'mother', 'papa', 'mama', 'grandma', 'grandpa', 'darling', 'dear', 'sweetheart',
+  '고블린', '마법사', '마녀', '소년', '소녀', '남자', '여자', '아이', '교장', '반장', '집사', '하녀', '유모', '가정교사', '요리사', '마부', '하인', '학생', '아버지', '어머니', '아빠', '엄마', '할머니', '할아버지', '공작', '공작부인', '아가씨', '도련님']);
+/** v0.6.2 ⑤: animal words — an other name with one the setting itself is not (불사조 → 「은색 표범」) is another being. */
+// each animal once, its Korean and English words together (부엉이 = owl), so a translation is not another animal
+const ANIMALS = [['표범', 'leopard', 'panther'], ['고양이', 'cat', 'kitten'], ['개', '강아지', 'dog', 'puppy', 'hound'], ['늑대', 'wolf'], ['여우', 'fox'], ['부엉이', '올빼미', 'owl'], ['까마귀', 'raven', 'crow'], ['뱀', 'snake', 'serpent'], ['쥐', 'rat', 'mouse'], ['두꺼비', 'toad'], ['불사조', 'phoenix'], ['용', '드래곤', 'dragon'], ['사슴', 'stag', 'deer'], ['곰', 'bear'], ['토끼', 'rabbit', 'hare'], ['말', 'horse', 'pony'], ['니즐', '크니즐', 'kneazle', 'half-kneazle']];
+const animalIn = (s) => { const w = String(s || '').normalize('NFC').toLowerCase().split(/[^\p{L}-]+/u).filter(Boolean); return ANIMALS.filter((g) => g.some((x) => (/[a-z]/.test(x) ? w.includes(x) || w.includes(x + 's') : w.some((y) => y === x || (x.length >= 2 && y.endsWith(x)))))).map((g) => g[0]); };
 function nameLike(alias) {
   const a = String(alias || '').trim();
   if (!a) return false;
+  // v0.6.2 ⑤: a phrase that starts small (「charm for it」 · 「third shelf」 · 「the bar」) and a lone title or common word
+  if (/^[a-z]/.test(a) && /\s/.test(a) && !/[가-힣]/.test(a)) return false;
+  if (!/\s/.test(a) && COMMON_ALONE.has(a.normalize('NFC').toLowerCase())) return false;
   if (/["“”「」『』]/.test(a)) return false;
   const latin = /^[A-Za-z0-9]/.test(a) && !/[가-힣]/.test(a);
   const words = a.split(/\s+/);
@@ -279,6 +289,21 @@ function nameLike(alias) {
   if (/\b(?!of\b|in\b|on\b|at\b|to\b|for\b|with\b|from\b|by\b|into\b|under\b|over\b|and\b|or\b)[a-z]{2,}\s+(the|a|an|every|his|her|its|their|my|your|our)\s/.test(a + ' ') && !/^the\s/i.test(a)) return false;
   if (words.length > 5 && lower.length >= 2) return false;
   return true;
+}
+
+/**
+ * v0.6.2 ⑤ ⑩: why an other name does not belong to e — null when it does. { why, other }: not a name; the name of
+ * another setting (other); an animal word the setting is not (its name and 종 do not say it).
+ */
+function aliasOff(e, a, entities) {
+  if (!nameLike(a)) return { why: '이름이 아님' };
+  const k = squashName(a);
+  const other = (entities || []).find((x) => x.entityId !== e.entityId && squashName(x.name) === k);
+  if (other) return { why: `「${other.name}」의 이름`, other };
+  const own = new Set(animalIn(`${e.name} ${e.fields?.species || ''}`));
+  const theirs = animalIn(a).filter((x) => !own.has(x));
+  if (theirs.length && (own.size || e.fields?.species)) return { why: `다른 동물(${theirs[0]})` };
+  return null;
 }
 
 function cleanAliases(v, name) {
@@ -1035,6 +1060,7 @@ class Archive {
       const known = new Set([e.name, ...e.aliases].map(norm));
       for (const a of [name, ...aliases]) {
         if (known.has(norm(a)) || e.aliases.length >= ALIAS_MAX) continue;
+        if (aliasOff(e, a, doc.entities)) continue; // v0.6.2 ⑤ ⑩: not a name, another's name, or another animal
         e.aliases.push(a);
         known.add(norm(a));
         touched = true;
@@ -2403,7 +2429,8 @@ class Archive {
   }
 
   /**
-   * v0.5.0 O: other names that are not names (pieces of sentences, descriptions) taken off — not the ones the person
+   * v0.5.0 O · v0.6.2 ⑤ ⑩: other names that are not names (pieces of sentences, descriptions, a lone title), that are
+   * another setting's name, or that name another animal, taken off — not the ones the person
    * wrote (sources.aliases 'manual'). Recorded ('alias-remove', undoable). Returns the changes.
    */
   tidyAliases(worldId, meta = {}) {
@@ -2413,12 +2440,17 @@ class Archive {
     const changes = [];
     for (const e of doc.entities) {
       if (e.sources?.aliases === 'manual') continue;
-      const off = (e.aliases || []).filter((a) => !nameLike(a));
-      if (!off.length) continue;
-      e.aliases = e.aliases.filter((a) => nameLike(a));
+      const why = new Map();
+      for (const a of e.aliases || []) { const w = aliasOff(e, a, doc.entities); if (w) why.set(a, w); }
+      if (!why.size) continue;
+      e.aliases = e.aliases.filter((a) => !why.has(a));
       e.revision++;
       e.updatedAt = t;
-      for (const a of off) changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'alias-remove', alias: a });
+      for (const [a, w] of why) {
+        changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'alias-remove', alias: a, ...(w.why ? { why: w.why } : {}) });
+        // v0.6.2 ⑩: another person's name (「모모」 on the 니즐 when it is 모웨나's) — 「같은 것일 수 있음」 for the person
+        if (w.other && w.other.type === e.type && !(e.maybe || []).some((m) => m.id === w.other.entityId)) e.maybe = [...(e.maybe || []), { id: w.other.entityId, why: `다른 이름 「${a}」이(가) 「${w.other.name}」의 이름`, at: t }].slice(-5);
+      }
     }
     if (!changes.length) return [];
     this.writeJson(this.entityFile(worldId), doc);
@@ -2546,6 +2578,38 @@ class Archive {
     }
     for (const e of touched) if (!changes.some((c) => c.entityId === e.entityId && c.action === 'create')) { e.revision++; e.updatedAt = t; }
     if (!changes.length && !touched.size) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * v0.6.2 ⑤: an English word or name inside a Korean field value that the glossary has (「아이방 wing」 with
+   * 「wing = 별채」) becomes the glossary's Korean; one it does not have stays. Not the person's fields. 'field' changes
+   * (why 「단어장 표기로」, undoable). Returns the changes.
+   */
+  glossaryValues(worldId, pairs, meta = {}) {
+    this.getWorld(worldId);
+    const list = (pairs || []).filter((p) => /[A-Za-z]/.test(p.from) && /[가-힣]/.test(p.to)).sort((a, b) => b.from.length - a.from.length);
+    if (!list.length) return [];
+    const doc = this.readEntities(worldId);
+    const t = now();
+    const changes = [];
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const e of doc.entities) {
+      let touched = false;
+      for (const [key, value] of Object.entries(e.fields || {})) {
+        if (!value || e.sources?.[key] === 'manual' || !/[가-힣]/.test(value) || !/[A-Za-z]/.test(value)) continue;
+        let v = value;
+        for (const p of list) v = v.replace(new RegExp(`(?<![A-Za-z])${esc(p.from)}(?![A-Za-z])`, 'gi'), p.to);
+        if (v === value) continue;
+        e.fields[key] = v;
+        touched = true;
+        changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before: value, after: v, why: '단어장 표기로' });
+      }
+      if (touched) { e.revision++; e.updatedAt = t; }
+    }
+    if (!changes.length) return [];
     this.writeJson(this.entityFile(worldId), doc);
     this.pushHistory(worldId, changes);
     return changes;
