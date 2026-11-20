@@ -250,7 +250,7 @@ test('suggest: writes only when automatic updates are on, never over hand-writte
   const off = (await call('POST', `${A}/rooms/room/suggest`, { items, by: 'memory-module' })).data;
   assert.deepEqual(off, { written: false, reason: 'automatic updates off', changes: [] });
   assert.equal(s.listEntities(w.worldId).length, 4, 'nothing written');
-  assert.equal(s.listHistory(w.worldId).length, 0);
+  assert.equal(s.listHistory(w.worldId).filter((c) => c.by !== 'person').length, 0, 'only the hand-made settings of the setup are recorded');
 
   const cur = s.listEntities(w.worldId).find((e) => e.entityId === ids.summer);
   s.updateEntity(w.worldId, ids.summer, { fields: { gender: '여' }, revision: cur.revision });
@@ -260,7 +260,7 @@ test('suggest: writes only when automatic updates are on, never over hand-writte
   assert.deepEqual(on.changes.map((c) => c.action).sort(), ['create', 'field']);
   const summer = s.listEntities(w.worldId).find((e) => e.entityId === ids.summer);
   assert.deepEqual([summer.fields.gender, summer.fields.age], ['여', '17세'], 'the hand-written field stays');
-  const hist = s.listHistory(w.worldId);
+  const hist = s.listHistory(w.worldId).filter((c) => c.by !== 'person'); // the setup's own hand edits are recorded too (할 일 5)
   assert.ok(hist.every((c) => c.by === 'memory-module' && c.roomId === 'room'));
   assert.ok(hist.every((c) => c.evidence.length <= 300));
   assert.equal(s.undoChange(w.worldId, hist.find((c) => c.action === 'field').id).undone, true, 'undoable like the reader\'s');

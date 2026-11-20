@@ -621,6 +621,8 @@ class Archive {
     };
     doc.entities.push(entity);
     this.writeJson(this.entityFile(worldId), doc);
+    // 할 일 5: what the person does by hand is in the history too, and can be undone.
+    this.pushHistory(worldId, [{ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: entity.entityId, name: entity.name, type: entity.type, action: 'create' }]);
     return entity;
   }
 
@@ -644,8 +646,14 @@ class Archive {
       delete next.glossaryName;
       delete entity.glossaryName;
     }
+    const before = structuredClone(entity);
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
     this.writeJson(this.entityFile(worldId), doc);
+    const keys = [...new Set([...Object.keys(before.fields || {}), ...Object.keys(entity.fields || {})])].filter((k) => (before.fields || {})[k] !== (entity.fields || {})[k]);
+    for (const k of ['name', 'type', 'description', 'pinned']) if (JSON.stringify(before[k]) !== JSON.stringify(entity[k])) keys.push(k);
+    if (JSON.stringify(before.aliases) !== JSON.stringify(entity.aliases)) keys.push('aliases');
+    if (JSON.stringify(before.extra) !== JSON.stringify(entity.extra)) keys.push('extra');
+    this.pushHistory(worldId, [{ id: randomUUID(), at: entity.updatedAt, by: 'person', roomId: null, messageIds: [], entityId, name: entity.name, type: entity.type, action: 'edit', keys, before, afterRevision: entity.revision }]);
     return entity;
   }
 
@@ -831,6 +839,11 @@ class Archive {
         const touched = (r) => [r.from, r.to].some((x) => x === c.entityId || x === c.dropId);
         doc.relations = doc.relations.filter((r) => !touched(r)).concat(c.relationsBefore.filter(validRelation).map((r) => structuredClone(r)));
       }
+    } else if (c.action === 'edit') {
+      if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
+      if (e.revision !== c.afterRevision) throw new ArchiveError(409, later);
+      if (!validEntity(c.before)) throw broken('변경 기록');
+      doc.entities[index] = { ...structuredClone(c.before), revision: e.revision + 1, updatedAt: now() };
     } else if (c.action === 'retype') {
       if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
       if (e.revision !== c.afterRevision) throw new ArchiveError(409, later);
@@ -852,7 +865,7 @@ class Archive {
       for (const r of c.relations || []) if (validRelation(r) && ids.has(r.from) && ids.has(r.to) && !have.has(relKey(r))) doc.relations.push(structuredClone(r));
     } else if (c.action === 'create') {
       if (!e) throw new ArchiveError(409, '이미 지워진 설정입니다.');
-      if (Object.values(e.sources || {}).includes('manual')) throw new ArchiveError(409, '직접 고친 칸이 있는 설정이라 지우지 않았습니다. 지우려면 설정에서 지워 주세요.');
+      if (c.by !== 'person' && Object.values(e.sources || {}).includes('manual')) throw new ArchiveError(409, '직접 고친 칸이 있는 설정이라 지우지 않았습니다. 지우려면 설정에서 지워 주세요.');
       // Removing the setting would also throw away what was read into it afterwards: undo those first.
       const after = history.changes.slice(history.changes.indexOf(c) + 1).filter((x) => (x.entityId === c.entityId || x.entityIds?.includes(c.entityId)) && !x.undoneAt).length;
       if (after) throw new ArchiveError(409, `그 뒤 자동으로 ${after}번 바뀌었어요. 최근 기록부터 되돌리거나 설정에서 지워 주세요.`);

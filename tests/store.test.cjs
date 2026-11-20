@@ -245,7 +245,7 @@ test('auto: creates, fills empty fields, replaces its own, never touches hand-wr
 
   const hist = s.listHistory(w.worldId);
   assert.equal(hist[0].roomId, null);
-  assert.equal(hist.at(-1).roomId, 'r1');
+  assert.equal(hist.filter((c) => c.by !== 'person').at(-1).roomId, 'r1');
 });
 
 test('auto: undo one change at a time, only while it is still there', (t) => {
@@ -673,7 +673,7 @@ test('merge: undo brings both back as they were, only while the kept one has not
   const now = s.listEntities(w.worldId);
   const m = s.mergeEntities(w.worldId, mergeBody(now[0], now[1]));
   s.updateEntity(w.worldId, m.entityId, { pinned: true, revision: m.revision });
-  const [h2] = s.listHistory(w.worldId);
+  const h2 = s.listHistory(w.worldId).find((c) => c.action === 'merge');
   assert.equal(h2.action, 'merge');
   assert.throws(() => s.undoChange(w.worldId, h2.id), (e) => e.status === 409 && /합친 뒤에 다시 바뀌어서/.test(e.message));
   assert.equal(s.listEntities(w.worldId).length, 1, 'nothing changed');
@@ -702,4 +702,31 @@ test('same person: 「다른 사람이에요」 keeps a pair from being suggeste
   assert.throws(() => s.dismissPair(w.worldId, a.entityId, a.entityId), status(400));
   assert.throws(() => s.dismissPair(w.worldId, a.entityId, '00000000-0000-4000-8000-000000000000'), status(404));
   assert.throws(() => s.dismissPair(w.worldId, a.entityId, 'x'), status(400));
+});
+
+test('할 일 5: what the person does by hand is recorded and can be undone — a new setting, an edit, a delete', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'A' });
+  const e = s.createEntity(w.worldId, { type: 'person', name: '마르타', fields: { age: '50대' } });
+  const u = s.updateEntity(w.worldId, e.entityId, { fields: { age: '60대', gender: '여' }, name: '마르타 그린', revision: e.revision });
+  const [edit, create] = s.listHistory(w.worldId);
+  assert.deepEqual([create.action, create.by, edit.action, edit.by], ['create', 'person', 'edit', 'person']);
+  assert.deepEqual(edit.keys.sort(), ['age', 'gender', 'name']);
+  s.undoChange(w.worldId, edit.id);
+  const back = s.listEntities(w.worldId)[0];
+  assert.deepEqual([back.name, back.fields.age, back.fields.gender, back.revision], ['마르타', '50대', undefined, u.revision + 1]);
+  const again = s.updateEntity(w.worldId, back.entityId, { description: '사서', revision: back.revision });
+  const e2 = s.listHistory(w.worldId)[0];
+  s.updateEntity(w.worldId, back.entityId, { description: '사서장', revision: again.revision });
+  assert.throws(() => s.undoChange(w.worldId, e2.id), status(409), 'changed again since');
+  const cur = s.listEntities(w.worldId)[0];
+  s.deleteEntity(w.worldId, cur.entityId, cur.revision);
+  s.undoChange(w.worldId, s.listHistory(w.worldId)[0].id);
+  assert.equal(s.listEntities(w.worldId)[0].description, '사서장', 'the delete is undone');
+  const d2 = s.listEntities(w.worldId)[0];
+  s.deleteEntity(w.worldId, d2.entityId, d2.revision);
+  assert.equal(s.listEntities(w.worldId).length, 0);
+  const s2 = s.createEntity(w.worldId, { type: 'place', name: '옥상' });
+  s.undoChange(w.worldId, s.listHistory(w.worldId)[0].id);
+  assert.equal(s.listEntities(w.worldId).some((x) => x.entityId === s2.entityId), false, 'a hand-made setting can be undone even though its fields are the person\'s');
 });

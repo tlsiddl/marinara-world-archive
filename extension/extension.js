@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.3.13';
+  const VERSION = '0.3.14';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -722,7 +722,12 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   }
 
   const ACTION_TEXT = {
-    create: (c) => `새 ${KIND[c.type]?.label || '설정'} <b>${esc(c.name)}</b>`,
+    create: (c) => `새 ${KIND[c.type]?.label || '설정'} <b>${esc(c.name)}</b>${c.by === 'person' ? ' · 직접 만듦' : ''}`,
+    edit: (c) => {
+      const label = { name: '이름', description: '메모', aliases: '다른 이름', pinned: '고정', extra: '추가 칸', type: '종류' };
+      const keys = (c.keys || []).map((k) => label[k] || (st.fields[c.type] || []).find((f) => f.key === k)?.label || k);
+      return `<b>${esc(c.name)}</b> · 직접 고침${keys.length ? `: ${esc(keys.join(', '))}` : ''}`;
+    },
     field: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
     alias: (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.after)}」`,
     memo: (c) => `<b>${esc(c.name)}</b> · 메모: ${esc(c.after)}`,
