@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.3.14';
+  const VERSION = '0.3.15';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -142,6 +142,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0}
 .chip{font-size:11.5px;line-height:1.5;padding:2px 10px;border:1px solid var(--ink);border-radius:999px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip:nth-child(even){border-radius:2px}
+.card .hit{margin:8px 0 0;font-size:12.5px;color:var(--muted)}.card .hit mark{background:var(--accent-soft,#f3e2a8);color:inherit;padding:0 1px;border-radius:2px}
 .card .snip{margin:10px 0 12px;font-size:12.5px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:justify}
 .card .foot{margin-top:auto;margin-bottom:0;padding-top:8px;padding-top:8px;border-top:1px dashed var(--line);font:9.5px var(--mono);letter-spacing:1.5px;color:var(--muted);display:flex;justify-content:space-between}
 .empty{padding:40px 20px;text-align:center;border:1.5px dashed var(--line);border-radius:4px;color:var(--muted)}
@@ -530,7 +531,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       <h1>${k.label}</h1>
       <p class="intro">${k.hint}</p>
       <div class="toolbar">
-        ${list.length ? `<label class="search">${icon('search')}<input id="q" type="search" placeholder="이름이나 다른 이름으로 찾기" value="${esc(st.query)}" aria-label="찾기"></label>` : ''}
+        ${list.length ? `<label class="search">${icon('search')}<input id="q" type="search" placeholder="이름 · 다른 이름 · 내용으로 찾기" value="${esc(st.query)}" aria-label="찾기"></label>` : ''}
         <span style="flex:1"></span>
         <button class="primary" type="button" data-act="new" data-type="${type}">새 ${k.label}</button>
       </div>
@@ -714,6 +715,11 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <div class="actions"><button class="primary" type="button" data-act="save-auto">저장</button></div>
       </form>
       <div class="paper">
+        <h2>백업 · 복원</h2>
+        <p class="sub" style="margin:0 0 12px">이 세계관의 설정 · 관계 · 기록을 파일 하나로 내려받습니다. 복원하면 「(복원)」이 붙은 새 세계관이 생기고, 지금 세계관은 그대로입니다. 방 연결은 복원되지 않습니다.</p>
+        <div class="row"><button type="button" data-act="backup">백업 내려받기</button><label class="quiet" style="cursor:pointer;padding:6px 8px">백업에서 복원<input id="restore-file" type="file" accept="application/json,.json" hidden></label></div>
+      </div>
+      <div class="paper">
         <h2>세계관 지우기</h2>
         <p class="sub" style="margin:0 0 12px">설정 ${st.entities.length}개도 함께 지워지고, 이 세계관을 읽던 방들은 연결이 끊깁니다. 서버의 world-archive/trash 폴더에 사본이 남습니다.</p>
         ${st.ask === 'world' ? `<span class="ask">정말 「${esc(w.name)}」을(를) 지울까요? <button class="danger" type="button" data-act="delete-world">지우기</button><button class="quiet" type="button" data-act="ask" data-key="">취소</button></span>`
@@ -788,12 +794,38 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     if (st.busy) root.querySelectorAll('main button, .rail button').forEach((b) => { b.disabled = true; });
   }
 
+  // 할 일 6 — 검색: the server finds names, other names, field values and memos (and the glossary's English names);
+  // the cards of this list are shown in its order with the matched part marked. Until it answers, names filter locally.
+  let searchTimer = null;
+  let searchSeq = 0;
+  function runSearch() {
+    clearTimeout(searchTimer);
+    const q = st.query.trim();
+    if (!q || !st.worldId) { st.hits = null; filterCards(); return; }
+    filterCards();
+    const seq = ++searchSeq;
+    searchTimer = setTimeout(async () => {
+      try {
+        const r = await api('GET', `/worlds/${st.worldId}/search?q=${encodeURIComponent(q)}&types=${encodeURIComponent(KIND[st.view] ? st.view : '')}`);
+        if (seq !== searchSeq) return;
+        st.hits = new Map((r.results || []).map((x, i) => [x.entityId, { ...x, order: i }]));
+        filterCards();
+      } catch { /* keep the local filter */ }
+    }, 200);
+  }
+  const marked = (h) => `${h.label ? `${esc(h.label)} · ` : ''}${esc(h.text.slice(0, h.start))}<mark>${esc(h.text.slice(h.start, h.end))}</mark>${esc(h.text.slice(h.end))}`;
+
   function filterCards() {
     const q = st.query.trim().toLowerCase();
     let shown = 0;
     root.querySelectorAll('.card').forEach((c) => {
-      const hit = !q || c.dataset.search.includes(q);
+      const found = q && st.hits ? st.hits.get(c.dataset.id) : null;
+      const hit = !q || (st.hits ? !!found : c.dataset.search.includes(q));
       c.hidden = !hit;
+      c.style.order = found ? String(found.order) : '';
+      c.querySelector('.hit')?.remove();
+      const show = found?.hits.find((h) => h.where !== 'name');
+      if (show) c.querySelector('.nm')?.insertAdjacentHTML('afterend', `<p class="hit">${marked(show)}</p>`);
       if (hit) shown++;
     });
     const none = $('#noHit');
@@ -817,7 +849,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     };
   }
 
-  const go = (view) => { st.view = view; st.dupes = false; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; };
+  const go = (view) => { st.view = view; st.hits = null; st.dupes = false; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; };
 
   const actions = {
     go: (b) => {
@@ -932,6 +964,16 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       await loadWorlds();
       await loadRoom();
     }, '저장했습니다.'),
+    backup: () => run(async () => {
+      const w = world();
+      const file = await api('GET', `/worlds/${w.worldId}/export`);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `세계관-${w.name.replace(/[\/:*?"<>|]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }, '백업 파일을 내려받았습니다.'),
     'delete-world': () => run(async () => {
       const w = world();
       await api('DELETE', `/worlds/${w.worldId}`, { revision: w.revision });
@@ -967,8 +1009,23 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       render();
     }
   });
+  root.addEventListener('change', (ev) => {
+    if (ev.target.id !== 'restore-file' || !ev.target.files?.[0]) return;
+    const f = ev.target.files[0];
+    ev.target.value = '';
+    run(async () => {
+      let file;
+      try { file = JSON.parse(await f.text()); } catch { throw Error('백업 파일을 읽지 못했습니다.'); }
+      const r = await api('POST', '/worlds/import', file);
+      await loadWorlds();
+      st.worldId = r.world.worldId;
+      go('overview');
+      await loadEntities();
+      await loadRoom();
+    }, '새 세계관으로 복원했습니다.');
+  });
   root.addEventListener('input', (ev) => {
-    if (ev.target.id === 'q') { st.query = ev.target.value; filterCards(); }
+    if (ev.target.id === 'q') { st.query = ev.target.value; runSearch(); }
   });
   el.backdrop.addEventListener('click', () => toggle(false));
   root.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !el.panel.hidden) toggle(false); });

@@ -8,6 +8,7 @@ const X = require('./extract.cjs');
 const N = require('./names.cjs');
 const G = require('./vendor/glossary.cjs');
 const { assembleWorld } = require('./inject.cjs');
+const Search = require('./search.cjs');
 
 const TAG = '[world-archive]';
 const PREFIX = '/api/world-archive';
@@ -358,6 +359,9 @@ async function routes(r) {
 
   r.get('/worlds', handle(async () => ({ worlds: s().listWorlds() })));
   r.post('/worlds', handle(async (req) => s().createWorld(body(req))));
+  // 할 일 7 — 백업 · 복원: one world as one file; restoring makes a new world 「… (복원)」 and links no room.
+  r.get('/worlds/:worldId/export', handle(async (req) => s().exportWorld(req.params.worldId)));
+  r.post('/worlds/import', { bodyLimit: 32 * 1024 * 1024 }, handle(async (req) => s().importWorld(body(req))));
   r.get('/worlds/:worldId', handle(async (req) => s().getWorld(req.params.worldId)));
   r.patch('/worlds/:worldId', handle(async (req) => s().updateWorld(req.params.worldId, body(req))));
   r.delete('/worlds/:worldId', handle(async (req) => s().deleteWorld(req.params.worldId, body(req).revision ?? Number(req.query?.revision))));
@@ -369,6 +373,20 @@ async function routes(r) {
     // 소속 칸이 설정집의 집단을 가리키면 소속 관계도 (코드로, 모델 없이).
     if (e.type === 'person') s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation' });
     return e;
+  }));
+  // 할 일 6 — 검색 (code only). types=person,place …; the glossary of the rooms that read this world adds English names.
+  r.get('/worlds/:worldId/search', handle(async (req) => {
+    const worldId = req.params.worldId;
+    const entities = s().listEntities(worldId);
+    const q = String(req.query?.q || '').slice(0, 200);
+    const types = String(req.query?.types || '').split(',').map((t) => t.trim()).filter((t) => TYPES.includes(t));
+    const glossary = [];
+    for (const [roomId, link] of Object.entries(s().readRooms().rooms)) {
+      if (link.worldId !== worldId) continue;
+      const pairs = glossaries.get(roomId) || (await roomGlossary(engineApi(), roomId));
+      if (pairs) glossary.push(...pairs);
+    }
+    return { q, results: Search.search(entities, q, { types, glossary, fields: FIELDS }) };
   }));
   r.get('/worlds/:worldId/relations', handle(async (req) => ({ relations: s().listRelations(req.params.worldId) })));
   // The current rules applied again by code to what was already read (no model): crowds become groups, misfit relations go.

@@ -13,6 +13,7 @@ const { findPairs, describedPairs } = require('./same.cjs');
 const N = require('./names.cjs');
 
 const SCHEMA = 1;
+const BACKUP_FORMAT = 'marinara-world-archive-backup';
 const NAME_MAX = 120;
 const DESC_MAX = 4000;
 const ALIAS_MAX = 20;
@@ -1352,6 +1353,75 @@ class Archive {
       if (!ids.has(r.from) || !ids.has(r.to)) throw new ArchiveError(409, '이을 설정이 지워져서 되돌리지 않았습니다.');
       doc.relations.push(structuredClone(r));
     }
+  }
+
+  // ---------------------------------------------------------------- 할 일 7 — 백업 · 복원
+
+  /**
+   * One world as one file: its settings, entities, relations, history and the rooms that read it. format and
+   * schemaVersion say what it is, so a later version can refuse it safely.
+   */
+  exportWorld(worldId) {
+    const world = this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const rooms = Object.entries(this.readRooms().rooms).filter(([, l]) => l.worldId === worldId).map(([roomId]) => roomId);
+    return {
+      format: BACKUP_FORMAT,
+      schemaVersion: SCHEMA,
+      exportedAt: now(),
+      world: { name: world.name, description: world.description, injectChars: world.injectChars, injectMode: world.injectMode, auto: world.auto },
+      entities: doc.entities,
+      relations: doc.relations,
+      history: this.readHistory(worldId).changes,
+      dismissed: this.readDismissed(worldId).pairs,
+      rooms,
+    };
+  }
+
+  /**
+   * A backup comes back as a NEW world (「이름 (복원)」); nothing that exists is written over, and no room is linked
+   * (a room reads one world only). A file of a newer version or one that does not check out is refused whole —
+   * nothing is written. Entity and relation ids stay as in the file (they belong to the new world only).
+   */
+  importWorld(file) {
+    if (!isObject(file) || file.format !== BACKUP_FORMAT) throw new ArchiveError(400, '세계관 설정집 백업 파일이 아닙니다.');
+    if (!Number.isSafeInteger(file.schemaVersion) || file.schemaVersion < 1) throw new ArchiveError(400, '백업 파일의 형식 번호가 없습니다.');
+    if (file.schemaVersion > SCHEMA) throw new ArchiveError(409, '이 파일은 더 새로운 판에서 만든 백업입니다. 세계관 설정집을 업데이트한 뒤 복원해 주세요.');
+    if (Buffer.byteLength(JSON.stringify(file)) > FILE_MAX * 2) throw new ArchiveError(413, '백업 파일이 너무 큽니다.');
+    const w = file.world;
+    if (!isObject(w)) throw new ArchiveError(400, '백업 파일이 깨졌습니다(세계관 정보).');
+    const entities = Array.isArray(file.entities) ? file.entities : null;
+    const relations = file.relations === undefined ? [] : Array.isArray(file.relations) ? file.relations : null;
+    const history = file.history === undefined ? [] : Array.isArray(file.history) ? file.history : null;
+    const dismissed = file.dismissed === undefined ? [] : Array.isArray(file.dismissed) ? file.dismissed : null;
+    if (!entities || !relations || !history || !dismissed) throw new ArchiveError(400, '백업 파일이 깨졌습니다.');
+    if (entities.length > ENTITY_MAX || relations.length > REL_MAX) throw new ArchiveError(413, '백업 파일의 설정이 너무 많습니다.');
+    const ids = new Set();
+    for (const e of entities) {
+      if (!validEntity(e) || ids.has(e.entityId)) throw new ArchiveError(400, '백업 파일이 깨졌습니다(설정).');
+      ids.add(e.entityId);
+    }
+    const keys = new Set();
+    for (const r of relations) {
+      if (!validRelation(r) || !ids.has(r.from) || !ids.has(r.to) || keys.has(relKey(r))) throw new ArchiveError(400, '백업 파일이 깨졌습니다(관계).');
+      keys.add(relKey(r));
+    }
+    if (!dismissed.every((x) => isObject(x) && typeof x.a === 'string' && typeof x.b === 'string')) throw new ArchiveError(400, '백업 파일이 깨졌습니다(다른 사람 표시).');
+    if (!history.every((c) => isObject(c) && typeof c.id === 'string')) throw new ArchiveError(400, '백업 파일이 깨졌습니다(기록).');
+    // Check the world's own fields with the usual rules before anything is written.
+    const base = String(w.name || '').trim() || '복원한 세계관';
+    const made = this.createWorld({
+      name: (base.length > NAME_MAX - 5 ? base.slice(0, NAME_MAX - 5) : base) + ' (복원)',
+      description: typeof w.description === 'string' ? w.description : '',
+      injectChars: Number.isSafeInteger(w.injectChars) ? cleanBudget(w.injectChars) : undefined,
+      injectMode: INJECT_MODES.includes(w.injectMode) ? w.injectMode : undefined,
+      auto: isObject(w.auto) ? { ...defaultAuto(), ...w.auto, enabled: false } : undefined,
+    });
+    const worldId = made.worldId;
+    this.writeJson(this.entityFile(worldId), { schemaVersion: SCHEMA, worldId, entities: structuredClone(entities), relations: structuredClone(relations) });
+    this.writeJson(this.historyFile(worldId), { schemaVersion: SCHEMA, worldId, changes: structuredClone(history).slice(-HISTORY_MAX) });
+    if (dismissed.length) this.writeJson(this.dismissFile(worldId), { schemaVersion: SCHEMA, worldId, pairs: structuredClone(dismissed).slice(-DISMISS_MAX) });
+    return { world: this.getWorld(worldId), entities: entities.length, relations: relations.length, history: history.length, roomsInFile: Array.isArray(file.rooms) ? file.rooms.length : 0 };
   }
 
   // ---------------------------------------------------------------- rooms
