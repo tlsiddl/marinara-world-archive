@@ -58,6 +58,8 @@ s.applyAuto(W, [
   person('솜뭉치', { species: '고양이', appearance: '흰 털, 한쪽 귀 끝이 검음' }), person('지팡이 가게 주인', { affiliation: '별빛 시장 상인회' }),
 ]);
 s.linkSubgroups(W); s.linkAffiliations(W);
+// people who know each other from the start (연동 v2: 기억 서재 「인물별」 카드의 관계)
+s.applyRelations(W, [['하람 윤', '테오 마렌', '친구', ''], ['하람 윤', '벨로나 하르트', '스승·제자', '기숙사 사감'], ['하람 윤', '솜뭉치', '가족', '반려동물']].map(([a, b, type, note]) => ({ from: id(a), to: id(b), type, note, evidence: '' })));
 for (const [n, room] of [['하람 윤', '1학년 침실'], ['리아 소넷', '1학년 침실']]) s.setRoom(W, id(n), id(room), {}, { force: true });
 const rule = (name, memo, where, type = 'rule') => ({ type, name, memo, ...(where ? { appliesTo: where === 'world' ? 'world' : id(where) } : {}) });
 s.applyAuto(W, [
@@ -168,6 +170,8 @@ const blob=await new Promise((r)=>o.toBlob(r,'image/webp',0.9));const r=await fe
       let body = {};
       try { body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; } catch {}
       const r = await call(req.method, u.pathname + u.search, body);
+      // without Marinara's runtime the module has no version: say the repo's (기억 서재 looks for it)
+      if (u.pathname === '/api/world-archive/status' && r.data && !r.data.version) r.data.version = require(path.join(REPO, 'package.json')).version;
       res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(r.data ?? null));
     });
   }

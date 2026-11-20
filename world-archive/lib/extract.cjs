@@ -4,7 +4,7 @@
 // The slicing follows the Memory Module's nextSlice idea (read only what comes after the last place read), and evidence
 // works the way it does there: the new messages are shown as numbered sentences, the model answers with sentence
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
-const { TYPES, FIELDS, REL_TYPES, relationFits } = require('./store.cjs');
+const { TYPES, FIELDS, REL_TYPES, relationFits, STATUS_OFF } = require('./store.cjs');
 const TT = require('./timetable.cjs');
 const R = require('./roster.cjs');
 const CAL = require('./calendar.cjs');
@@ -66,7 +66,18 @@ function batches(settled, start) {
  * sentences as S.segment.
  */
 const PROFILE_BLOCK = /<(npc_profile|world_profile)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+/**
+ * v0.6.2: the scene's status lines — the §RP head line (「§RP | 날짜 | 시각 | 곳 | 날씨§」) and the lines under it
+ * (「이름: 옷차림 | 자세 | 기분」): what someone wears or does now, not who they are. Marked 'status'; they never back a
+ * lasting field (외형 · 성격 · 배경 · 메모 …).
+ */
+const STATUS_LINE = /^(§RP\b.*\|.*|[^|\n:：]{1,48}[:：][^|\n]*\|[^|\n]*\|.*)$/;
+const markStatus = (out) => { out.sentences.forEach((x, i) => { if (!out.blocks[i] && STATUS_LINE.test(String(x).trim())) out.blocks[i] = 'status'; }); return out; };
+const isProfile = (b) => Boolean(b) && b !== 'status';
 function segmentBlocks(text) {
+  return markStatus(segmentProfile(text));
+}
+function segmentProfile(text) {
   const t = String(text || '');
   if (!/<(npc_profile|world_profile)\b/i.test(t)) {
     const sentences = S.segment(t);
@@ -88,7 +99,11 @@ function segmentBlocks(text) {
 function indexBlocks(batch) {
   const index = S.indexBatch(batch);
   const byNumber = new Map(batch.map((m) => [m.number, m]));
-  for (const p of index.values()) p.block = byNumber.get(p.number)?.blocks?.[p.sentence - 1] || null;
+  for (const p of index.values()) {
+    p.block = byNumber.get(p.number)?.blocks?.[p.sentence - 1] || null;
+    // v0.6.2: evidence is kept without HTML tags (<font …>, <br>, <span …>)
+    p.text = String(p.text).replace(/<\/?[a-z][a-z0-9_-]*(\s[^<>]*)?\/?>/gi, '').replace(/\s+/g, ' ').trim();
+  }
   return index;
 }
 
@@ -186,16 +201,18 @@ ${fieldGuide()}${balanceGuide(world)}
 - species(종)에는 사람이 아닌 존재(고양이 · 부엉이 · 용 · 집요정 같은)의 종만 쓴다. 사람이면 비워 둔다("사람"이라고 쓰지 마).
 - 이름 없이 종으로만 불리는 존재(「크니즐」, 「부엉이」처럼 종 이름뿐인 것)는 인물 항목으로 만들지 마. 이름 있는 동물은 이름으로 만들고 종은 species 칸에 적는다.
 - age(나이·생일)에는 나이를 나타내는 말만 쓴다(예: 열두 살, 노인, 50대). 몇 해째 일했다거나 외모 같은 것은 다른 칸에 쓴다.
-- state(지금 상태)에는 며칠 뒤에도 사실일 상태만 쓴다: 다침, 병, 이사, 직위·소속 변화, 관계 단절, 잃어버린 물건 같은 것. 지금 하는 동작, 잠깐 간 곳, 그날의 기분은 쓰지 않는다. 버릇·걸음걸이·말투는 상태가 아니라 appearance(외형)나 personality(성격)에 쓴다.
+- state(지금 상태)에는 며칠 뒤에도 사실일 상태만 쓴다: 다침, 병, 이사, 직위·소속 변화, 관계 단절, 잃어버린 물건 같은 것. 지금 하는 동작, 잠깐 간 곳, 그날의 기분은 쓰지 않는다. 버릇·걸음걸이·말투는 상태가 아니라 appearance(외형)나 personality(성격)에 쓴다. appearance · personality에는 며칠 뒤에도 같은 생김새 · 성격만 쓴다: 그 장면의 옷(잠옷 · 외출복), 하던 동작(침대에서 잠, 칫솔질을 서두름), 그때의 기분은 쓰지 않는다. 이미 있는 외형 · 성격을 그 장면 모습으로 바꾸지 않는다.
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
   좋은 예: "오른팔이 부러져 붕대를 감고 다님", "기사단에서 쫓겨나 항구 창고에서 지냄"
 - 각 칸의 뜻에 맞는 값만 넣는다(위계 칸에는 위계·역할만, 위치 칸에는 위치만).
-- rule · system · schedule에는 lasting을 적는다: 다음 장면에서도 다시 쓸 일이면 true, 한 장면에서 한 번 스친 물건 · 주문 · 질문 · 행동이면 false(예: true — 기숙사 암호, 마법사 화폐, 통로 여는 법 / false — 첫 수업의 질문 하나, 욕실 수도꼭지, 의상실 재봉, 열차 방음 주문). false인 것은 프로그램이 버린다.
+- rule · system · schedule에는 lasting을 적는다: 다음 장면에서도 다시 쓸 일이면 true, 한 장면에서 한 번 스친 물건 · 주문 · 질문 · 행동이면 false(예: true — 기숙사 암호, 마법사 화폐, 통로 여는 법 / false — 첫 수업의 질문 하나, 욕실 수도꼭지, 의상실 재봉, 열차 방음 주문, 한 사람의 한 번의 부탁, 그 장면에서 한 지시(「지금은 한 번에 하나씩」), 물건 하나의 쓰임(이 지팡이는 …), 주문을 한 번 쓴 것). false인 것은 프로그램이 버린다.
 - personality(성격)에는 버릇 · 기질만 적는다. 그 장면에서 한 행동(「~에게 겁을 줌」, 「~를 구경함」)은 적지 않는다(그건 기억 서재 몫이다). memo에는 오래가는 사실만 적는다.
 - aliases에는 원문에서 그 대상을 부른 이름 · 호칭만 넣는다. 문장 조각이나 묘사(「pulls the bolt back」, 「키 큰 검은 머리 소녀」)는 넣지 않는다.
 - 주제마다 따로 적는다: 명단 · 임무(반장 임무 같은 것) · 배치 · 시설 · 시간표 · 규칙은 서로 다른 항목이다. 큰 곳의 규칙을 작은 방 항목의 칸에 넣지 말고 rule로 따로 적고 where에 그곳을 적는다. 집단 · 장소 · 인물 칸에 시간표를 넣지 말고 timetable로 적는다. 한 문단이나 블록에 여러 주제가 섞여 있으면 주제별로 나눠 적는다.
 - 등장인물이 한 말 · 소문 · 추측(「○○ 말로는」, 「~라던데」, 「아마」)은 확정된 사실이 아니다. 그런 칸은 {"v":"값","n":["번호"],"rumor":"누구의 말(모르면 소문)"}로 적는다. 확정된 사실을 덮지 않는다.
 - 칸 값이 시간이 지나 바뀐 것(이사 · 승진 · 전학)이 아니라 전에 틀리게 적힌 것을 바로잡는 것이면(「사실은 처음부터 ○○였다」) 그 칸에 "fix":true를 적는다.
+- [상태줄] 표시가 붙은 문장은 장면 머리의 지금 상태 줄(옷차림 · 자세 · 기분)이다. 그 장면의 모습일 뿐이라 외형 · 성격 · 배경 · 가족 · 메모의 근거로 쓰지 않는다(쓰면 프로그램이 뺀다). 오래가는 변화(다침 · 이사)가 본문에도 나올 때만 state에 적는다.
+- 근거에 없는 상태(죽음 · 결혼 · 병)를 짐작해 적지 않는다. 나이 · 정도가 불확실하면 원문의 말투를 살려 적는다(예: 「예순쯤으로 보임」, 「예순이 넘었을지도」). 원문에 없는 연도 · 숫자를 덧붙이지 않는다.
 - [프로필] 표시가 붙은 문장은 답변에 붙은 프로필 블록(<npc_profile> · <world_profile>)이다. 이야기에 아직 나오지 않았어도 확정된 설정으로 받는다. 칸은 이렇게 맞춘다: 이름/나이/성별 → name · age · gender, 외형과 옷차림 → appearance, 태도와 주요 성격 → personality, 그 밖에 눈에 띄는 것 → background나 memo(며칠 뒤에도 사실일 것만). 같은 사실이 본문과 프로필에 둘 다 있으면 항목 · 칸을 하나로 적고 n에 둘 다 적는다. 이미 있는 항목이면 match로 잇는다.
 - 집단의 members(구성원)에는 구성(예: 남학생 다섯 명, 여학생 네 명)만 쓰고 사람 이름을 늘어놓지 않는다. size(전체 인원)에는 근거가 있으면 그 집단의 전체 인원 수를 「N명」으로 적는다(나뉘어 적혀 있으면 합친 수, 예: 9명). 이름을 아는 사람 수가 아니라 전체 수다. 수가 안 나오면(「많다」, 「수십 명」) 적지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
 
@@ -218,7 +235,7 @@ ${fieldGuide()}${balanceGuide(world)}
 {"owner":"그 시간표의 주인 — 집단이나 인물 이름(예: 슬리데린 1학년)","day":"월|화|수|목|금|토|일|평일|매일","slot":"교시나 때(예: 1교시, 오전, 09:00–10:30)","value":"무엇을 하는지(예: 마법약 — 스네이프 교수)","subject":"과목 이름만(예: 마법약 — 같은 과목은 늘 같은 이름)","place":"어디서(원문에 있을 때만)","hours":"몇 교시·몇 시간 이어지는지 숫자(원문에 있을 때만)","evidence":[{"n":"12.3","q":"핵심 구절"}]}
 - 요일과 시간(교시·오전·오후·몇 시)이 둘 다 원문에 있을 때만 적는다. 한 번만 있는 일(「내일 아침 시험」)은 적지 않는다. 주인은 [이미 있는 항목]이나 items의 집단·인물 이름 그대로 쓴다.
 ${scoreRules}
-학사일정: 날짜가 정해진 한 번뿐인 행사(입학식 · 연회 · 경기 · 방학 · 시험 · 무도회 같은 것)는 calendar에 적는다. 되풀이되는 수업 · 일과는 timetable로 적는다.
+학사일정: 날짜가 정해진 한 번뿐인 행사(입학식 · 연회 · 경기 · 방학 · 시험 · 무도회 같은 것)는 calendar에 적는다. calendar는 집단 · 장소 전체의 일만이다 — 한 사람만의 기한 · 약속(입학 답장 마감, 누구와의 약속)은 그 사람의 일정(schedule, who에 그 사람)으로 적는다. 되풀이되는 수업 · 일과는 timetable로 적는다.
 {"owner":"그 일정의 주인 — 집단이나 장소 이름(세계 전체면 빈 문자열)","date":"1991-10-31처럼(연도를 모르면 10-31)","end":"기간이면 끝나는 날","when":"날짜로 바꿀 수 없는 말(예: 다음 주 금요일)","name":"행사 이름","place":"장소","who":"참가하는 집단 · 사람","status":"취소되면 cancelled","evidence":[{"n":"12.3","q":"핵심 구절"}]}
 - 날짜가 근거 문장에 실제로 있어야 적는다. 「다음 주」처럼 상대 날짜는 [이야기 속 오늘]이 있을 때만 날짜로 바꾸고, 없으면 when에 글 그대로 둔다. 미뤄졌으면 새 날짜를 적는다(코드가 이전 날짜를 남긴다).
 JSON만 출력: {"items":[...],"relations":[...],"timetable":[...],"calendar":[...]${board ? ',"scores":[...]' : ''}} (적을 게 없으면 빈 배열)`;
@@ -231,7 +248,7 @@ ${cast.length ? cast.join(', ') : '(없음)'}
 ${knownList(entities, text) || '(없음)'}
 
 ${glossed}${part.context.length ? `[앞 내용 — 참고만, 여기서 뽑지 마]\n${part.context.map((m) => line(m, CONTEXT_CHARS)).join('\n')}\n\n` : ''}[새 대화 — 여기서만 뽑아. 문장 앞 숫자가 근거 번호]
-${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) => `${m.number}.${i + 1} ${m.blocks?.[i] ? '[프로필] ' : ''}${t}`).join('\n')}`).join('\n')}`;
+${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) => `${m.number}.${i + 1} ${m.blocks?.[i] === 'status' ? '[상태줄] ' : m.blocks?.[i] ? '[프로필] ' : ''}${t}`).join('\n')}`).join('\n')}`;
   return [
     { role: 'system', content: system },
     { role: 'user', content: user },
@@ -301,6 +318,15 @@ function overlap(value, evidence) {
   return hit / (v.length - 1);
 }
 const FIELD_OVERLAP = { line: 0.5, text: 0.2 };
+/** v0.6.2: whether a sentence says a value — its two-letter pieces in it (Korean), or its words in it (other letters). */
+function saysValue(value, sentence, kind = 'text') {
+  const v = String(value || '').trim();
+  if (!v) return false;
+  if (isKorean(v) && isKorean(sentence)) return overlap(v, sentence) >= Math.max(FIELD_OVERLAP[kind] || 0.2, 0.34);
+  const words = v.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+  const t = String(sentence || '').toLowerCase();
+  return words.length > 0 && words.filter((w) => t.includes(w)).length / words.length >= 0.5;
+}
 /** Fields that name a class rather than repeat the text (성별 from "그", 분류 "관례"): their sentence is enough. */
 /** A 종 value that only says "a person". */
 const HUMAN_SPECIES = /^(사람|인간|인류|human|humans|person|people|mortal|muggle|머글|마녀|마법사|wizard|witch|mage)$/i;
@@ -335,10 +361,16 @@ function checkFields(type, raw, index, itemFound = []) {
     }
     if (!given || typeof given !== 'object' || typeof given.v !== 'string' || !given.v.trim()) continue;
     const refs = (Array.isArray(given.n) ? given.n : given.n != null && given.n !== '' ? [given.n] : []).map((x) => (typeof x === 'object' && x ? x : { n: x }));
-    const found = refs.length ? S.resolveEvidence(refs, index).slice(0, 3) : itemFound;
+    let found = refs.length ? S.resolveEvidence(refs, index).slice(0, 3) : itemFound;
     if (!found.length) {
       droppedFields.push({ key, why: 'no evidence sentence' });
       continue;
+    }
+    // v0.6.2 ③: a status line never backs 외형 · 성격 · 배경 · 가족 (store STATUS_OFF; 메모 in checkItems)
+    if (type === 'person' && STATUS_OFF.has(key) && found.some((p) => p.block === 'status')) {
+      const rest = found.filter((p) => p.block !== 'status');
+      if (!rest.length) { droppedFields.push({ key, why: 'a status line only' }); continue; }
+      found = rest;
     }
     const said = found.map((p) => p.text).join(' ');
     const kind = FIELDS[type]?.find((f) => f.key === key)?.kind || 'text';
@@ -375,7 +407,9 @@ function checkFields(type, raw, index, itemFound = []) {
     fields[key] = given.v;
     fieldEvidence[key] = clip(found.map((p) => p.text).join(' / '), 300);
     // v0.5.0 S: only a profile block says it (not the story yet) — 「아직 드러나지 않음」
-    if (found.every((p) => p.block)) hidden[key] = true;
+    // v0.6.2 ④: field by field — hidden when its evidence is profile sentences only; one story sentence takes it off
+    // (status lines were taken out above). Story sentences elsewhere that say the value: recheck (store.recheckFields).
+    if (found.some((p) => isProfile(p.block)) && !found.some((p) => !p.block)) hidden[key] = true;
   }
   return { fields, fieldEvidence, droppedFields, hidden, rumors, corrections, moved };
 }
@@ -420,6 +454,7 @@ function checkItems(parsed, part, cast) {
     // v0.5.0 P: a passing thing (not used again) is not kept
     if (['rule', 'system', 'schedule'].includes(it.type) && it.lasting === false) { dropped.push({ name, why: 'not lasting' }); continue; }
     const f = checkFields(it.type, it.fields, index, found);
+    const memoOk = !found.every((p) => p.block === 'status');
     // v0.5.1 T: 균형 볼 칸 the world added — each with its own evidence, like a field
     const bal = it.type === 'person' && it.balance && typeof it.balance === 'object' && !Array.isArray(it.balance) ? checkFields('balance', it.balance, index, found) : null;
     if (bal) for (const d of bal.droppedFields) droppedFields.push({ name, ...d, key: `balance.${d.key}` });
@@ -439,7 +474,7 @@ function checkItems(parsed, part, cast) {
       corrections: f.corrections,
       ...(bal && Object.keys(bal.fields).length ? { balance: bal.fields } : {}),
       ...(f.moved.length ? { toTimetable: f.moved } : {}),
-      memo: typeof it.memo === 'string' ? it.memo : '',
+      memo: typeof it.memo === 'string' && memoOk ? it.memo : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
       // v0.5.0 E: group — the place it is at (본거지), a name
@@ -595,4 +630,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { saysValue, segmentBlocks, STATUS_LINE, isProfile, customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };

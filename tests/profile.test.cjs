@@ -60,7 +60,8 @@ test('only the block says it: 「아직 드러나지 않음」 on the card and i
   const { s, w } = world(t, [first], messages);
   await service.runRoom('room');
   let e = s.listEntities(w.worldId).find((x) => x.name === '노을 교수');
-  assert.deepEqual(e.hidden, { personality: true, background: true }, 'appearance has a story sentence too: not hidden');
+  // v0.6.2 ⑨: the profile block read by code also fills the empty 나이 · 성별 (only the block says them)
+  assert.deepEqual(e.hidden, { personality: true, background: true, age: true, gender: true }, 'appearance has a story sentence too: not hidden');
   const text = I.assembleWorld(s.getWorld(w.worldId), s.listEntities(w.worldId), 3000, {}).text;
   assert.match(text, /성격: 말수가 적고 엄격하다 \(아직 드러나지 않음\)/);
   assert.match(text, /배경: 하르트 가문의 셋째 아들 \(아직 드러나지 않음\)/);
@@ -68,7 +69,7 @@ test('only the block says it: 「아직 드러나지 않음」 on the card and i
   // the story says the secret: the mark goes, recorded
   s.applyAuto(w.worldId, [{ type: 'person', match: '노을 교수', name: '노을 교수', fields: { background: '하르트 가문의 셋째 아들' }, fieldEvidence: { background: '"나는 하르트 가문의 셋째다."' } }]);
   e = s.listEntities(w.worldId).find((x) => x.name === '노을 교수');
-  assert.deepEqual(e.hidden, { personality: true });
+  assert.deepEqual(e.hidden, { personality: true, age: true, gender: true });
   const rv = s.listHistory(w.worldId).find((c) => c.action === 'reveal');
   assert.equal(rv.key, 'background');
   s.undoChange(w.worldId, rv.id);

@@ -1,5 +1,5 @@
 'use strict';
-const { FIELDS } = require('./store.cjs');
+const { FIELDS, groupOfPlace } = require('./store.cjs');
 const TT = require('./timetable.cjs');
 const R = require('./roster.cjs');
 const CAL = require('./calendar.cjs');
@@ -154,6 +154,14 @@ function orderEntities(entities, scene = null) {
  * included / omitted are entity IDs. An item that does not fit is left out whole; smaller ones after it can
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
+/**
+ * v0.6.2 ②: a rule or system the reading found in one batch only (seen.n < 2) — 「한 번 나옴」: kept in the world,
+ * not put in {{세계}}. Not one that is pinned, that the person wrote, or whose name says it is a law (법 · 령 · 규칙 · 제도).
+ * One counted before v0.5.1 (no seen) is not judged here; recheck counts it.
+ */
+const LAW_NAME = /(법|령|규칙|제도)/;
+const onceOnly = (e) => (e?.type === 'rule' || e?.type === 'system') && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(String(e.name || '')) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
+
 function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
@@ -175,7 +183,8 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   // 「Here」: the places and groups of the scene, the places they are in (위치) and the bigger groups (소속), the groups
   // the people of the scene belong to. A rule of a place or group not here is left out.
   // Without scene information yet (a fresh start), everything is a candidate in the plain order.
-  let pool = entities || [];
+  const once = (entities || []).filter(onceOnly).length;
+  let pool = (entities || []).filter((e) => !onceOnly(e));
   let skipped = 0;
   const byIdAll = new Map((entities || []).map((x) => [x.entityId, x]));
   const nameOf = (id) => byIdAll.get(id)?.name || '';
@@ -205,6 +214,8 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
       const e = byIdAll.get(id);
       if (e?.type === 'group' && e.base && byIdAll.has(e.base)) add(e.base, here.get(id));
       if (e?.type === 'place') for (const g of entities || []) if (g.type === 'group' && g.base === id) add(g.entityId, here.get(id) + 1);
+      // v0.6.2: a place whose 위치 칸 names a group (교장실 → 호그와트) is in that group: its rules · 시간표 · 학사일정 are here too
+      if (e?.type === 'place') { const g = groupOfPlace(e, entities); if (g) add(g.entityId, here.get(id) + 1); }
     }
     const ruleLike = (e) => ALWAYS.has(e.type);
     const whereKnown = (e) => ruleLike(e) && e.appliesTo && e.appliesTo !== WORLD && byIdAll.has(e.appliesTo);
@@ -304,7 +315,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   if (relLines.length) parts.push(`[관계]\n${relLines.join('\n')}`);
   if (tail.kept.length) parts.push(tail.kept.join('\n'));
   const text = parts.join('\n\n');
-  return { text, chars: text.length, budget, included, omitted, skipped };
+  return { text, chars: text.length, budget, included, omitted, skipped, once };
 }
 
 /** 할 일 12: what {{세계외형}} may hold at most (whole lines only). */
@@ -346,4 +357,4 @@ function assembleLooks(entities, scene, { recent = null, budget = LOOKS_CHARS } 
   return { text: lines.length ? `${head}\n${lines.join('\n')}` : '', included, omitted };
 }
 
-module.exports = { WORLD, shownName, tailLines, CAST_CHARS, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
+module.exports = { onceOnly, LAW_NAME, WORLD, shownName, tailLines, CAST_CHARS, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };

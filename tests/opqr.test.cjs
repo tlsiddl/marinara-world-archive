@@ -22,7 +22,9 @@ function world(t) {
 }
 
 test('O: names, not pieces of sentences — new ones filtered, old ones taken off by 「관계 다시 보기」 (not the person\'s), undoable', async (t) => {
-  for (const ok of ['Starclock School of Stars and Bells', 'the dungeons', "Madam Rue's Robes for All Occasions", '은사슴', 'Rue Makers since 382 B.C.']) assert.ok(nameLike(ok), ok);
+  for (const ok of ['Starclock School of Stars and Bells', "Madam Rue's Robes for All Occasions", '은사슴', 'Rue Makers since 382 B.C.', 'Madam Rue']) assert.ok(nameLike(ok), ok);
+  // v0.6.2 ⑤ (사령탑): a phrase that starts small (「the bar」 · 「third shelf」 — 「the dungeons」 too now) and a lone title or common word are not names
+  for (const no of ['the dungeons', 'the bar', 'third shelf', 'charm for it', 'Professor', 'Goblin', 'Madam']) assert.ok(!nameLike(no), no);
   for (const no of ['Professor Noel pulls the bolt back', 'oil the pivot pin', 'Kneazles know when someone\'s lying', 'tiny, high-walled brick courtyard', '키 큰 검은 머리에 은색 배지를 단 소녀', '"그만해."']) assert.ok(!nameLike(no), no);
   const { s, w, by } = world(t);
   s.applyAuto(w.worldId, [{ type: 'person', name: '노을 교수', aliases: ['Professor Noel', 'Professor Noel pulls the bolt back'] }]);

@@ -219,7 +219,8 @@ test('auto: creates, fills empty fields, replaces its own, never touches hand-wr
   assert.deepEqual(hand.sources, { gender: 'manual' });
 
   const c1 = s.applyAuto(w.worldId, [
-    { type: 'person', name: '한여름', aliases: ['반장'], fields: { gender: '남', age: '17세' }, evidence: '반장은 열일곱이었다' },
+    // v0.6.2 ⑤: a lone role word (「반장」) is not an other name any more — 「여름이」 is
+    { type: 'person', name: '한여름', aliases: ['반장', '여름이'], fields: { gender: '남', age: '17세' }, evidence: '반장은 열일곱이었다' },
     { type: 'place', name: '옥상 정원', fields: { location: '본관 5층 위' }, memo: '열쇠는 사감실', evidence: '옥상 정원' },
     { type: 'dragon', name: 'x' },
     { type: 'person', name: '   ' },
@@ -228,7 +229,7 @@ test('auto: creates, fills empty fields, replaces its own, never touches hand-wr
   const [p] = s.listEntities(w.worldId).filter((e) => e.name === '한여름');
   assert.equal(p.fields.gender, '여', 'hand-written field stays');
   assert.equal(p.fields.age, '17세');
-  assert.deepEqual(p.aliases, ['반장']);
+  assert.deepEqual(p.aliases, ['여름이']);
   assert.deepEqual(p.sources, { gender: 'manual', age: 'auto' });
   const place = s.listEntities(w.worldId).find((e) => e.name === '옥상 정원');
   assert.equal(place.provenance.source, 'auto');
