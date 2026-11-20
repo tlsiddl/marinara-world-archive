@@ -226,7 +226,9 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           else if (!mentions(r.evidence, from) && !mentions(r.evidence, to)) rel.dropped.push({ name: r.from + ' — ' + r.to, why: 'evidence names neither' });
           else resolved.push({ ...r, from: from.entityId, to: to.entityId });
         }
-        const relChanges = [...s.applyRelations(worldId, resolved, meta), ...s.linkAffiliations(worldId, null, meta)];
+        // 소속 칸 changed in this batch (전학 · 배정): the earlier values, so relations to groups they no longer name go.
+        const was = Object.fromEntries(changes.filter((c) => c.action === 'field' && c.key === 'affiliation').map((c) => [c.entityId, c.before || '']));
+        const relChanges = [...s.applyRelations(worldId, resolved, meta), ...s.linkSubgroups(worldId, meta), ...s.linkAffiliations(worldId, null, { ...meta, was })];
         job.relations += relChanges.filter((c) => c.action === 'relation-add').length;
         if (rel.dropped.length) log(`chat ${roomId}: left out relations ${rel.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
         if (world.scoreboard?.name) job.scores += s.addScores(roomId, X.checkScores(parsed, part)).length;
@@ -441,11 +443,26 @@ async function routes(r) {
   r.delete('/worlds/:worldId', handle(async (req) => s().deleteWorld(req.params.worldId, body(req).revision ?? Number(req.query?.revision))));
 
   r.get('/worlds/:worldId/entities', handle(async (req) => ({ entities: s().listEntities(req.params.worldId) })));
-  r.post('/worlds/:worldId/entities', handle(async (req) => s().createEntity(req.params.worldId, body(req))));
-  r.patch('/worlds/:worldId/entities/:entityId', handle(async (req) => {
-    const e = s().updateEntity(req.params.worldId, req.params.entityId, body(req));
-    // 소속 칸이 설정집의 집단을 가리키면 소속 관계도 (코드로, 모델 없이).
+  r.post('/worlds/:worldId/entities', handle(async (req) => {
+    const e = s().createEntity(req.params.worldId, body(req));
+    // v0.5.0: a new person's 소속 칸, or a new group someone's 소속 칸 already names (and the group in it by name).
     if (e.type === 'person') s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation' });
+    if (e.type === 'group') { s().linkSubgroups(req.params.worldId); s().linkAffiliations(req.params.worldId, null, { by: 'affiliation' }); }
+    return e;
+  }));
+  // v0.5.0 구성원 명단: gathered from 소속 by code. Adding / taking off = changing that person's 소속 칸.
+  r.get('/worlds/:worldId/entities/:entityId/members', handle(async (req) => s().roster(req.params.worldId, req.params.entityId)));
+  r.post('/worlds/:worldId/entities/:entityId/members', handle(async (req) => {
+    const b = body(req);
+    if (typeof b.personId !== 'string') throw new ArchiveError(400, 'personId를 보내 주세요.');
+    return s().setMember(req.params.worldId, req.params.entityId, b.personId, b.on !== false);
+  }));
+  r.patch('/worlds/:worldId/entities/:entityId', handle(async (req) => {
+    const was = s().listEntities(req.params.worldId).find((x) => x.entityId === req.params.entityId)?.fields?.affiliation || '';
+    const e = s().updateEntity(req.params.worldId, req.params.entityId, body(req));
+    // 소속 칸이 설정집의 집단을 가리키면 소속 관계도 (코드로, 모델 없이). v0.5.0: 더는 안 가리키는 집단과의 소속은 끝남.
+    if (e.type === 'person') s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'affiliation', was: { [e.entityId]: was } });
+    if (e.type === 'group') { s().linkSubgroups(req.params.worldId); s().linkAffiliations(req.params.worldId, null, { by: 'affiliation' }); }
     return e;
   }));
   // 할 일 6 — 검색 (code only). types=person,place …; the glossary of the rooms that read this world adds English names.
@@ -501,7 +518,14 @@ async function routes(r) {
   r.post('/worlds/:worldId/duplicates/dismiss', handle(async (req) => s().dismissPair(req.params.worldId, body(req).a, body(req).b)));
   r.post('/worlds/:worldId/merge', handle(async (req) => s().mergeEntities(req.params.worldId, body(req))));
   r.get('/worlds/:worldId/history', handle(async (req) => ({ changes: s().listHistory(req.params.worldId, Math.min(Number(req.query?.limit) || 200, 1000)) })));
-  r.post('/worlds/:worldId/history/:changeId/undo', handle(async (req) => s().undoChange(req.params.worldId, req.params.changeId)));
+  r.post('/worlds/:worldId/history/:changeId/undo', handle(async (req) => {
+    const out = s().undoChange(req.params.worldId, req.params.changeId);
+    // v0.5.0: a 소속 칸 back as it was → the 소속 made from it follow (the 구성원 명단 too).
+    const c = s().readHistory(req.params.worldId).changes.find((x) => x.id === req.params.changeId);
+    const e = c && s().listEntities(req.params.worldId).find((x) => x.entityId === c.entityId);
+    if (e?.type === 'person' && (c.action === 'edit' || (c.action === 'field' && c.key === 'affiliation'))) s().linkAffiliations(req.params.worldId, [e.entityId], { by: 'undo' });
+    return out;
+  }));
   r.get('/connections', handle(async () => ({ connections: await engineApi().listConnections() })));
   r.get('/rooms/:roomId/entities', handle(async (req) => { s().getRoom(req.params.roomId); return roomEntities(req.params.roomId); }));
   r.get('/rooms/:roomId/lookup', handle(async (req) => { s().getRoom(req.params.roomId); return lookup(req.params.roomId, String(req.query?.name || '')); }));

@@ -168,6 +168,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
 .sec{padding:16px 0 4px;border-top:1px dashed var(--wa-line);margin-top:14px}
 .sec small,.state small{display:block;font:10px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted);margin-bottom:6px}
 .sec p,.state p{margin:0;white-space:pre-wrap;text-align:justify;overflow-wrap:anywhere}
+.roster-add{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.roster-add select{max-width:100%}
 .state{margin-top:18px;padding:14px 16px;border:1.5px dashed var(--wa-ink);border-radius:3px}
 .meta{margin-top:20px;font:10px var(--wa-mono);letter-spacing:1px;color:var(--wa-muted)}
 .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:20px}
@@ -579,6 +580,35 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     return c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 ? '이에요' : '예요';
   }
 
+  /** 구성원 명단 (v0.5.0) — the same walk as world-archive/lib/roster.cjs: 소속 relations, smaller groups' people too. */
+  function rosterOf(groupId) {
+    const byId = new Map(st.entities.map((x) => [x.entityId, x]));
+    const aff = (st.relations || []).filter((r) => r.type === '소속');
+    const order = [groupId];
+    const seen = new Set(order);
+    const at = new Map();
+    for (let i = 0; i < order.length; i++) {
+      for (const r of aff) {
+        const other = r.from === order[i] ? r.to : r.to === order[i] ? r.from : null;
+        const o = other && byId.get(other);
+        if (!o) continue;
+        if (o.type === 'person') at.set(other, order[i]);
+        else if (o.type === 'group' && r.from === other && !seen.has(other)) { seen.add(other); order.push(other); }
+      }
+    }
+    const rank = new Map(order.map((id, i) => [id, i]));
+    return [...at].map(([pid, gid]) => ({ entityId: pid, name: byId.get(pid).name, viaId: gid === groupId ? null : gid, via: gid === groupId ? null : byId.get(gid).name }))
+      .sort((a, b) => rank.get(a.viaId || groupId) - rank.get(b.viaId || groupId) || a.name.localeCompare(b.name, 'ko'));
+  }
+  function rosterHtml(g) {
+    const list = rosterOf(g.entityId);
+    const inList = new Set(list.map((m) => m.entityId));
+    const rows = list.map((m) => `<button class="quiet" type="button" data-act="open" data-id="${esc(m.entityId)}">${esc(m.name)}${m.via ? ` <small>· ${esc(m.via)}</small>` : ''}</button><button class="quiet" type="button" data-act="member-off" data-group="${esc(m.viaId || g.entityId)}" data-id="${esc(m.entityId)}" title="${esc(m.via || g.name)}의 명단에서 빼기 — 그 인물의 소속 칸에서 이 이름을 지웁니다" aria-label="${esc(m.name)} 빼기">×</button>`).join('');
+    const others = st.entities.filter((x) => x.type === 'person' && !inList.has(x.entityId)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    const add = others.length ? `<span class="roster-add"><select id="rosterPick" aria-label="명단에 더할 인물">${others.map((x) => `<option value="${esc(x.entityId)}">${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="member-add" data-group="${esc(g.entityId)}">명단에 더하기</button></span>` : '';
+    return `<div class="sec"><small>구성원 명단 · ${list.length}명 · 인물마다 적힌 소속으로 모음</small><p>${rows || '<span class="sub">아직 이 집단에 소속된 인물이 없습니다.</span>'}</p>${add}</div>`;
+  }
+
   function detailHtml(e) {
     const k = KIND[e.type];
     const d = defs(e.type);
@@ -614,7 +644,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
-        ${secs}${extra}${memo}${relSec}
+        ${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
         ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
@@ -1015,6 +1045,17 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await loadEntities();
       await loadRoom();
     }, '번역 단어장의 이름으로 바꿨습니다.'),
+    // v0.5.0 명단: adding / taking off changes that person's 소속 칸 (in 기록, undoable).
+    'member-add': (b) => run(async () => {
+      const personId = root.getElementById('rosterPick')?.value;
+      if (!personId) return;
+      await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.group}/members`, { personId, on: true });
+      await loadEntities();
+    }, '명단에 더했습니다. 그 인물의 소속 칸에도 적었습니다.'),
+    'member-off': (b) => run(async () => {
+      await api('POST', `/worlds/${st.worldId}/entities/${b.dataset.group}/members`, { personId: b.dataset.id, on: false });
+      await loadEntities();
+    }, '명단에서 뺐습니다. 그 인물의 소속 칸에서도 지웠습니다(기록에서 되돌릴 수 있습니다).'),
     pin: (b) => run(async () => {
       const e = st.entities.find((x) => x.entityId === b.dataset.id);
       await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, { pinned: !e.pinned, revision: e.revision });

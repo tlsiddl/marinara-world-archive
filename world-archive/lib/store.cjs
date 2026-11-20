@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { findPairs, describedPairs, speciesPairs } = require('./same.cjs');
+const { rosterOf } = require('./roster.cjs');
 const N = require('./names.cjs');
 
 const SCHEMA = 1;
@@ -129,6 +130,13 @@ const isDescriptiveName = (n) => /의\s/.test(String(n || ''));
 /** 「그리핀도르 1학년 무리」, 「학생들」: a crowd, not a person. */
 const isGroupName = (n) => /(무리|일행|들)$/.test(String(n || '').trim());
 const squashName = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
+/** Whether a 소속 text names a group (its name or other name, whole, without spaces). */
+const namesGroup = (text, g) => {
+  const t = squashName(text);
+  return Boolean(t && g?.name) && [g.name, ...(g.aliases || [])].some((n) => squashName(n).length >= 2 && t.includes(squashName(n)));
+};
+/** What a longer group name may add and still be the same group, not one inside it (「슬리데린 기숙사」 is 「슬리데린」). */
+const SAME_GROUP_SUFFIX = new Set(['기숙사', '가', '가문', '집안', '일가', '학교', '마법학교', '학원', '기사단', '단', '회', '조직', 'house', 'family', 'school']);
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -1299,21 +1307,105 @@ class Archive {
   linkAffiliations(worldId, ids = null, meta = {}) {
     this.getWorld(worldId);
     const doc = this.readEntities(worldId);
-    const squashed = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
     const groups = doc.entities.filter((e) => e.type === 'group');
     const exists = new Set(doc.relations.map(relKey));
     const found = [];
+    // v0.5.0 (명단은 지금 상태): the 소속 칸 changed (전학 · 배정) → a relation to a group it no longer names goes. Those
+    // made from the 소속 칸 always follow it; the reader's go when the earlier value (meta.was: { personId: before })
+    // named that group. The person's own relations stay.
+    const stale = [];
     for (const p of doc.entities) {
       if (p.type !== 'person' || (ids && !ids.includes(p.entityId))) continue;
-      const text = squashed(p.fields?.affiliation);
-      if (!text) continue;
+      const named = new Set(groups.filter((g) => namesGroup(p.fields?.affiliation, g)).map((g) => g.entityId));
+      const was = typeof meta.was?.[p.entityId] === 'string' ? meta.was[p.entityId] : null;
+      for (const r of doc.relations) {
+        if (r.type !== '소속' || r.source === 'manual' || (r.from !== p.entityId && r.to !== p.entityId)) continue;
+        const g = groups.find((x) => x.entityId === (r.from === p.entityId ? r.to : r.from));
+        if (!g || named.has(g.entityId)) continue;
+        if (String(r.evidence || '').startsWith('소속:') || (was !== null && namesGroup(was, g))) stale.push(r);
+      }
       for (const g of groups) {
-        if (!g.name || ![g.name, ...g.aliases].some((n) => squashed(n).length >= 2 && text.includes(squashed(n)))) continue;
+        if (!named.has(g.entityId)) continue;
         const r = { from: p.entityId, to: g.entityId, type: '소속', note: '', evidence: '소속: ' + p.fields.affiliation };
         if (!exists.has(relKey(r))) found.push(r);
       }
     }
-    return this.applyRelations(worldId, found, { ...meta, by: meta.by || 'affiliation' });
+    const by = meta.by || 'affiliation';
+    const gone = [];
+    if (stale.length) {
+      doc.relations = doc.relations.filter((r) => !stale.includes(r));
+      this.writeJson(this.entityFile(worldId), doc);
+      gone.push(...stale.map((r) => ({ ...this.relationLog(doc, r, 'relation-remove', by, meta), why: 'affiliation changed' })));
+      this.pushHistory(worldId, gone);
+    }
+    return [...gone, ...this.applyRelations(worldId, found, { ...meta, by })];
+  }
+
+  /**
+   * 작은 집단 → 큰 집단, by code (v0.5.0): a group whose name begins with another group's name or other name
+   * (「슬리데린 1학년」 → 「슬리데린」) gets a 소속 relation to it, unless the two are already joined either way.
+   */
+  linkSubgroups(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const groups = doc.entities.filter((e) => e.type === 'group');
+    const joined = new Set(doc.relations.filter((r) => r.type === '소속').flatMap((r) => [r.from + '|' + r.to, r.to + '|' + r.from]));
+    const found = [];
+    for (const a of groups) {
+      const an = squashName(a.name);
+      // The longest name it begins with: 「슬리데린 1학년 여학생」 joins 「슬리데린 1학년」, not 「슬리데린」 as well.
+      let best = null;
+      for (const b of groups) {
+        if (b === a) continue;
+        const len = Math.max(0, ...[b.name, ...(b.aliases || [])].map(squashName)
+          .filter((k) => k.length >= 2 && an.length > k.length && an.startsWith(k) && !SAME_GROUP_SUFFIX.has(an.slice(k.length)))
+          .map((k) => k.length));
+        if (len && (!best || len > best.len)) best = { b, len };
+      }
+      if (!best || joined.has(a.entityId + '|' + best.b.entityId)) continue;
+      found.push({ from: a.entityId, to: best.b.entityId, type: '소속', note: '', evidence: '이름: ' + a.name });
+    }
+    return this.applyRelations(worldId, found, { ...meta, by: meta.by || 'subgroup' });
+  }
+
+  /** 구성원 명단 of a group (v0.5.0): gathered from the 소속 relations by code; see roster.cjs. */
+  roster(worldId, groupId) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const out = rosterOf(doc.entities, doc.relations, groupId);
+    if (!out) throw new ArchiveError(404, '집단을 찾지 못했습니다.');
+    return out;
+  }
+
+  /**
+   * Adding someone to a group's list, or taking them off, is changing their 소속 칸 (v0.5.0): on adds the group's name
+   * to it, off takes the group's names out and ends the 소속 relations between the two (the person's own too — they
+   * asked). Each step is in the history like any edit and can be undone.
+   */
+  setMember(worldId, groupId, personId, on) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const g = doc.entities.find((e) => e.entityId === groupId && e.type === 'group');
+    const p = doc.entities.find((e) => e.entityId === personId && e.type === 'person');
+    if (!g || !p) throw new ArchiveError(404, g ? '인물을 찾지 못했습니다.' : '집단을 찾지 못했습니다.');
+    const before = p.fields?.affiliation || '';
+    let after = before;
+    if (on) {
+      if (!namesGroup(before, g)) after = before ? `${before}, ${g.name}` : g.name;
+    } else {
+      const names = [g.name, ...(g.aliases || [])].filter((n) => String(n).trim().length >= 2).sort((x, y) => y.length - x.length);
+      for (const n of names) after = after.split(n).join(' ');
+      after = after.replace(/\s*([,·/])\s*(?=[,·/]|$)/g, '').replace(/^[\s,·/]+|[\s,·/]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+    }
+    if (after !== before) this.updateEntity(worldId, personId, { revision: p.revision, fields: { ...(p.fields || {}), affiliation: after } });
+    const changes = this.linkAffiliations(worldId, [personId], { by: 'person', was: { [personId]: before } });
+    if (!on) {
+      for (const r of this.readEntities(worldId).relations.filter((r) => r.type === '소속' && [r.from, r.to].includes(personId) && [r.from, r.to].includes(groupId))) {
+        this.deleteRelation(worldId, r.relationId);
+        changes.push({ action: 'relation-remove' });
+      }
+    }
+    return { affiliation: { before, after }, relations: changes.length, roster: this.roster(worldId, groupId) };
   }
 
   /**

@@ -394,3 +394,23 @@ test('{{세계외형}}: people in the scene with an appearance only, the latest 
   assert.equal(service.renderLooks({ chatId: 'room' }), '', 'unlinked: empty');
   assert.equal(service.renderLooks(null), '');
 });
+
+test('v0.5.0 구성원 명단 over HTTP: a new group joins the people whose 소속 칸 names it; add / take off; undo follows', async (t) => {
+  const { call } = setup(t);
+  const id = (await call('POST', `${A}/worlds`, { name: '별시계 학원' })).data.worldId;
+  const p = (await call('POST', `${A}/worlds/${id}/entities`, { type: 'person', name: '하윤', fields: { affiliation: '은사슴 1학년' } })).data;
+  const big = (await call('POST', `${A}/worlds/${id}/entities`, { type: 'group', name: '은사슴' })).data;
+  const small = (await call('POST', `${A}/worlds/${id}/entities`, { type: 'group', name: '은사슴 1학년' })).data;
+  const names = async (g) => (await call('GET', `${A}/worlds/${id}/entities/${g}/members`)).data.members.map((m) => m.name + (m.via ? '·' + m.via : ''));
+  assert.deepEqual(await names(small.entityId), ['하윤'], 'a group made after the person still gets them');
+  assert.deepEqual(await names(big.entityId), ['하윤·은사슴 1학년']);
+  const off = await call('POST', `${A}/worlds/${id}/entities/${small.entityId}/members`, { personId: p.entityId, on: false });
+  assert.equal(off.status, 200);
+  assert.deepEqual(off.data.affiliation, { before: '은사슴 1학년', after: '' });
+  assert.deepEqual(await names(big.entityId), []);
+  const edit = (await call('GET', `${A}/worlds/${id}/history`)).data.changes.find((c) => c.action === 'edit');
+  assert.equal((await call('POST', `${A}/worlds/${id}/history/${edit.id}/undo`)).status, 200);
+  assert.deepEqual(await names(small.entityId), ['하윤'], 'undo brings the 소속 칸 back and the list with it');
+  assert.equal((await call('POST', `${A}/worlds/${id}/entities/${small.entityId}/members`, {})).status, 400);
+  assert.equal((await call('GET', `${A}/worlds/${id}/entities/${p.entityId}/members`)).status, 404);
+});
