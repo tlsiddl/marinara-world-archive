@@ -678,7 +678,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     const d = defs(e.type);
     const f = e.fields || {};
     const src = e.sources || {};
-    const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '');
+    const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '') + (e.hidden?.[k] ? '<span class="auto-tag" title="프로필 블록에만 있고 이야기에는 아직 나오지 않았습니다">· 아직 드러나지 않음</span>' : '');
     // 할 일 10: the earlier value small under the field; a newer value from the story for a field the person wrote.
     const was = (k) => (e.past?.[k]?.[0] ? `<small class="past">이전: ${esc(e.past[k][0].value)} <button class="quiet" type="button" data-act="past-prompt" data-id="${esc(e.entityId)}" data-key="${esc(k)}" title="켜면 {{세계}}에 「(과거: …)」가 붙습니다">${e.pastInPrompt?.[k] ? '프롬프트에 넣는 중 · 끄기' : '프롬프트에도 넣기'}</button></small>` : '');
     const wait = (k) => (e.pending?.[k] ? `<small class="pending">대화에서는 「${esc(e.pending[k].value)}」${copula(e.pending[k].value)} <button class="quiet" type="button" data-act="pending" data-id="${esc(e.entityId)}" data-key="${esc(k)}">적용</button><button class="quiet" type="button" data-act="pending-drop" data-id="${esc(e.entityId)}" data-key="${esc(k)}">무시</button></small>` : '');
@@ -889,6 +889,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     cell: (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: ${c.before ? `${esc(c.before)} → ` : ''}${c.after ? esc(c.after) : '지움'}`,
     'cell-pending': (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: 대화에서는 「${esc(c.after)}」`,
     base: (c) => `<b>${esc(c.name)}</b> · 본거지: ${esc(c.beforeName || '없음')} → ${esc(c.afterName || '없음')}`,
+    reveal: (c) => `<b>${esc(c.name)}</b> · ${esc((st.fields[c.type] || []).find((f) => f.key === c.key)?.label || c.key)}: 이야기에 드러남`,
     applies: (c) => `<b>${esc(c.name)}</b> · 적용되는 곳: ${esc(c.beforeName || '세계 전체')} → ${esc(c.afterName || '세계 전체')}`,
     'alias-move': (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.alias)}」을(를) 새 집단 「${esc(c.to)}」(으)로 옮김`,
     delete: (c) => `<b>${esc(c.name)}</b> 지움${c.relations?.length ? ` · 관계 ${c.relations.length}개도 함께` : ''}`,

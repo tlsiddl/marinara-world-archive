@@ -51,10 +51,43 @@ function batches(settled, start) {
       i++;
     }
     const first = i - batch.length;
-    const numbered = batch.map((m, k) => ({ ...m, number: first + k + 1, sentences: S.segment(clip(m.content, MESSAGE_CHARS)) }));
+    const numbered = batch.map((m, k) => ({ ...m, number: first + k + 1, ...segmentBlocks(clip(m.content, MESSAGE_CHARS)) }));
     out.push({ batch: numbered, context: settled.slice(Math.max(0, first - CONTEXT_MESSAGES), first), end: i });
   }
   return out;
+}
+
+/**
+ * v0.5.0 G: a message split into numbered sentences as before, each marked when it is inside a profile block the reply
+ * carries (<npc_profile> · <world_profile>): blocks[i] is that block's tag or null. The tags themselves are not
+ * sentences. <*_update> blocks are read like the story (no rule of their own). A message with no block: the same
+ * sentences as S.segment.
+ */
+const PROFILE_BLOCK = /<(npc_profile|world_profile)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+function segmentBlocks(text) {
+  const t = String(text || '');
+  if (!/<(npc_profile|world_profile)\b/i.test(t)) {
+    const sentences = S.segment(t);
+    return { sentences, blocks: sentences.map(() => null) };
+  }
+  const sentences = [];
+  const blocks = [];
+  let at = 0;
+  const add = (part, block) => { for (const x of S.segment(part)) { sentences.push(x); blocks.push(block); } };
+  for (const m of t.matchAll(PROFILE_BLOCK)) {
+    add(t.slice(at, m.index), null);
+    add(m[2], m[1].toLowerCase());
+    at = m.index + m[0].length;
+  }
+  add(t.slice(at), null);
+  return { sentences, blocks };
+}
+/** The batch's sentence index (vendor), each entry knowing whether it is in a profile block. */
+function indexBlocks(batch) {
+  const index = S.indexBatch(batch);
+  const byNumber = new Map(batch.map((m) => [m.number, m]));
+  for (const p of index.values()) p.block = byNumber.get(p.number)?.blocks?.[p.sentence - 1] || null;
+  return index;
 }
 
 const line = (m, max) => `[${m.speaker}] ${clip(m.content.trim(), max)}`;
@@ -150,6 +183,7 @@ ${fieldGuide()}
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
   좋은 예: "오른팔이 부러져 붕대를 감고 다님", "기사단에서 쫓겨나 항구 창고에서 지냄"
 - 각 칸의 뜻에 맞는 값만 넣는다(위계 칸에는 위계·역할만, 위치 칸에는 위치만).
+- [프로필] 표시가 붙은 문장은 답변에 붙은 프로필 블록(<npc_profile> · <world_profile>)이다. 이야기에 아직 나오지 않았어도 확정된 설정으로 받는다. 칸은 이렇게 맞춘다: 이름/나이/성별 → name · age · gender, 외형과 옷차림 → appearance, 태도와 주요 성격 → personality, 그 밖에 눈에 띄는 것 → background나 memo(며칠 뒤에도 사실일 것만). 같은 사실이 본문과 프로필에 둘 다 있으면 항목 · 칸을 하나로 적고 n에 둘 다 적는다. 이미 있는 항목이면 match로 잇는다.
 - 집단의 members(구성원)에는 규모·구성(예: 1학년 다섯 명, 여학생 둘)만 쓰고 사람 이름을 늘어놓지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
 
 같은 사람 잇기: [이미 있는 항목]의 인물을 성만, 이름만, 직함(반장, 사감, 교수)으로 부르면 새로 만들지 말고 match에 그 인물 이름을 적고, 그 호칭은 aliases에 넣는다. 같은 사람인지 애매하면 이번에는 만들지 않는다(다음 대화에서 다시 본다).
@@ -181,7 +215,7 @@ ${cast.length ? cast.join(', ') : '(없음)'}
 ${knownList(entities, text) || '(없음)'}
 
 ${glossed}${part.context.length ? `[앞 내용 — 참고만, 여기서 뽑지 마]\n${part.context.map((m) => line(m, CONTEXT_CHARS)).join('\n')}\n\n` : ''}[새 대화 — 여기서만 뽑아. 문장 앞 숫자가 근거 번호]
-${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) => `${m.number}.${i + 1} ${t}`).join('\n')}`).join('\n')}`;
+${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) => `${m.number}.${i + 1} ${m.blocks?.[i] ? '[프로필] ' : ''}${t}`).join('\n')}`).join('\n')}`;
   return [
     { role: 'system', content: system },
     { role: 'user', content: user },
@@ -268,7 +302,8 @@ function checkFields(type, raw, index, itemFound = []) {
   const fields = {};
   const fieldEvidence = {};
   const droppedFields = [];
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields };
+  const hidden = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields, hidden };
   for (const [key, given] of Object.entries(raw)) {
     // 종 is for a being that is not a person: "사람" (or the like) stays empty, which means unknown.
     if (type === 'person' && key === 'species' && HUMAN_SPECIES.test(String((typeof given === 'string' ? given : given?.v) || '').trim())) {
@@ -294,8 +329,10 @@ function checkFields(type, raw, index, itemFound = []) {
     }
     fields[key] = given.v;
     fieldEvidence[key] = clip(found.map((p) => p.text).join(' / '), 300);
+    // v0.5.0 S: only a profile block says it (not the story yet) — 「아직 드러나지 않음」
+    if (found.every((p) => p.block)) hidden[key] = true;
   }
-  return { fields, fieldEvidence, droppedFields };
+  return { fields, fieldEvidence, droppedFields, hidden };
 }
 
 /**
@@ -309,7 +346,7 @@ function checkFields(type, raw, index, itemFound = []) {
 function checkItems(parsed, part, cast) {
   const list = Array.isArray(parsed?.items) ? parsed.items : [];
   const text = squash(part.batch.map((m) => m.content).join('\n'));
-  const index = S.indexBatch(part.batch);
+  const index = indexBlocks(part.batch);
   const castSet = new Set(cast.map(squash));
   // For settings that are not people, places or groups: a name about a card character ("이리나의 지팡이") is the
   // character's own detail, not the world's. The full name and the first word of it (the given name) are looked for.
@@ -344,6 +381,7 @@ function checkItems(parsed, part, cast) {
       match: typeof it.match === 'string' && it.match.trim() ? it.match.trim() : null,
       fields: f.fields,
       fieldEvidence: f.fieldEvidence,
+      hidden: f.hidden,
       memo: typeof it.memo === 'string' ? it.memo : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
@@ -364,7 +402,7 @@ function checkItems(parsed, part, cast) {
  */
 function checkRelations(parsed, part, cast) {
   const list = Array.isArray(parsed?.relations) ? parsed.relations : [];
-  const index = S.indexBatch(part.batch);
+  const index = indexBlocks(part.batch);
   const castSet = new Set(cast.map(squash));
   const relations = [];
   const dropped = [];
@@ -393,7 +431,7 @@ function checkRelations(parsed, part, cast) {
  */
 function checkTimetable(parsed, part, cast) {
   const list = Array.isArray(parsed?.timetable) ? parsed.timetable : [];
-  const index = S.indexBatch(part.batch);
+  const index = indexBlocks(part.batch);
   const castSet = new Set(cast.map(squash));
   const cells = [];
   const dropped = [];
@@ -423,7 +461,7 @@ function checkTimetable(parsed, part, cast) {
  */
 function checkScores(parsed, part) {
   const list = Array.isArray(parsed?.scores) ? parsed.scores : [];
-  const index = S.indexBatch(part.batch);
+  const index = indexBlocks(part.batch);
   const out = [];
   for (const r of list) {
     if (!r || typeof r !== 'object' || typeof r.target !== 'string' || !r.target.trim()) continue;

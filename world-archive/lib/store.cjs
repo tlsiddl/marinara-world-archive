@@ -431,6 +431,7 @@ function validEntity(e) {
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
     (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
+    (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
     (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
@@ -730,6 +731,10 @@ class Archive {
       for (const k of Object.keys(entity.pending)) if ((next.fields[k] || '') !== (entity.fields?.[k] || '')) delete entity.pending[k];
     }
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
+    if (entity.hidden) {
+      for (const k of Object.keys(entity.hidden)) if ((before.fields || {})[k] !== (entity.fields || {})[k]) delete entity.hidden[k];
+      if (!Object.keys(entity.hidden).length) delete entity.hidden;
+    }
     this.writeJson(this.entityFile(worldId), doc);
     const keys = [...new Set([...Object.keys(before.fields || {}), ...Object.keys(entity.fields || {})])].filter((k) => (before.fields || {})[k] !== (entity.fields || {})[k]);
     for (const k of ['name', 'type', 'description', 'pinned']) if (JSON.stringify(before[k]) !== JSON.stringify(entity[k])) keys.push(k);
@@ -853,6 +858,9 @@ class Archive {
           createdAt: t,
           updatedAt: t,
         };
+        // v0.5.0 S: fields only a profile block says
+        const hid = isObject(item.hidden) ? Object.keys(item.hidden).filter((k) => item.hidden[k] === true && entity.fields[k]) : [];
+        if (hid.length) entity.hidden = Object.fromEntries(hid.map((k) => [k, true]));
         if (APPLIES_TYPES.has(item.type) && item.appliesTo && (item.appliesTo === WORLD || doc.entities.some((x) => x.entityId === item.appliesTo && APPLIES_TO.has(x.type)))) {
           entity.appliesTo = item.appliesTo;
           entity.sources.appliesTo = 'auto';
@@ -868,6 +876,16 @@ class Archive {
         if (e.type !== item.type && !FIELDS[e.type].some((f) => f.key === key)) continue;
         const before = e.fields[key] || '';
         const said = isObject(item.fieldEvidence) && typeof item.fieldEvidence[key] === 'string' ? item.fieldEvidence[key].slice(0, 300) : evidence;
+        // v0.5.0 G · S: what only a profile block says fills an empty field only, marked 「아직 드러나지 않음」; the story
+        // saying it later takes the mark off (recorded)
+        const fromBlock = isObject(item.hidden) && item.hidden[key] === true;
+        if (fromBlock && before) continue;
+        if (!fromBlock && e.hidden?.[key]) {
+          delete e.hidden[key];
+          if (!Object.keys(e.hidden).length) delete e.hidden;
+          touched = true;
+          log({ entityId: e.entityId, name: e.name, type: e.type, action: 'reveal', key, before: '', after: before === value ? value : value, evidence: said });
+        }
         if (before === value) {
           if (e.pending?.[key]) (delete e.pending[key], (touched = true)); // the story came back to what the person wrote
           continue;
@@ -884,8 +902,9 @@ class Archive {
         if (before) e.past = { ...(e.past || {}), [key]: [{ value: before, until: t, evidence: said }, ...((e.past || {})[key] || [])].slice(0, PAST_MAX) };
         e.fields[key] = value;
         e.sources[key] = 'auto';
+        if (fromBlock) e.hidden = { ...(e.hidden || {}), [key]: true };
         touched = true;
-        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said });
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before, after: value, evidence: said, ...(fromBlock ? { hidden: true } : {}) });
       }
       const known = new Set([e.name, ...e.aliases].map(norm));
       for (const a of [name, ...aliases]) {
@@ -991,6 +1010,8 @@ class Archive {
         }
         if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
+      } else if (c.action === 'reveal') {
+        e.hidden = { ...(e.hidden || {}), [c.key]: true };
       } else if (c.action === 'base') {
         if ((e.base || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.base = c.before; else delete e.base;
