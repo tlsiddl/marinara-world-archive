@@ -120,6 +120,10 @@ const BUDGET_MAX = 20000;
 const BUDGET_DEFAULT = 3000;
 const AUTO_EVERY = { min: 2, max: 50, default: 6 };
 const HISTORY_MAX = 1000;
+/** v0.5.1 T: 균형 볼 칸 a world may have (default 성별). */
+const BALANCE_MAX = 4;
+/** v0.5.1 T: the 균형 볼 칸 values the reader gave for a person — only the labels the world asks for (meta.balance). */
+const balanceOf = (item, meta) => (item.type === 'person' && isObject(item.balance) && Array.isArray(meta.balance) ? Object.entries(item.balance).filter(([k, v]) => meta.balance.includes(k) && typeof v === 'string' && v.trim()).map(([k, v]) => [k, v.trim().slice(0, 120)]) : []);
 const SOURCES = ['manual', 'auto'];
 const INJECT_MODES = ['all', 'scene'];
 /** Relations between two settings (사령탑 할 일 3). Matched as an unordered pair + kind. */
@@ -435,6 +439,8 @@ function validWorld(w) {
     (w.auto === undefined || isObject(w.auto)) &&
     (w.yearStart === undefined || (Number.isInteger(w.yearStart) && w.yearStart >= 1 && w.yearStart <= 12)) &&
     (w.nameStyle === undefined || ['auto', 'ko', 'original'].includes(w.nameStyle)) &&
+    (w.tail === undefined || isObject(w.tail)) &&
+    (w.balance === undefined || (Array.isArray(w.balance) && w.balance.every((x) => typeof x === 'string'))) &&
     typeof w.createdAt === 'string' &&
     typeof w.updatedAt === 'string' &&
     Number.isSafeInteger(w.revision) &&
@@ -642,6 +648,17 @@ class Archive {
     if (body.nameStyle !== undefined) {
       if (!['auto', 'ko', 'original'].includes(body.nameStyle)) throw new ArchiveError(400, '이름 표기는 auto · ko · original 중 하나입니다.');
       next.nameStyle = body.nameStyle;
+      changed = true;
+    }
+    // v0.5.1 T: the two last lines of {{세계}} (on by default) and the 균형 볼 칸 (default 성별)
+    if (body.tail !== undefined) {
+      if (!isObject(body.tail) || Object.entries(body.tail).some(([k, v]) => !['cast', 'balance'].includes(k) || typeof v !== 'boolean')) throw new ArchiveError(400, 'tail은 { cast, balance } 켜기/끄기(true · false)입니다.');
+      next.tail = { ...(world.tail || {}), ...body.tail };
+      changed = true;
+    }
+    if (body.balance !== undefined) {
+      if (!Array.isArray(body.balance) || body.balance.length > BALANCE_MAX || body.balance.some((x) => typeof x !== 'string' || !x.trim() || x.trim().length > 20)) throw new ArchiveError(400, `균형 볼 칸은 1~20자 이름 ${BALANCE_MAX}개까지입니다.`);
+      next.balance = [...new Set(body.balance.map((x) => x.trim()))];
       changed = true;
     }
     if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
@@ -853,6 +870,8 @@ class Archive {
     const changes = [];
     const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
     let anyTouched = false;
+    // v0.5.1 T: which batch this is — a setting spoken of in two batches or more comes back (반복 등장)
+    const batchKey = Array.isArray(meta.messageIds) && meta.messageIds.length ? String(meta.messageIds[0]) : null;
     const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
     const norm = (x) => String(x || '').normalize('NFC').trim().toLowerCase();
     const findEntity = (item) => {
@@ -917,6 +936,9 @@ class Archive {
           entity.appliesTo = item.appliesTo;
           entity.sources.appliesTo = 'auto';
         }
+        if (batchKey) entity.seen = { n: 1, last: batchKey };
+        const bal = balanceOf(item, meta);
+        if (bal.length) entity.extra = bal.map(([label, value]) => ({ label, value, source: 'auto' }));
         doc.entities.push(entity);
         log({ entityId: entity.entityId, name, type: item.type, action: 'create', evidence });
         continue;
@@ -924,6 +946,18 @@ class Archive {
       const e = found;
       e.sources = e.sources || {};
       let touched = false;
+      // v0.5.1 T: one more batch spoke of it (반복 등장: two or more) — not a change of the setting, no revision
+      if (batchKey && e.seen?.last !== batchKey) { e.seen = { n: (e.seen?.n || 1) + 1, last: batchKey }; anyTouched = true; }
+      // v0.5.1 T: 균형 볼 칸 the world added (the person's 추가 칸) — an entry the person wrote is never written over
+      for (const [label, value] of balanceOf(item, meta)) {
+        e.extra = Array.isArray(e.extra) ? e.extra : [];
+        const x = e.extra.find((y) => y.label === label);
+        if (x && (x.source !== 'auto' || x.value === value)) continue;
+        const before = x ? x.value : '';
+        if (x) x.value = value; else e.extra.push({ label, value, source: 'auto' });
+        touched = true;
+        log({ entityId: e.entityId, name: e.name, type: e.type, action: 'extra', key: label, before, after: value, evidence });
+      }
       for (const [key, value] of Object.entries(fields)) {
         if (e.type !== item.type && !FIELDS[e.type].some((f) => f.key === key)) continue;
         const before = e.fields[key] || '';
@@ -1081,6 +1115,10 @@ class Archive {
         else { delete e.rumors[c.key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
       } else if (c.action === 'reveal') {
         e.hidden = { ...(e.hidden || {}), [c.key]: true };
+      } else if (c.action === 'extra') {
+        const x = (e.extra || []).find((y) => y.label === c.key);
+        if (!x || x.value !== c.after || x.source !== 'auto') throw new ArchiveError(409, later);
+        if (c.before) x.value = c.before; else e.extra = e.extra.filter((y) => y !== x);
       } else if (c.action === 'room') {
         if ((e.room || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.room = c.before; else delete e.room;
@@ -1177,6 +1215,24 @@ class Archive {
     const c = { id: randomUUID(), at: g.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: groupId, entityIds: [groupId, after || before].filter(Boolean), name: g.name, type: 'group', action: 'base', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
     this.pushHistory(worldId, [c]);
     return c;
+  }
+
+  /**
+   * v0.5.1 T: the people who come back (반복 등장) — pinned, or spoken of in two batches or more. Settings from before
+   * v0.5.1 have no count yet: their history's batches (the first message of each change) are counted instead.
+   */
+  recurringIds(worldId) {
+    const doc = this.readEntities(worldId);
+    const people = doc.entities.filter((e) => e.type === 'person');
+    const batches = new Map();
+    if (people.some((e) => !e.seen && !e.pinned)) {
+      for (const c of this.readHistory(worldId).changes) {
+        if (!c.messageIds?.length || !c.entityId) continue;
+        if (!batches.has(c.entityId)) batches.set(c.entityId, new Set());
+        batches.get(c.entityId).add(String(c.messageIds[0]));
+      }
+    }
+    return new Set(people.filter((e) => e.pinned || (e.seen ? e.seen.n >= 2 : (batches.get(e.entityId)?.size || 0) >= 2)).map((e) => e.entityId));
   }
 
   /**

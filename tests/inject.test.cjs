@@ -8,7 +8,8 @@ const id = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
 const ent = (type, name, description = '', extra = {}) => ({
   entityId: id(), type, name, aliases: [], description, status: 'confirmed', pinned: false, ...extra,
 });
-const world = { worldId: id(), name: '별빛 학원', description: '산 위의 기숙학교. 1988년.', injectChars: 3000 };
+// v0.5.1 T: the two last lines are looked at in tests/tail.test.cjs; here they are off so each test sees only its own part
+const world = { worldId: id(), name: '별빛 학원', description: '산 위의 기숙학교. 1988년.', injectChars: 3000, tail: { cast: false, balance: false } };
 
 test('groups by kind in a fixed order with names and aliases', () => {
   const out = assembleWorld(world, [

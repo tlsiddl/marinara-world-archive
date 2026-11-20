@@ -79,6 +79,59 @@ function entityLine(e, nameOf = () => '', today = null, names = 'ko', knownOf = 
 }
 
 /**
+ * v0.5.1 T: the two last lines of {{세계}} — no new macro. 「[이미 있는 인물] 이름, 이름, … 외 N명」 (the people there are,
+ * the latest first, up to CAST_CHARS, so a reply does not make them again) and 「[균형] 반복 등장 인물 N명: 여 a · 남 b /
+ * 혈통 편견: … 」 (the people who come back — pinned, or spoken of in two batches or more — counted by code; what is not
+ * known is 「모름」). Each can be turned off in the world (world.tail.cast · world.tail.balance, on by default); the 균형
+ * 볼 칸 are world.balance (default 성별): a person field by its label, or else the person's 추가 칸 of that name.
+ */
+const CAST_CHARS = 600;
+const GENDER = [[/^(여|여성|여자|소녀|female|woman|girl|f)$/i, '여'], [/^(남|남성|남자|소년|male|man|boy|m)$/i, '남']];
+const GENDER_RANK = (v) => (v === '여' ? 0 : v === '남' ? 1 : v === '모름' ? 3 : 2);
+function tailLines(world, entities, { recurring = null, names = 'ko' } = {}) {
+  const lines = [];
+  const people = (entities || []).filter((e) => e.type === 'person' && e.status === 'confirmed');
+  const on = (k) => world?.tail?.[k] !== false;
+  if (on('cast') && people.length) {
+    const list = people.slice().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) || a.name.localeCompare(b.name, 'ko'));
+    const head = '[이미 있는 인물] ';
+    const say = (shown) => head + shown.join(', ') + (list.length > shown.length ? ` 외 ${list.length - shown.length}명` : '');
+    let shown = [];
+    for (const e of list) {
+      const next = [...shown, shownName(e, names)];
+      if (say(next).length > CAST_CHARS) break;
+      shown = next;
+    }
+    if (shown.length) lines.push(sanitize(say(shown)));
+  }
+  if (on('balance')) {
+    const back = people.filter((e) => (recurring ? recurring.has(e.entityId) : e.pinned || (e.seen?.n || 0) >= 2));
+    if (back.length) {
+      const labels = Array.isArray(world.balance) && world.balance.length ? world.balance : ['성별'];
+      const parts = labels.map((label) => {
+        const def = FIELDS.person.find((f) => f.label === label);
+        const gender = def?.key === 'gender';
+        const count = new Map();
+        for (const e of back) {
+          let v = String((def ? e.fields?.[def.key] : (e.extra || []).find((x) => x.label === label)?.value) || '').trim();
+          if (gender) v = (GENDER.find(([re]) => re.test(v)) || [null, v])[1];
+          v = v ? oneLine(v).slice(0, 12) : '모름';
+          count.set(v, (count.get(v) || 0) + 1);
+        }
+        const all = [...count].sort((a, b) => (gender ? GENDER_RANK(a[0]) - GENDER_RANK(b[0]) : 0) || (a[0] === '모름') - (b[0] === '모름') || b[1] - a[1]);
+        const top = all.filter(([v]) => v !== '모름').slice(0, 4);
+        const more = all.filter(([v]) => v !== '모름').slice(4).reduce((a, x) => a + x[1], 0);
+        const unknown = count.get('모름') || 0;
+        const body = [...top.map(([v, n]) => `${v} ${n}`), ...(more ? [`그 밖 ${more}`] : []), ...(unknown ? [`모름 ${unknown}`] : [])].join(' · ');
+        return gender ? body : `${label}: ${body}`;
+      });
+      lines.push(sanitize(`[균형] 반복 등장 인물 ${back.length}명: ${parts.join(' / ')}`));
+    }
+  }
+  return { lines, kept: [] };
+}
+
+/**
  * Only confirmed settings go into the prompt. Pinned ones first, then the ones in the current scene (scene: a Set of
  * entity ids named in the latest messages), then by kind, then by name.
  */
@@ -101,7 +154,7 @@ function orderEntities(entities, scene = null) {
  * included / omitted are entity IDs. An item that does not fit is left out whole; smaller ones after it can
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko' } = {}) {
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
@@ -196,17 +249,26 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
       included.push(e.entityId);
     }
   };
+  // v0.5.1 T: the two last lines take their room first, right after the pinned ones (each that fits)
+  const tail = tailLines(world, entities || [], { recurring, names });
+  const reserve = () => { for (const l of tail.lines) if (used + 2 + l.length <= budget) { used += 2 + l.length; tail.kept.push(l); } };
   if (part) {
     // v0.5.0 D: pinned and the scene first; what is left goes at most a third to the rules of the whole world, the
     // rest to the rules · 시간표 here — a part that does not use its share leaves it to the other — then the unknown.
     const of = (k) => ordered.filter((e) => part(e) === k);
-    fill([...of(0), ...of(1)], budget);
+    fill(of(0), budget);
+    reserve();
+    fill(of(1), budget);
     const worldCap = used + Math.floor((budget - used) / 3);
     fill(of(2), worldCap);
     fill(of(3), budget);
     fill(of(2), budget);
     fill([...of(4), ...of(5)], budget);
-  } else fill(ordered, budget);
+  } else {
+    fill(ordered.filter((e) => e.pinned), budget);
+    reserve();
+    fill(ordered, budget);
+  }
   for (const e of ordered) if (!included.includes(e.entityId)) omitted.push(e.entityId);
 
   // Scene mode: relations of people in the scene whose other end is in the scene too, one line each, if they fit.
@@ -240,6 +302,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     if (lines) parts.push(`[${TYPE_LABEL[type]}]\n${lines.join('\n')}`);
   }
   if (relLines.length) parts.push(`[관계]\n${relLines.join('\n')}`);
+  if (tail.kept.length) parts.push(tail.kept.join('\n'));
   const text = parts.join('\n\n');
   return { text, chars: text.length, budget, included, omitted, skipped };
 }
@@ -283,4 +346,4 @@ function assembleLooks(entities, scene, { recent = null, budget = LOOKS_CHARS } 
   return { text: lines.length ? `${head}\n${lines.join('\n')}` : '', included, omitted };
 }
 
-module.exports = { WORLD, shownName, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
+module.exports = { WORLD, shownName, tailLines, CAST_CHARS, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };

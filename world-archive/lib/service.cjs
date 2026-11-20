@@ -222,7 +222,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           if (it.type === 'group' || it.type === 'person') continue;
           homeless.push({ type: 'schedule', name: `${it.name} ${m.label}`, aliases: [], match: null, fields: { when: m.text, ...(it.type === 'place' ? { where: it.name } : {}) }, fieldEvidence: { when: m.evidence }, hidden: {}, rumors: {}, corrections: {}, memo: `「${it.name}」의 ${m.label} 칸에서 시간표로 옮김 — 「시간표로 모으기」가 주인을 찾아요`, where: '', base: '', evidence: m.evidence, evidenceAt: it.evidenceAt });
         }
-        const changes = s.applyAuto(worldId, [...items, ...homeless], { roomId, messageIds: part.batch.map((x) => x.id) });
+        const changes = s.applyAuto(worldId, [...items, ...homeless], { roomId, messageIds: part.batch.map((x) => x.id), balance: X.customBalance(world) });
         const afterSave = s.readEntities(worldId).entities;
         for (const it of items) {
           // v0.5.0 E: a group's 본거지 — a place the world has (now)
@@ -456,7 +456,7 @@ function preview(roomId) {
   // 이름 표기: the world's choice; 「자동」 — the original name first in a room in English
   const latin = known?.latin ?? s.getRoom(roomId).latin ?? false;
   const names = world.nameStyle === 'original' ? 'original' : world.nameStyle === 'ko' ? 'ko' : latin ? 'original' : 'ko';
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names }) };
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names }) };
 }
 
 /** 할 일 12: what one room's {{세계외형}} would be right now. */

@@ -135,6 +135,9 @@ function fieldGuide() {
  * The messages for one batch. world: { name, description }; entities: the world's settings; cast: names to skip;
  * glossary: the room's translation glossary pairs [{ from, to }] — only those named in the batch go in.
  */
+/** v0.5.1 T: the 균형 볼 칸 the world added that are not person fields — asked only with evidence. */
+const customBalance = (world) => (Array.isArray(world?.balance) ? world.balance : []).filter((l) => !FIELDS.person.some((f) => f.label === l));
+const balanceGuide = (world) => { const c = customBalance(world); return c.length ? `\n인물의 균형 볼 칸(근거가 있을 때만, 없으면 적지 않는다): ${c.join(', ')} — 인물 항목에 "balance":{"${c[0]}":{"v":"값","n":["근거 문장 번호"]}}로 적는다.` : ''; };
 function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
   // 할 일 11: only a world with a board asks for score events (the model never adds them up).
   const board = world.scoreboard?.name ? world.scoreboard : null;
@@ -176,7 +179,7 @@ ${KIND_GUIDE}
 {"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","maybe":"같은 것인지 애매한 이미 있는 항목 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
 
 칸 키 (이것 말고는 쓰지 마):
-${fieldGuide()}
+${fieldGuide()}${balanceGuide(world)}
 
 칸 쓰는 법:
 - 칸마다 그 값이 나온 문장 번호를 n에 1~3개 적는다. 그 칸의 내용이 실제로 쓰인 문장이어야 한다(다른 사실이 쓰인 문장을 대지 마).
@@ -417,6 +420,9 @@ function checkItems(parsed, part, cast) {
     // v0.5.0 P: a passing thing (not used again) is not kept
     if (['rule', 'system', 'schedule'].includes(it.type) && it.lasting === false) { dropped.push({ name, why: 'not lasting' }); continue; }
     const f = checkFields(it.type, it.fields, index, found);
+    // v0.5.1 T: 균형 볼 칸 the world added — each with its own evidence, like a field
+    const bal = it.type === 'person' && it.balance && typeof it.balance === 'object' && !Array.isArray(it.balance) ? checkFields('balance', it.balance, index, found) : null;
+    if (bal) for (const d of bal.droppedFields) droppedFields.push({ name, ...d, key: `balance.${d.key}` });
 
     for (const d of f.droppedFields) droppedFields.push({ name, ...d });
     items.push({
@@ -431,6 +437,7 @@ function checkItems(parsed, part, cast) {
       hidden: f.hidden,
       rumors: f.rumors,
       corrections: f.corrections,
+      ...(bal && Object.keys(bal.fields).length ? { balance: bal.fields } : {}),
       ...(f.moved.length ? { toTimetable: f.moved } : {}),
       memo: typeof it.memo === 'string' ? it.memo : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
@@ -588,4 +595,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };

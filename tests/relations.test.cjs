@@ -165,7 +165,7 @@ test('scene mode puts one line per relation whose both ends are in the scene, wi
   const e = (id, name, type) => ({ entityId: id, name, type, aliases: [], fields: {}, status: 'confirmed', pinned: false, description: '' });
   const ents = [e('a', '해나', 'person'), e('b', '어니', 'person'), e('c', '세드릭', 'person')];
   const relations = [{ from: 'a', to: 'b', type: '가족', note: '남매' }, { from: 'a', to: 'c', type: '친구', note: '' }];
-  const world = { name: '호그와트', description: '', injectMode: 'scene' };
+  const world = { name: '호그와트', description: '', injectMode: 'scene', tail: { cast: false, balance: false } };
   const out = assembleWorld(world, ents, 3000, { scene: new Set(['a', 'b']), relations });
   assert.match(out.text, /\[관계\]\n- 해나 — 어니: 남매$/);
   assert.doesNotMatch(out.text, /세드릭/);
