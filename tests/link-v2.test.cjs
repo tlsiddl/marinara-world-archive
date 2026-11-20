@@ -114,3 +114,44 @@ test('종 (species): only for a being that is not a person — "사람" and the 
   const [sys] = X.buildPrompt({ name: 'w' }, [], { batch: [{ number: 1, speaker: 'x', sentences: ['a'] }], context: [] }, []);
   assert.match(sys.content, /species\(종\)에는 사람이 아닌 존재/);
 });
+
+test('인물 종 채우기: only people with an empty 종 (not hand-written), name · other names · appearance · memo only, animals only, never "사람", recorded and undoable', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-species-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  service._test.useStore(s);
+  const engine = require('../world-archive/lib/vendor/engine.cjs');
+  const prompts = [];
+  service._test.useEngine({
+    model: async (id) => ({ id }),
+    askModel: async (m, messages) => { prompts.push(messages); return { content: JSON.stringify({ species: [{ name: '베아트릭스', species: '반니즐' }, { name: '이리나', species: '사람' }, { name: '모르는 이', species: '고양이' }, { name: '말킨 부인', species: '마녀' }] }), usage: { input_tokens: 120, output_tokens: 30 } }; },
+    parseJsonObject: engine.parseJsonObject,
+  });
+  const w = s.createWorld({ name: '시험', auto: { enabled: false, connectionId: 'c1', every: 6 } });
+  const cat = s.createEntity(w.worldId, { type: 'person', name: '베아트릭스', aliases: ['비아'], fields: { appearance: '은빛 털, 술 달린 귀' }, description: '이리나의 반니즐' });
+  s.createEntity(w.worldId, { type: 'person', name: '이리나', fields: { appearance: '은발 소녀' } });
+  s.createEntity(w.worldId, { type: 'person', name: '말킨 부인' });
+  s.createEntity(w.worldId, { type: 'person', name: '헤드윅', fields: { species: '부엉이' } });
+  s.createEntity(w.worldId, { type: 'place', name: '호그와트' });
+  const out = await service.fillSpecies(w.worldId);
+  assert.equal(out.asked, 3, 'people with an empty 종 only (헤드윅 has one, 호그와트 is a place)');
+  assert.equal(out.calls, 1);
+  assert.deepEqual(out.filled, [{ name: '베아트릭스', species: '반니즐' }], '"사람" and "마녀" are not written; a name not asked about is ignored');
+  assert.deepEqual(out.tokens, { input_tokens: 120, output_tokens: 30 });
+  const sent = prompts[0][1].content;
+  assert.match(sent, /- 베아트릭스 :: 다른 이름: 비아 \/ 외형: 은빛 털, 술 달린 귀 \/ 메모: 이리나의 반니즐/);
+  assert.doesNotMatch(sent, /헤드윅|호그와트/);
+  const after = s.readEntities(w.worldId).entities.find((e) => e.entityId === cat.entityId);
+  assert.equal(after.fields.species, '반니즐');
+  const change = s.listHistory(w.worldId, 50).find((c) => c.by === 'species-fill' && c.entityId === cat.entityId);
+  assert.ok(change, 'recorded in 기록 with by species-fill');
+  s.undoChange(w.worldId, change.id);
+  assert.equal(String(s.readEntities(w.worldId).entities.find((e) => e.entityId === cat.entityId).fields.species || ''), '', 'undone');
+  // A 종 written by hand is never asked about or touched.
+  s.updateEntity(w.worldId, cat.entityId, { fields: { species: '고양이' }, revision: s.readEntities(w.worldId).entities.find((e) => e.entityId === cat.entityId).revision });
+  prompts.length = 0;
+  const again = await service.fillSpecies(w.worldId);
+  assert.ok(!prompts[0]?.[1]?.content.includes('베아트릭스'));
+  assert.equal(s.readEntities(w.worldId).entities.find((e) => e.entityId === cat.entityId).fields.species, '고양이');
+  assert.ok(again.filled.every((x) => x.name !== '베아트릭스'));
+});

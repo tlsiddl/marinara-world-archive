@@ -388,4 +388,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { HUMAN_SPECIES, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
