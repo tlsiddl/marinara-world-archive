@@ -8,10 +8,10 @@ const TT = require('./timetable.cjs');
 const CAL = require('./calendar.cjs');
 const X = require('./extract.cjs');
 const N = require('./names.cjs');
-const { speciesName } = require('./same.cjs');
+const { speciesName, topicGroups } = require('./same.cjs');
 const G = require('./vendor/glossary.cjs');
 const P = require('./profile.cjs');
-const { assembleWorld, assembleLooks } = require('./inject.cjs');
+const { assembleWorld, assembleLooks, onceOnly } = require('./inject.cjs');
 const Search = require('./search.cjs');
 
 const TAG = '[world-archive]';
@@ -299,6 +299,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           job.changed += pc.filter((c) => c.action !== 'create').length;
         }
         job.dropped += dropped.length;
+        // v0.6.2: why things were left out (「not lasting」 …), for comparing readings
+        for (const d of dropped) job.droppedWhy = { ...(job.droppedWhy || {}), [d.why]: ((job.droppedWhy || {})[d.why] || 0) + 1 };
         job.fieldsDropped += droppedFields.length;
         // Relations: both ends must be settings by now (existing, or made from this batch's items).
         const meta = { roomId, messageIds: part.batch.map((x) => x.id) };
@@ -647,6 +649,8 @@ async function routes(r) {
     const removed = s().recheckRelations(req.params.worldId, { by: 'recheck' });
     // v0.5.0 O: other names that are pieces of sentences
     const aliasesOff = s().tidyAliases(req.params.worldId, { by: 'recheck' });
+    // v0.6.2 ②: 「한 번 나옴」 — the batches each setting was spoken of in, counted again from the history
+    const seenMoved = s().recountSeen(req.params.worldId);
     // v0.6.2 ③ ④: status lines as evidence go back; 「아직 드러나지 않음」 again field by field, against the rooms' sentences
     const sentences = await roomSentences(req.params.worldId);
     // v0.6.2 ⑨: the rooms' profile blocks read by code (empty fields, people left out, 「서로 다른 말을 해요」)
@@ -661,7 +665,7 @@ async function routes(r) {
     s().linkSubgroups(req.params.worldId, { by: 'recheck' });
     const filled = s().fillGroups(req.params.worldId, { by: 'recheck' });
     s().linkAffiliations(req.params.worldId, null, { by: 'recheck' });
-    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
+    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
   }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));
@@ -713,7 +717,7 @@ async function routes(r) {
     return s().listEntities(req.params.worldId).find((e) => e.entityId === req.params.entityId);
   }));
   // 같은 사람일 수 있음: suggestions only; merging takes the person's own press, and is undone from the history.
-  r.get('/worlds/:worldId/duplicates', handle(async (req) => ({ pairs: s().listDuplicates(req.params.worldId) })));
+  r.get('/worlds/:worldId/duplicates', handle(async (req) => ({ pairs: s().listDuplicates(req.params.worldId), differ: topicGroups(s().listEntities(req.params.worldId)) })));
   r.post('/worlds/:worldId/duplicates/dismiss', handle(async (req) => s().dismissPair(req.params.worldId, body(req).a, body(req).b)));
   r.post('/worlds/:worldId/merge', handle(async (req) => s().mergeEntities(req.params.worldId, body(req))));
   r.get('/worlds/:worldId/history', handle(async (req) => ({ changes: s().listHistory(req.params.worldId, Math.min(Number(req.query?.limit) || 200, 1000)) })));
@@ -840,7 +844,7 @@ async function gatherTimetables(worldId, { model = true } = {}) {
     if (exact) return exact;
     // the most specific group the 누가 text names (「스네이프 교수가 가르치는 슬리데린 1학년」 → 슬리데린 1학년)
     // the longest name it matches wins: 「슬리데린 1학년」 over 「슬리데린 (기숙사)」
-    const matched = (g) => { const w = String(who).normalize('NFC').toLowerCase().replace(/s+/g, ''); return Math.max(0, ...[g.name, ...(g.aliases || [])].map((n) => String(n).normalize('NFC').toLowerCase().replace(/s+/g, '')).filter((k) => k.length >= 2 && w.includes(k)).map((k) => k.length)); };
+    const matched = (g) => { const w = String(who).normalize('NFC').toLowerCase().replace(/\s+/g, ''); return Math.max(0, ...[g.name, ...(g.aliases || [])].map((n) => String(n).normalize('NFC').toLowerCase().replace(/\s+/g, '')).filter((k) => k.length >= 2 && w.includes(k)).map((k) => k.length)); };
     const hits = groups.filter((g) => namesGroup(who, g)).sort((a, b) => matched(b) - matched(a));
     return hits[0] || null;
   };

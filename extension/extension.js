@@ -445,7 +445,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     st.entities = st.worldId ? (await api('GET', `/worlds/${st.worldId}/entities`)).entities || [] : [];
     st.relations = st.worldId ? (await api('GET', `/worlds/${st.worldId}/relations`).catch(() => ({ relations: [] }))).relations || [] : [];
     st.rosters = {};
-    try { st.pairs = st.worldId ? (await api('GET', `/worlds/${st.worldId}/duplicates`)).pairs || [] : []; } catch { st.pairs = []; }
+    try { const d = st.worldId ? await api('GET', `/worlds/${st.worldId}/duplicates`) : {}; st.pairs = d.pairs || []; st.differ = d.differ || []; } catch { st.pairs = []; st.differ = []; }
     try { st.groupSuggest = st.worldId ? (await api('GET', `/worlds/${st.worldId}/group-suggestions`)).suggestions || [] : []; } catch { st.groupSuggest = []; }
     if (st.detail && !st.entities.some((e) => e.entityId === st.detail)) st.detail = null;
   }
@@ -662,7 +662,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       </div>
       ${type === 'group' && st.groupSuggest?.length ? `<p class="sub" style="margin:-6px 0 14px">소속 칸에만 있는 이름 · ${st.groupSuggest.map((g) => `<button class="quiet" type="button" data-act="group-make" data-name="${esc(g.name)}" title="${esc(g.people.join(', '))}의 소속 칸${g.owner ? ` · 지금은 「${esc(g.owner)}」의 다른 이름` : ''}">${esc(g.name)} · 집단으로 만들기</button>`).join(' ')}</p>` : ''}
       ${type === 'schedule' && !st.readOnly ? `<p class="sub" style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="cal-gather" title="날짜가 정해진 한 번뿐인 행사 일정을 그 집단·장소의 학사일정으로 옮깁니다(코드로)">학사일정으로 모으기</button> <button class="quiet" type="button" data-act="tt-gather" title="요일·시간이 정해진 수업·일과 일정을 그 집단·사람의 시간표 칸으로 옮깁니다. 코드로 먼저 하고, 안 되는 것만 작은 호출 한 번">시간표로 모으기</button></p>` : ''}
-      ${pairsOf(type).length ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">${type === 'person' ? '같은 사람일 수 있음' : '같은 것일 수 있음'} ${pairsOf(type).length}쌍</button></p>` : ''}
+      ${pairsOf(type).length || ((type === 'rule' || type === 'system') && (st.differ || []).length) ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">${type === 'person' ? '같은 사람일 수 있음' : '같은 것일 수 있음'} ${pairsOf(type).length}쌍${(type === 'rule' || type === 'system') && (st.differ || []).length ? ` · 서로 다른 말 ${st.differ.length}묶음` : ''}</button></p>` : ''}
       ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
         : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
   }
@@ -810,6 +810,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}${tag('description')}</small><p>${esc(e.description)}</p></div>` : '';
     // v0.5.0 L: 「확인 안 됨 · ○○의 말」
     // v0.6.2 ⑨: a profile that says another 나이 · 성별 · 종 — never written over, shown beside it
+    // v0.6.2 ②: a rule or system one batch spoke of — kept, not in {{세계}}
+    const lawName = /(법|령|규칙|제도)/;
+    const once = (e.type === 'rule' || e.type === 'system') && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !lawName.test(e.name) && Number.isFinite(e.seen?.n) && e.seen.n < 2
+      ? '<div class="sec"><small>한 번 나옴</small><p>대화의 한 묶음에서만 나왔어요. 설정집에는 두고 {{세계}}에는 넣지 않아요. 다시 나오거나 고정하면 들어가요.</p></div>' : '';
     const differs = Object.entries(e.differs || {}).map(([k, x]) => `<div class="sec"><small>${esc(d.find((y) => y.key === k)?.label || k)} · 서로 다른 말을 해요</small><p>${esc(e.fields?.[k] || '')} ↔ ${esc(x.value)}</p>${x.evidence ? `<p class="ev">${quoted(x.evidence)}</p>` : ''}</div>`).join('');
     const rumors = Object.entries(e.rumors || {}).map(([k, r]) => `<div class="sec"><small>${esc(d.find((x) => x.key === k)?.label || k)} · 확인 안 됨 · ${esc(r.by || '소문')}의 말</small><p>${esc(r.value)}</p></div>`).join('');
     // 관계: both directions; a chip opens the other setting.
@@ -834,7 +838,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}${e.nameCheck ? `<span class="pill" title="근거 문장에는 「${esc(e.nameCheck.said)}」이(가) 나옵니다. 이름을 확인해 주세요(고치면 사라집니다).">이름 확인 필요</span>` : ''}
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
-        ${differs}${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'person' ? roomHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
+        ${once}${differs}${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'person' ? roomHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
         ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
@@ -889,7 +893,19 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
                  <button type="button" data-act="dismiss" data-a="${esc(a)}" data-b="${esc(b)}">${person ? '다른 사람이에요' : '다른 것이에요'}</button>`}
           </div>
         </div>`;
-      }).join('') : `<div class="empty"><h2>${person ? '같은 사람일 수 있는 인물이' : '같은 것일 수 있는 설정이'} 없습니다</h2><p>이름이나 다른 이름이 겹치는 설정이 생기면 여기에 보입니다.</p></div>`}`;
+      }).join('') : `<div class="empty"><h2>${person ? '같은 사람일 수 있는 인물이' : '같은 것일 수 있는 설정이'} 없습니다</h2><p>이름이나 다른 이름이 겹치는 설정이 생기면 여기에 보입니다.</p></div>`}
+      ${differHtml(type)}`;
+  }
+  /** v0.6.2 ②: rules · systems about the same thing (two words in a row of their names) — 「서로 다른 말을 해요」. */
+  function differHtml(type) {
+    if (type !== 'rule' && type !== 'system') return '';
+    const byId = (id) => st.entities.find((e) => e.entityId === id);
+    const groups = (st.differ || []).map((g) => ({ ...g, list: g.ids.map(byId).filter(Boolean) })).filter((g) => g.list.length >= 2 && g.list.some((e) => e.type === type));
+    if (!groups.length) return '';
+    return `<div class="eyebrow" style="margin-top:22px">SAYS DIFFERENT THINGS? · ${groups.length}</div>
+      <h2>서로 다른 말을 해요</h2>
+      <p class="intro">같은 대상(이름의 두 낱말)을 다루는 규칙 · 시스템이에요. 서로 부딪치면 하나만 남기거나 합쳐 주세요. 자동으로 바꾸지는 않아요.</p>
+      ${groups.map((g) => `<div class="paper"><p class="sub" style="margin:0 0 8px">「${esc(g.topic)}」</p><ul>${g.list.map((e) => `<li><b>${esc(e.name)}</b> <small>${esc(KIND[e.type]?.label || e.type)}${e.description ? ` · ${esc(e.description.slice(0, 80))}` : ''}</small></li>`).join('')}</ul></div>`).join('')}`;
   }
 
   function fieldInput(x, value, hideLabel) {

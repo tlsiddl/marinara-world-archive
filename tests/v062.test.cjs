@@ -152,3 +152,55 @@ test('⑨ applyProfiles: empty fields only, a person made, a second profile\'s o
   s.undoChange(w.worldId, filled.id);
   assert.equal(s.listEntities(w.worldId).find((x) => x.name === '로완 하트').fields.gender, undefined);
 });
+
+test('② 「한 번 나옴」: a rule one batch spoke of stays out of {{세계}} (not pinned · written · a law by name); recheck counts again', (t) => {
+  const { onceOnly } = I;
+  const r1 = ent('rule', '복도에서는 오른쪽으로', { seen: { n: 1, last: 'm1' }, appliesTo: 'world' });
+  const r2 = ent('rule', '통금', { seen: { n: 2, last: 'm9' }, appliesTo: 'world' });
+  const r3 = ent('rule', '비밀 유지법', { seen: { n: 1, last: 'm1' }, appliesTo: 'world' });
+  const r4 = ent('system', '은화와 금화', { seen: { n: 1, last: 'm1' }, pinned: true, appliesTo: 'world' });
+  const r5 = ent('rule', '사감이 정한 일', { seen: { n: 1, last: 'm1' }, sources: { description: 'manual' }, appliesTo: 'world' });
+  const r6 = ent('rule', '아주 옛날 것', { appliesTo: 'world' });
+  assert.deepEqual([r1, r2, r3, r4, r5, r6].map(onceOnly), [true, false, false, false, false, false]);
+  const text = I.assembleWorld({ name: '별시계', description: '' }, [r1, r2, r3, r4, r5, r6], 5000, {}).text;
+  assert.doesNotMatch(text, /복도에서는 오른쪽으로/);
+  for (const n of ['통금', '비밀 유지법', '은화와 금화', '사감이 정한 일', '아주 옛날 것']) assert.match(text, new RegExp(n));
+  // recheck: the history's batches
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'rule', name: '복도에서는 오른쪽으로', memo: '' }], { messageIds: ['m1'] });
+  s.applyAuto(w.worldId, [{ type: 'rule', name: '복도에서는 오른쪽으로', fields: { category: '학교 규칙' } }], { messageIds: ['m1'] });
+  const e = s.listEntities(w.worldId)[0];
+  assert.equal(e.seen.n, 1);
+  const doc = s.readEntities(w.worldId);
+  doc.entities[0].seen = { n: 1, last: 'm1' };
+  const h = s.readHistory(w.worldId);
+  h.changes.push({ id: 'x', at: '2026-11-21T00:00:00Z', by: 'reader', roomId: null, messageIds: ['m7'], entityId: e.entityId, name: e.name, type: 'rule', action: 'alias', after: '오른쪽 통행' });
+  s.writeJson(s.historyFile(w.worldId), h);
+  assert.equal(s.recountSeen(w.worldId), 1);
+  assert.equal(s.listEntities(w.worldId)[0].seen.n, 2);
+});
+
+test('② rules and systems: 「같은 것일 수 있음」 across the two kinds, merged into the kept one\'s; 「서로 다른 말을 해요」 by topic', (t) => {
+  const { thingPairs, topicGroups } = require('../world-archive/lib/same.cjs');
+  const a = ent('rule', '애니마구스 등록');
+  const b = ent('system', '애니마구스 등록', { fields: { how: '마법부 명부에 적는다' } });
+  const pairs = thingPairs([a, b]);
+  assert.equal(pairs.length, 1);
+  assert.match(pairs[0].why, /규칙과 시스템/);
+  const g = topicGroups([ent('place', '말킨 옷가게'), ent('rule', '옷에 지팡이 주머니를 달 때는 오른팔에'), ent('system', '교복의 지팡이 주머니는 손목 위에'), ent('rule', '말킨 옷가게 영업시간'), ent('rule', '말킨 옷가게 휴일')]);
+  assert.deepEqual(g.map((x) => x.topic), ['지팡이 주머니'], 'a place\'s name is where, not a topic');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'rule', name: '애니마구스 등록' }, { type: 'system', name: '애니마구스 등록부', fields: { how: '마법부 명부에 적는다' } }]);
+  const [x, y] = s.listEntities(w.worldId);
+  s.mergeEntities(w.worldId, { keepId: x.entityId, dropId: y.entityId, keepRevision: x.revision, dropRevision: y.revision });
+  const kept = s.listEntities(w.worldId);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].type, 'rule');
+  assert.match(kept[0].description, /작동 방식: 마법부 명부에 적는다/);
+});

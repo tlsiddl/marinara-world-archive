@@ -371,7 +371,9 @@ function mergeInto(keep, drop) {
     }
   }
   let description = keep.description || '';
-  const dd = drop.description || '';
+  // v0.6.2: the other kind's fields (a system's 작동 방식 into a rule) go to the 메모, not away
+  const lost = Object.entries(drop.fields || {}).filter(([k, v]) => v && !FIELDS[keep.type].some((d) => d.key === k)).map(([k, v]) => `${FIELDS[drop.type]?.find((d) => d.key === k)?.label || k}: ${v}`);
+  const dd = [drop.description || '', ...lost].filter(Boolean).join('\n');
   if (dd && !description) {
     description = dd;
     if (ds.description) sources.description = ds.description;
@@ -1929,7 +1931,9 @@ class Archive {
     const keep = doc.entities[keepIndex];
     const drop = doc.entities[dropIndex];
     if (keep.revision !== keepRevision || drop.revision !== dropRevision) throw new ArchiveError(409, '다른 곳에서 먼저 고쳤습니다. 새로 불러온 뒤 다시 해 주세요.');
-    if (keep.type !== drop.type) throw new ArchiveError(400, '같은 종류의 설정끼리만 합칠 수 있습니다.');
+    // v0.6.2 ②: a rule and a system can be the same thing (애니마구스 등록): merged into the kept one's kind
+    const ruleish = (x) => x.type === 'rule' || x.type === 'system';
+    if (keep.type !== drop.type && !(ruleish(keep) && ruleish(drop))) throw new ArchiveError(400, '같은 종류의 설정끼리만 합칠 수 있습니다.');
     const t = now();
     const merged = { ...mergeInto(keep, drop), revision: keep.revision + 1, updatedAt: t };
     if (merged.type === 'person' && !merged.room && drop.room) { merged.room = drop.room; merged.sources = { ...(merged.sources || {}), room: drop.sources?.room || 'auto' }; } // v0.5.1 I
@@ -2545,6 +2549,31 @@ class Archive {
     this.writeJson(this.entityFile(worldId), doc);
     this.pushHistory(worldId, changes);
     return changes;
+  }
+
+  /**
+   * v0.6.2 ②: how many batches spoke of each setting (seen.n), counted again from the history — the first message of
+   * every change made for it (created, a field, another name …). Only raised, never lowered (a batch that named it
+   * without changing it is not in the history). No history entry: not a change of the setting. Returns how many moved.
+   */
+  recountSeen(worldId) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const batches = new Map();
+    for (const c of this.readHistory(worldId).changes) {
+      if (c.undoneAt || !c.entityId || !Array.isArray(c.messageIds) || !c.messageIds.length) continue;
+      if (!batches.has(c.entityId)) batches.set(c.entityId, new Set());
+      batches.get(c.entityId).add(String(c.messageIds[0]));
+    }
+    let moved = 0;
+    for (const e of doc.entities) {
+      const got = batches.get(e.entityId);
+      if (!got) continue;
+      const n = got.size;
+      if (!e.seen || e.seen.n < n) { e.seen = { n, last: e.seen?.last || [...got].at(-1) }; moved++; }
+    }
+    if (moved) this.writeJson(this.entityFile(worldId), doc);
+    return moved;
   }
 
   /**

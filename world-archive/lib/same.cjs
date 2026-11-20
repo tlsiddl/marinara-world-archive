@@ -272,7 +272,9 @@ function thingPairs(entities, relations = [], skip = () => false) {
   // the words of the names of groups and places the world has
   const known = new Set(entities.filter((e) => e.type === 'group' || e.type === 'place').flatMap((e) => [e.name, ...(e.aliases || [])]).filter((n) => !/\s/.test(String(n).trim())).map((n) => String(n).normalize('NFC').toLowerCase()));
   const byType = new Map();
-  for (const e of entities) if (THING_TYPES.has(e.type)) byType.set(e.type, [...(byType.get(e.type) || []), e]);
+  // v0.6.2 ②: rules and systems are looked at together (「애니마구스 등록」 a rule and a system)
+  const kindKey = (t) => (t === 'rule' || t === 'system' ? 'rule|system' : t);
+  for (const e of entities) if (THING_TYPES.has(e.type)) byType.set(kindKey(e.type), [...(byType.get(kindKey(e.type)) || []), e]);
   const out = [];
   for (const list of byType.values()) {
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
@@ -294,10 +296,44 @@ function thingPairs(entities, relations = [], skip = () => false) {
       }
       if (!why) continue;
       const [a, b] = filled(y) > filled(x) ? [y, x] : [x, y];
-      out.push({ a: a.entityId, b: b.entityId, why, type: x.type });
+      out.push({ a: a.entityId, b: b.entityId, why: x.type !== y.type ? `${why} · 규칙과 시스템` : why, type: a.type });
     }
   }
   return out;
 }
 
-module.exports = { thingPairs, words, forms, whySame, findPairs, describedPairs, speciesPairs, speciesName, TITLE_WORDS };
+/**
+ * v0.6.2 ②: rules and systems about the same thing that may say different things (「옷에 지팡이 주머니를 달 때는
+ * 오른팔에」 · 「교복 로브의 지팡이 주머니는 손목집 위에」) — 「서로 다른 말을 해요」. Two words in a row that two names
+ * or more share (the topic, 「지팡이 주머니」), where the rules hold for the same place or group (or nobody said).
+ * Shown for the person to look at; nothing is changed. Returns [{ topic, ids }].
+ */
+const PARTICLE = /(을|를|은|는|의|에서|에|으로|까지|부터)$/;
+function topicGroups(entities) {
+  const list = (entities || []).filter((e) => (e.type === 'rule' || e.type === 'system') && !e.timetable && !e.calendar);
+  const wordsOf = (n) => String(n || '').normalize('NFC').toLowerCase().split(/[\s·,.()「」]+/).map((w) => (w.length > 2 ? w.replace(PARTICLE, '') : w)).filter((w) => w.length >= 2);
+  // the words of the world's place and group names: where a rule holds, not what it is about
+  const scope = new Set((entities || []).filter((e) => e.type === 'place' || e.type === 'group').flatMap((e) => [e.name, ...(e.aliases || [])]).flatMap((n) => String(n).normalize('NFC').toLowerCase().split(/\s+/)).filter((w) => w.length >= 2));
+  const by = new Map();
+  for (const e of list) {
+    const w = wordsOf(e.name);
+    const seenHere = new Set();
+    for (let i = 0; i + 1 < w.length; i++) {
+      const k = `${w[i]} ${w[i + 1]}`;
+      if (seenHere.has(k) || scope.has(w[i]) || scope.has(w[i + 1])) continue;
+      seenHere.add(k);
+      const at = `${e.appliesTo || ''}|${k}`;
+      by.set(at, [...(by.get(at) || []), e.entityId]);
+    }
+  }
+  // the biggest topics first; a group inside a bigger one with the same ids is the same group
+  const out = [];
+  for (const [at, ids] of [...by].sort((a, b) => b[1].length - a[1].length)) {
+    if (ids.length < 2) continue;
+    if (out.some((g) => ids.every((id) => g.ids.includes(id)))) continue;
+    out.push({ topic: at.split('|')[1], ids });
+  }
+  return out;
+}
+
+module.exports = { topicGroups, thingPairs, words, forms, whySame, findPairs, describedPairs, speciesPairs, speciesName, TITLE_WORDS };
