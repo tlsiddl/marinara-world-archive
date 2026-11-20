@@ -239,3 +239,57 @@ test('⑤ ⑩ other names: a small phrase, a lone title, another setting\'s name
   assert.equal(g.length, 1);
   assert.equal(s.listEntities(w.worldId).find((e) => e.name === '여관 1층 바').fields.location, '은사슴 여관 동쪽 별채');
 });
+
+test('⑥ roster: 유모 · 가정교사 are 맡은 사람, an animal is 「함께 사는 동물」; a 소속 칸 naming a shop is 「일하는 곳」', (t) => {
+  const Ro = require('../world-archive/lib/roster.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [
+    { type: 'group', name: '하르트 가문' },
+    { type: 'place', name: '은사슴 지팡이 가게' },
+    { type: 'person', name: '하윤', fields: { affiliation: '하르트 가문' } },
+    { type: 'person', name: '메이', fields: { affiliation: '하르트 가문 유모' } },
+    { type: 'person', name: '핀', fields: { affiliation: '하르트 가문 가정교사' } },
+    { type: 'person', name: '솜뭉치', fields: { affiliation: '하르트 가문', species: '고양이' } },
+    { type: 'person', name: '노인 장인', fields: { affiliation: '은사슴 지팡이 가게 주인' } },
+  ]);
+  const ch = s.linkAffiliations(w.worldId);
+  const doc = s.readEntities(w.worldId);
+  const g = doc.entities.find((e) => e.name === '하르트 가문');
+  const r = Ro.rosterOf(doc.entities, doc.relations, g.entityId);
+  const kind = (n) => r.members.find((m) => m.name === n)?.kind;
+  assert.deepEqual(['하윤', '메이', '핀', '솜뭉치'].map(kind), ['member', 'staff', 'staff', 'animal']);
+  assert.equal(r.counts.animal, 1);
+  const shop = doc.entities.find((e) => e.name === '은사슴 지팡이 가게');
+  const old = doc.entities.find((e) => e.name === '노인 장인');
+  assert.equal(old.work, shop.entityId);
+  assert.ok(!doc.entities.some((e) => e.type === 'group' && /지팡이 가게/.test(e.name)), 'not a group');
+  const c = ch.find((x) => x.action === 'work');
+  s.undoChange(w.worldId, c.id);
+  assert.equal(s.listEntities(w.worldId).find((e) => e.name === '노인 장인').work, undefined);
+});
+
+test('⑦ a 학사일정 entry for one person becomes that person\'s 일정 (undoable); one for a group stays', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-062-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  s.applyAuto(w.worldId, [{ type: 'group', name: '별시계 학원' }, { type: 'person', name: '하윤' }]);
+  const school = s.listEntities(w.worldId).find((e) => e.type === 'group');
+  s.applyCalendar(w.worldId, [
+    { ownerId: school.entityId, date: '1891-07-31', name: '입학 답장 마감', who: '하윤', evidence: '하윤은 31일까지 답장을 보내야 했다.' },
+    { ownerId: school.entityId, date: '1891-09-01', name: '입학식', who: '1학년 전체', evidence: '9월 1일 입학식.' },
+  ], { yearStart: 9 });
+  const ch = s.personalEvents(w.worldId);
+  const E = s.listEntities(w.worldId);
+  const own = E.find((e) => e.type === 'schedule' && e.name === '입학 답장 마감');
+  assert.equal(own.fields.who, '하윤');
+  assert.match(own.fields.when, /1891-07-31/);
+  const cal = E.find((e) => e.calendar);
+  assert.deepEqual(Object.values(cal.calendar.events).map((x) => x.name), ['입학식']);
+  const moved = ch.find((c) => c.action === 'event');
+  s.undoChange(w.worldId, moved.id);
+  assert.equal(Object.values(s.listEntities(w.worldId).find((e) => e.calendar).calendar.events).length, 2);
+});

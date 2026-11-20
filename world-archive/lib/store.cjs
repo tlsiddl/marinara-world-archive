@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { findPairs, describedPairs, speciesPairs, thingPairs, TITLE_WORDS } = require('./same.cjs');
-const { rosterOf, ROLE_WORDS } = require('./roster.cjs');
+const { rosterOf, ROLE_WORDS, animalIn } = require('./roster.cjs');
 const TT = require('./timetable.cjs');
 const CAL = require('./calendar.cjs');
 const N = require('./names.cjs');
@@ -268,9 +268,6 @@ const NAME_FUNC = new Set(['of', 'the', 'and', 'for', 'a', 'an', 'in', 'on', 'at
 const COMMON_ALONE = new Set([...TITLE_WORDS, 'goblin', 'wizard', 'witch', 'boy', 'girl', 'man', 'woman', 'child', 'kid', 'headmaster', 'headmistress', 'prefect', 'butler', 'maid', 'nanny', 'governess', 'cook', 'coachman', 'footman', 'student', 'teacher', 'master', 'mistress', 'duke', 'duchess', 'father', 'mother', 'papa', 'mama', 'grandma', 'grandpa', 'darling', 'dear', 'sweetheart',
   '고블린', '마법사', '마녀', '소년', '소녀', '남자', '여자', '아이', '교장', '반장', '집사', '하녀', '유모', '가정교사', '요리사', '마부', '하인', '학생', '아버지', '어머니', '아빠', '엄마', '할머니', '할아버지', '공작', '공작부인', '아가씨', '도련님']);
 /** v0.6.2 ⑤: animal words — an other name with one the setting itself is not (불사조 → 「은색 표범」) is another being. */
-// each animal once, its Korean and English words together (부엉이 = owl), so a translation is not another animal
-const ANIMALS = [['표범', 'leopard', 'panther'], ['고양이', 'cat', 'kitten'], ['개', '강아지', 'dog', 'puppy', 'hound'], ['늑대', 'wolf'], ['여우', 'fox'], ['부엉이', '올빼미', 'owl'], ['까마귀', 'raven', 'crow'], ['뱀', 'snake', 'serpent'], ['쥐', 'rat', 'mouse'], ['두꺼비', 'toad'], ['불사조', 'phoenix'], ['용', '드래곤', 'dragon'], ['사슴', 'stag', 'deer'], ['곰', 'bear'], ['토끼', 'rabbit', 'hare'], ['말', 'horse', 'pony'], ['니즐', '크니즐', 'kneazle', 'half-kneazle']];
-const animalIn = (s) => { const w = String(s || '').normalize('NFC').toLowerCase().split(/[^\p{L}-]+/u).filter(Boolean); return ANIMALS.filter((g) => g.some((x) => (/[a-z]/.test(x) ? w.includes(x) || w.includes(x + 's') : w.some((y) => y === x || (x.length >= 2 && y.endsWith(x)))))).map((g) => g[0]); };
 function nameLike(alias) {
   const a = String(alias || '').trim();
   if (!a) return false;
@@ -524,6 +521,7 @@ function validEntity(e) {
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
     (e.maybe === undefined || (Array.isArray(e.maybe) && e.maybe.every((m) => isObject(m) && typeof m.id === 'string'))) &&
     (e.room === undefined || e.room === null || (typeof e.room === 'string' && ID_RE.test(e.room))) &&
+    (e.work === undefined || e.work === null || (typeof e.work === 'string' && ID_RE.test(e.work))) &&
     (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
@@ -1174,6 +1172,10 @@ class Archive {
         const x = (e.extra || []).find((y) => y.label === c.key);
         if (!x || x.value !== c.after || x.source !== 'auto') throw new ArchiveError(409, later);
         if (c.before) x.value = c.before; else e.extra = e.extra.filter((y) => y !== x);
+      } else if (c.action === 'work') {
+        if ((e.work || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.work = c.before; else delete e.work;
+        if (!c.before && e.sources) delete e.sources.work;
       } else if (c.action === 'room') {
         if ((e.room || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.room = c.before; else delete e.room;
@@ -2172,7 +2174,46 @@ class Archive {
       gone.push(...stale.map((r) => ({ ...this.relationLog(doc, r, 'relation-remove', by, meta), why: 'affiliation changed' })));
       this.pushHistory(worldId, gone);
     }
-    return [...gone, ...this.applyRelations(worldId, found, { ...meta, by })];
+    return [...gone, ...this.applyRelations(worldId, found, { ...meta, by }), ...this.linkWork(worldId, ids, { ...meta, by })];
+  }
+
+  /**
+   * v0.6.2 ⑥: 「일하는 곳」 — a piece of a person's 소속 칸 that names a place (a shop, a house: 「올리밴더스」 ·
+   * 「리키 콜드런 주인」) and no group: the person works there (e.work, person → place), not a group to make. The longest
+   * place name wins. Set by code ('work', undoable); the person's own choice (sources.work 'manual') stays.
+   */
+  linkWork(worldId, ids = null, meta = {}) {
+    const doc = this.readEntities(worldId);
+    const places = doc.entities.filter((e) => e.type === 'place');
+    const groups = doc.entities.filter((e) => e.type === 'group');
+    const t = now();
+    const changes = [];
+    for (const p of doc.entities) {
+      if (p.type !== 'person' || (ids && !ids.includes(p.entityId)) || p.sources?.work === 'manual') continue;
+      const aff = String(p.fields?.affiliation || '');
+      if (!aff.trim()) continue;
+      let best = null;
+      for (const piece of aff.split(/[,，、;/]|\s및\s/)) {
+        const k = squashName(piece);
+        if (k.length < 2 || groups.some((g) => namesGroup(piece, g))) continue;
+        for (const pl of places) {
+          const len = Math.max(0, ...[pl.name, ...(pl.aliases || [])].map(squashName).filter((n) => n.length >= 2 && (n === k || (n.length >= 3 && k.includes(n)))).map((n) => n.length));
+          if (len && (!best || len > best.len)) best = { pl, len };
+        }
+      }
+      if (!best || p.work === best.pl.entityId) continue;
+      const before = p.work || null;
+      p.work = best.pl.entityId;
+      p.sources = { ...(p.sources || {}), work: 'auto' };
+      p.revision++;
+      p.updatedAt = t;
+      const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
+      changes.push({ id: randomUUID(), at: t, by: meta.by || 'affiliation', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: p.entityId, entityIds: [p.entityId, best.pl.entityId], name: p.name, type: 'person', action: 'work', before, after: best.pl.entityId, beforeName: nameOf(before), afterName: best.pl.name, evidence: '소속: ' + aff.slice(0, 280) });
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
   }
 
   /**
@@ -2578,6 +2619,49 @@ class Archive {
     }
     for (const e of touched) if (!changes.some((c) => c.entityId === e.entityId && c.action === 'create')) { e.revision++; e.updatedAt = t; }
     if (!changes.length && !touched.size) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * v0.6.2 ⑦: a 학사일정 entry whose 누가 is one person of the world (「입학 답장 마감」 · 이리나) is that person's own
+   * 일정: it becomes a schedule (언제 · 누가 · 어디서, auto) and leaves the 학사일정 — both recorded, both undoable.
+   * 학사일정 stays for what a whole group or place does. Returns the changes.
+   */
+  personalEvents(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const people = doc.entities.filter((e) => e.type === 'person');
+    const t = now();
+    const by = meta.by || 'calendar';
+    const changes = [];
+    const oneOf = (who) => {
+      const w = String(who || '').trim();
+      if (!w || /[,，、/·]|\s(및|와|과|그리고)\s|(전체|모두|전원|학년|학생들|들)$/.test(w)) return null;
+      const k = squashName(w);
+      const hit = people.filter((p) => [p.name, ...(p.aliases || [])].some((n) => squashName(n) === k));
+      return hit.length === 1 ? hit[0] : null;
+    };
+    for (const sheet of [...doc.entities]) {
+      const events = sheet.calendar?.events;
+      if (!events) continue;
+      for (const ev of Object.values(events)) {
+        const p = oneOf(ev.who);
+        if (!p || ev.source === 'manual' || doc.entities.length >= ENTITY_MAX) continue;
+        const placeName = ev.placeId ? doc.entities.find((x) => x.entityId === ev.placeId)?.name || ev.place : ev.place;
+        const when = [ev.date ? String(ev.date).replace(/^--/, '') : ev.when, ev.end ? `~ ${ev.end}` : ''].filter(Boolean).join(' ');
+        const e = { entityId: randomUUID(), type: 'schedule', name: String(ev.name).slice(0, 80), aliases: [], description: `「${sheet.name}」 학사일정에서 옮김 — ${p.name} 한 사람의 일`, fields: { when, who: p.name, ...(placeName ? { where: placeName } : {}) }, extra: [], pinned: false, sources: { when: 'auto', who: 'auto', ...(placeName ? { where: 'auto' } : {}), description: 'auto' }, status: 'confirmed', provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence: String(ev.evidence || '').slice(0, 300) }, revision: 1, createdAt: t, updatedAt: t };
+        doc.entities.push(e);
+        changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: e.entityId, name: e.name, type: 'schedule', action: 'create', evidence: e.provenance.evidence, why: '한 사람의 일정' });
+        const before = structuredClone(ev);
+        delete events[ev.id];
+        sheet.revision++;
+        sheet.updatedAt = t;
+        changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: sheet.entityId, name: sheet.name, type: sheet.type, action: 'event', eventId: ev.id, before, after: null, evidence: String(ev.evidence || '').slice(0, 300), why: '한 사람의 일정이라 옮김' });
+      }
+    }
+    if (!changes.length) return [];
     this.writeJson(this.entityFile(worldId), doc);
     this.pushHistory(worldId, changes);
     return changes;

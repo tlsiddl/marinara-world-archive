@@ -353,6 +353,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           calEvents.push({ ...c, ownerId: owner?.entityId ?? null, ...(where?.type === 'place' ? { placeId: where.entityId } : {}) });
         }
         job.events = (job.events || 0) + s.applyCalendar(worldId, calEvents, { ...meta, yearStart }).filter((c) => c.action === 'event' || c.action === 'event-pending').length;
+        // v0.6.2 ⑦: one person's deadline is that person's 일정, not the 학사일정
+        job.added += s.personalEvents(worldId, meta).filter((c) => c.action === 'create').length;
         if (cal.dropped.length) log(`chat ${roomId}: left out events ${cal.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
         if (storyNow) s.setRoomStory(roomId, storyNow);
         if (tt.dropped.length) log(`chat ${roomId}: left out timetable cells ${tt.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
@@ -651,6 +653,8 @@ async function routes(r) {
     const removed = s().recheckRelations(req.params.worldId, { by: 'recheck' });
     // v0.5.0 O: other names that are pieces of sentences
     const aliasesOff = s().tidyAliases(req.params.worldId, { by: 'recheck' });
+    // v0.6.2 ⑦: 학사일정 entries that are one person's
+    const personal = s().personalEvents(req.params.worldId, { by: 'recheck' }).filter((c) => c.action === 'create').map((c) => c.name);
     // v0.6.2 ⑤: English words in Korean field values that the rooms' glossaries have
     const glossed = sentences?.glossary?.length ? s().glossaryValues(req.params.worldId, sentences.glossary, { by: 'recheck' }).length : 0;
     // v0.6.2 ②: 「한 번 나옴」 — the batches each setting was spoken of in, counted again from the history
@@ -668,7 +672,7 @@ async function routes(r) {
     s().linkSubgroups(req.params.worldId, { by: 'recheck' });
     const filled = s().fillGroups(req.params.worldId, { by: 'recheck' });
     s().linkAffiliations(req.params.worldId, null, { by: 'recheck' });
-    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
+    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, personal, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
   }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));
