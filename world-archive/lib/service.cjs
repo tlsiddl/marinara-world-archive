@@ -232,6 +232,13 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           if (g) s.setBase(worldId, g.entityId, pl.entityId, { roomId, by: 'reader', evidence: it.evidence });
         }
         for (const it of items) {
+          // v0.5.1 N: not sure it is that one — both stay, the pair is shown for the person to merge or keep apart
+          if (!it.maybe) continue;
+          const mine = afterSave.find((x) => x.type === it.type && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.name)));
+          const old = s.findByName(afterSave.filter((x) => x.type === it.type), it.maybe);
+          if (mine && old && mine.entityId !== old.entityId && s.markMaybe(worldId, mine.entityId, old.entityId, it.evidence)) job.unsure = (job.unsure || 0) + 1;
+        }
+        for (const it of items) {
           // v0.5.1 I: a person's 지내는 곳 — a place the world has (now); only the current one counts
           if (it.type !== 'person' || !it.room) continue;
           const pl = s.findByName(afterSave, it.room);

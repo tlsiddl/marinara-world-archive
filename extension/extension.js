@@ -783,7 +783,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       <button class="back" type="button" data-act="go" data-view="${type}">${icon('back')}${KIND[type].label} 목록</button>
       <div class="eyebrow">${person ? 'PEOPLE · SAME PERSON?' : 'SAME ONE?'} · ${pairs.length}</div>
       <h1>${person ? '같은 사람일 수 있음' : '같은 것일 수 있음'}</h1>
-      <p class="intro">이름이나 다른 이름이 겹치는 인물입니다. 같은 사람이면 「합치기」로 하나로 모을 수 있습니다. 자동으로 합치지는 않습니다. 합친 뒤에도 「기록」에서 되돌릴 수 있습니다.</p>
+      <p class="intro">이름이나 다른 이름이 겹치거나, 자동 반영이 같은 것인지 헷갈려 한 ${person ? '인물' : '설정'}입니다. 같은 ${person ? '사람' : '것'}이면 「합치기」로 하나로 모을 수 있습니다. 자동으로 합치지는 않습니다. 합친 뒤에도 「기록」에서 되돌릴 수 있습니다.</p>
       ${pairs.length ? pairs.map(({ a, b, why, ea, eb }) => {
         const key = `merge:${a}:${b}`;
         return `<div class="paper">

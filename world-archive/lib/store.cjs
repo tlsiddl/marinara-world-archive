@@ -464,6 +464,7 @@ function validEntity(e) {
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
     (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
+    (e.maybe === undefined || (Array.isArray(e.maybe) && e.maybe.every((m) => isObject(m) && typeof m.id === 'string'))) &&
     (e.room === undefined || e.room === null || (typeof e.room === 'string' && ID_RE.test(e.room))) &&
     (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
@@ -1775,6 +1776,22 @@ class Archive {
     );
   }
 
+  /**
+   * v0.5.1 N: the reader was not sure a new setting is one the world had — kept on the new one (maybe: [{ id, why }],
+   * up to 5) and shown first in 「같은 것일 수 있음」; merging or 「다른 것이에요」 is the person's.
+   */
+  markMaybe(worldId, newId, oldId, why = '') {
+    this.getWorld(worldId);
+    if (newId === oldId) return false;
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === newId);
+    const o = doc.entities.find((x) => x.entityId === oldId);
+    if (!e || !o || e.type !== o.type || (e.maybe || []).some((m) => m.id === oldId)) return false;
+    e.maybe = [...(e.maybe || []), { id: oldId, why: String(why).slice(0, 200), at: now() }].slice(-5);
+    this.writeJson(this.entityFile(worldId), doc);
+    return true;
+  }
+
   /** People who may be one person: [{ a, b, why }]. Only a suggestion; nothing is merged without mergeEntities. */
   listDuplicates(worldId) {
     this.getWorld(worldId);
@@ -1782,7 +1799,9 @@ class Archive {
     const doc = this.readEntities(worldId);
     const skip = (a, b) => gone.has(pairKey(a, b));
     const seen = new Set();
-    return [...findPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...describedPairs(doc.entities, doc.relations, skip).map((x) => ({ ...x, type: 'person' })), ...speciesPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...thingPairs(doc.entities, doc.relations, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
+    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+    const unsure = doc.entities.flatMap((e) => (e.maybe || []).filter((m) => byId.get(m.id)?.type === e.type && m.id !== e.entityId && !skip(e.entityId, m.id)).map((m) => ({ a: m.id, b: e.entityId, why: `자동 반영이 같은 것인지 헷갈려 했어요${m.why ? ` — 「${m.why}」` : ''}`, type: e.type, unsure: true })));
+    return [...unsure,...findPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...describedPairs(doc.entities, doc.relations, skip).map((x) => ({ ...x, type: 'person' })), ...speciesPairs(doc.entities, skip).map((x) => ({ ...x, type: 'person' })), ...thingPairs(doc.entities, doc.relations, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
   }
 
   /** 「다른 사람이에요」: the pair is not suggested again (by id, so renaming either does not bring it back). */

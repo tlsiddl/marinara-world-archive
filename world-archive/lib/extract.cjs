@@ -173,7 +173,7 @@ ${KIND_GUIDE}
 - custom(기타)은 위 어디에도 안 맞을 때만 쓴다. 무리·행렬·조직은 group, 지켜야 하는 관례·금기·법은 rule, 작동 원리는 system, 정해진 때에 돌아오는 날·행사는 schedule, 이야기 전의 과거 일은 history다.
 
 각 항목:
-{"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
+{"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","maybe":"같은 것인지 애매한 이미 있는 항목 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
 
 칸 키 (이것 말고는 쓰지 마):
 ${fieldGuide()}
@@ -196,7 +196,7 @@ ${fieldGuide()}
 - [프로필] 표시가 붙은 문장은 답변에 붙은 프로필 블록(<npc_profile> · <world_profile>)이다. 이야기에 아직 나오지 않았어도 확정된 설정으로 받는다. 칸은 이렇게 맞춘다: 이름/나이/성별 → name · age · gender, 외형과 옷차림 → appearance, 태도와 주요 성격 → personality, 그 밖에 눈에 띄는 것 → background나 memo(며칠 뒤에도 사실일 것만). 같은 사실이 본문과 프로필에 둘 다 있으면 항목 · 칸을 하나로 적고 n에 둘 다 적는다. 이미 있는 항목이면 match로 잇는다.
 - 집단의 members(구성원)에는 구성(예: 남학생 다섯 명, 여학생 네 명)만 쓰고 사람 이름을 늘어놓지 않는다. size(전체 인원)에는 근거가 있으면 그 집단의 전체 인원 수를 「N명」으로 적는다(나뉘어 적혀 있으면 합친 수, 예: 9명). 이름을 아는 사람 수가 아니라 전체 수다. 수가 안 나오면(「많다」, 「수십 명」) 적지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
 
-같은 사람 잇기: [이미 있는 항목]의 인물을 성만, 이름만, 직함(반장, 사감, 교수)으로 부르면 새로 만들지 말고 match에 그 인물 이름을 적고, 그 호칭은 aliases에 넣는다. 같은 사람인지 애매하면 이번에는 만들지 않는다(다음 대화에서 다시 본다).
+같은 사람 잇기: [이미 있는 항목]의 인물을 성만, 이름만, 직함(반장, 사감, 교수)으로 부르면 새로 만들지 말고 match에 그 인물 이름을 적고, 그 호칭은 aliases에 넣는다. 같은 사람인지 애매하면(장소 · 집단 · 규칙 같은 것도) 버리지 말고 새 항목으로 적되 maybe에 그 이미 있는 항목 이름을 적는다 — 프로그램이 「같은 것일 수 있음」으로 띄우고 사용자가 합칠지 고른다. 확실하면 match를 쓴다.
 
 규칙·시스템·일정·역사·기타는 이름을 설명형으로 지어도 된다(예: "밤에는 문을 세 번 두드린다", "기숙사 점수", "북부 전쟁"). 이미 있는 규칙·시스템·일정·역사·기타와 같은 내용이면 새로 만들지 말고 match에 그 이름을 그대로 적는다.
 
@@ -424,6 +424,8 @@ function checkItems(parsed, part, cast) {
       name,
       aliases,
       match: typeof it.match === 'string' && it.match.trim() ? it.match.trim() : null,
+      // v0.5.1 N: not sure it is that one — made, and shown as 「같은 것일 수 있음」
+      maybe: typeof it.maybe === 'string' && it.maybe.trim() && !(typeof it.match === 'string' && it.match.trim()) ? clip(it.maybe.trim(), 80) : null,
       fields: f.fields,
       fieldEvidence: f.fieldEvidence,
       hidden: f.hidden,
