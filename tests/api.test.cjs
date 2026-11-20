@@ -323,7 +323,7 @@ test('the same four functions are offered in-process on globalThis.__marinaraWor
   const { s, w, ids } = sceneSetup(t, { auto: { enabled: true } });
   const api = globalThis.__marinaraWorldArchive.api;
   assert.equal(api.version, 1);
-  assert.deepEqual(Object.keys(api).sort(), ['lookup', 'names', 'roomEntities', 'suggest', 'version']);
+  assert.deepEqual(Object.keys(api).sort(), ['contract', 'entity', 'features', 'lookup', 'names', 'roomEntities', 'roomRelations', 'suggest', 'version'], 'v1 functions kept, v2 added');
   assert.equal(api.roomEntities('room').entities.length, 4);
   assert.deepEqual(api.names('room'), { names: [] }, 'no romanized other names yet');
   assert.deepEqual(api.names('../x'), { names: [] });

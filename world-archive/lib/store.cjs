@@ -66,6 +66,8 @@ const EXTRA_LABEL = 40;
 const FIELDS = {
   person: [
     { key: 'gender', label: '성별', kind: 'line' },
+    // 종: only a being that is not a person (고양이 · 부엉이 · 용). Empty means unknown, not "a person" (연동 v2).
+    { key: 'species', label: '종', kind: 'line' },
     { key: 'age', label: '나이·생일', kind: 'line' },
     { key: 'affiliation', label: '소속', kind: 'line' },
     { key: 'appearance', label: '외형', kind: 'text' },

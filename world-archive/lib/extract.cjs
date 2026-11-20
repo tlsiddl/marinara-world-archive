@@ -139,6 +139,7 @@ ${fieldGuide()}
 
 칸 쓰는 법:
 - 칸마다 그 값이 나온 문장 번호를 n에 1~3개 적는다. 그 칸의 내용이 실제로 쓰인 문장이어야 한다(다른 사실이 쓰인 문장을 대지 마).
+- species(종)에는 사람이 아닌 존재(고양이 · 부엉이 · 용 · 집요정 같은)의 종만 쓴다. 사람이면 비워 둔다("사람"이라고 쓰지 마).
 - age(나이·생일)에는 나이를 나타내는 말만 쓴다(예: 열두 살, 노인, 50대). 몇 해째 일했다거나 외모 같은 것은 다른 칸에 쓴다.
 - state(지금 상태)에는 며칠 뒤에도 사실일 상태만 쓴다: 다침, 병, 이사, 직위·소속 변화, 관계 단절, 잃어버린 물건 같은 것. 지금 하는 동작, 잠깐 간 곳, 그날의 기분은 쓰지 않는다. 버릇·걸음걸이·말투는 상태가 아니라 appearance(외형)나 personality(성격)에 쓴다.
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
@@ -241,7 +242,9 @@ function overlap(value, evidence) {
 }
 const FIELD_OVERLAP = { line: 0.5, text: 0.2 };
 /** Fields that name a class rather than repeat the text (성별 from "그", 분류 "관례"): their sentence is enough. */
-const CLASS_FIELDS = new Set(['person.gender', 'group.kind', 'rule.category', 'system.category']);
+/** A 종 value that only says "a person". */
+const HUMAN_SPECIES = /^(사람|인간|인류|human|humans|person|people|mortal|muggle|머글|마녀|마법사|wizard|witch|mage)$/i;
+const CLASS_FIELDS = new Set(['person.gender', 'person.species', 'group.kind', 'rule.category', 'system.category']);
 
 /**
  * Fields come as {key: {v, n: ["12.3"]}} (each with its own evidence) or, as before, {key: "value"}.
@@ -257,6 +260,11 @@ function checkFields(type, raw, index, itemFound = []) {
   const droppedFields = [];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { fields, fieldEvidence, droppedFields };
   for (const [key, given] of Object.entries(raw)) {
+    // 종 is for a being that is not a person: "사람" (or the like) stays empty, which means unknown.
+    if (type === 'person' && key === 'species' && HUMAN_SPECIES.test(String((typeof given === 'string' ? given : given?.v) || '').trim())) {
+      droppedFields.push({ key, why: 'a person (species is only for other beings)' });
+      continue;
+    }
     if (typeof given === 'string') {
       fields[key] = given;
       continue;

@@ -378,6 +378,8 @@ async function routes(r) {
     memoryModule: globalThis.__marinaraMemory?.version ?? null,
     types: TYPES,
     fields: FIELDS,
+    contract: CONTRACT,
+    features: CONTRACT_FEATURES,
     budget: { default: BUDGET_DEFAULT, min: BUDGET_MIN, max: BUDGET_MAX },
     autoEvery: AUTO_EVERY,
   })));
@@ -455,6 +457,8 @@ async function routes(r) {
   r.get('/rooms/:roomId/entities', handle(async (req) => { s().getRoom(req.params.roomId); return roomEntities(req.params.roomId); }));
   r.get('/rooms/:roomId/lookup', handle(async (req) => { s().getRoom(req.params.roomId); return lookup(req.params.roomId, String(req.query?.name || '')); }));
   r.get('/rooms/:roomId/names', handle(async (req) => { s().getRoom(req.params.roomId); return names(req.params.roomId); }));
+  r.get('/rooms/:roomId/relations', handle(async (req) => { s().getRoom(req.params.roomId); return roomRelations(req.params.roomId); }));
+  r.get('/rooms/:roomId/entities/:entityId', handle(async (req) => { s().getRoom(req.params.roomId); return entity(req.params.roomId, String(req.params.entityId || '')); }));
   r.post('/rooms/:roomId/suggest', handle(async (req) => {
     s().getRoom(req.params.roomId);
     const by = typeof body(req).by === 'string' ? body(req).by : 'module';
@@ -476,6 +480,46 @@ async function routes(r) {
 // Contract: docs/연동-계약.md. The same four things are offered in-process on globalThis.__marinaraWorldArchive.api
 // (no HTTP, for preloads in the same server) and over HTTP under /api/world-archive/rooms/:roomId/….
 const compact = (e) => ({ entityId: e.entityId, type: e.type, name: e.name, aliases: e.aliases, fields: e.fields, description: e.description, pinned: e.pinned, sources: e.sources, updatedAt: e.updatedAt });
+
+/**
+ * The contract's level (연동 v2). The api's `version` stays 1 (v2 only adds); `contract` says which additions this
+ * server has, and a screen panel copied into another module (world-panel.js) compares its own number with it.
+ */
+const CONTRACT = 2;
+const CONTRACT_FEATURES = ['relations', 'species', 'entity'];
+/** Relations that make two people know each other from the start (연동 v2). 소속 · 위치 · 기타 do not. */
+const KNOW_TYPES = ['가족', '친구', '연인', '스승·제자', '적대'];
+const PAST_RE = /과거에는\s*(가족|친구|연인|스승·제자|적대)/g;
+
+/**
+ * GET …/relations (연동 v2): the people of the room's world who know each other from the start — family, friends,
+ * lovers, teacher and student, enemies — now or before ("과거에는 연인" in the note: previous). Each with both names.
+ * { worldId, relations: [{ relationId, from, to, fromName, toName, type, note, previous: [types] }] }.
+ */
+function roomRelations(roomId) {
+  const worldId = store().roomWorldId(roomId);
+  if (!worldId) return { worldId: null, relations: [] };
+  const doc = store().readEntities(worldId);
+  const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+  const out = [];
+  for (const r of doc.relations || []) {
+    const a = byId.get(r.from);
+    const b = byId.get(r.to);
+    if (!a || !b || a.type !== 'person' || b.type !== 'person') continue;
+    const previous = [...String(r.note || '').matchAll(PAST_RE)].map((m) => m[1].trim()).filter((t) => KNOW_TYPES.includes(t) && t !== r.type);
+    if (!KNOW_TYPES.includes(r.type) && !previous.length) continue;
+    out.push({ relationId: r.relationId, from: a.entityId, to: b.entityId, fromName: a.name, toName: b.name, type: r.type, note: r.note || '', previous });
+  }
+  return { worldId, relations: out };
+}
+
+/** GET …/entities/:entityId (연동 v2): one setting of the room's world, or null. */
+function entity(roomId, entityId) {
+  const worldId = store().roomWorldId(roomId);
+  if (!worldId) return { worldId: null, entity: null };
+  const e = store().readEntities(worldId).entities.find((x) => x.entityId === entityId);
+  return { worldId, entity: e ? compact(e) : null };
+}
 
 function roomEntities(roomId) {
   const worldId = store().roomWorldId(roomId);
@@ -548,7 +592,7 @@ function branchOnSend(req, reply, payload) {
 }
 
 function attach(app) {
-  if (globalThis.__marinaraWorldArchive) globalThis.__marinaraWorldArchive.api = { version: 1, roomEntities, lookup, suggest, names };
+  if (globalThis.__marinaraWorldArchive) globalThis.__marinaraWorldArchive.api = { version: 1, contract: CONTRACT, features: CONTRACT_FEATURES, roomEntities, lookup, suggest, names, roomRelations, entity };
   app.register(routes, { prefix: PREFIX });
   app.addHook('preHandler', sceneBeforeReply);
   app.addHook('onSend', (req, reply, payload, done) => {
@@ -569,4 +613,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
+module.exports = { CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
