@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.5.1';
+  const VERSION = '0.6.0';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -248,6 +248,88 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
 :host([data-embedded]){display:block;height:100%}
 :host([data-embedded]) #launch,:host([data-embedded]) #backdrop,:host([data-embedded]) #close{display:none!important}
 :host([data-embedded]) #panel{position:relative;left:auto;top:auto;transform:none;width:100%;height:100%;min-height:560px;z-index:auto;box-shadow:none;border-radius:0}
+/* ===== v0.6.0 세계관 칸 (시안 C · E · F · G, 사용자 확정 2026-11-21) — 기억 서재 클래스 이름(subtabs · world-card · rail-stat …)을 그대로 씀 ===== */
+:host{--wt-cream:#f3efe2;--wt-cream-line:#ddd5bf;--wt-c1:#e3e8f2;--wt-c1-line:#c9d2e3;--wt-c3:#ecebe8;--wt-c3-line:#d6d4cf;--wt-c4:#dfe6e9;--wt-c4-line:#c5d0d5;--wt-c6:#eef0f6;--wt-c6-line:#d3d8e6;--wt-c7:#e6ece4;--wt-c7-line:#cad6c6;--wt-c8:#ece6ee;--wt-c8-line:#d6cbdb;
+  --wt-white:#fff;--wt-night:#1b1c22;--wt-night-ink:#eeebe3;--wt-night-sub:#a9adbd;--wt-blue:#4c5d8f;--wt-gothic:"Gowun Batang","Nanum Myeongjo","Noto Serif KR",Georgia,serif}
+:host([data-theme=dark]){--wt-cream:#2a2721;--wt-cream-line:#4a4437;--wt-c1:#252a33;--wt-c1-line:#3a4252;--wt-c3:#292826;--wt-c3-line:#413f3b;--wt-c4:#242a2c;--wt-c4-line:#3a4649;--wt-c6:#272930;--wt-c6-line:#3e4250;--wt-c7:#252a24;--wt-c7-line:#3c4639;--wt-c8:#2a262c;--wt-c8-line:#453c49;
+  --wt-white:#1f1e1c;--wt-night:#0d0d0c;--wt-night-ink:#ece8df;--wt-night-sub:#a39d92;--wt-blue:#a9b6d8}
+.subtabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px}
+.subtab{border:1px solid var(--wa-line);background:var(--wa-paper);color:var(--wa-ink);border-radius:999px;padding:5px 12px;font-size:11px;line-height:1.6}
+.subtab:hover{background:var(--wa-soft)}.subtab.selected{background:var(--wa-ink);color:var(--wa-paper);border-color:var(--wa-ink)}
+.wt-years{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 6px;align-items:center}.wt-years>span{font-size:11px;color:var(--wa-muted);margin-right:4px}
+.wt-year{padding:5px 14px;border:1px solid var(--wa-ink);border-radius:999px;font:600 13px var(--wt-gothic);line-height:1.4}
+.wt-year.past{opacity:.55}.wt-year.now{background:var(--wa-ink);color:var(--wa-paper)}.wt-year.next{border-style:dashed;opacity:.75}
+.wt-year.none{border:1px dashed var(--wa-line);font:12px var(--wa-sans);color:var(--wa-muted)}.wt-year.on{outline:2px solid var(--wa-ink);outline-offset:2px}.wt-year.now.on{outline:0}
+.wt-eyebrow{font:10px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted);margin:18px 0 2px;display:flex;align-items:center;gap:10px}.wt-eyebrow:after{content:"";flex:1;max-width:220px;border-top:1px dashed currentColor;opacity:.6}
+.wt-h1{margin:0 0 4px}.wt-h1 span{font-size:18px;color:var(--wa-muted);font-weight:700}.wt-lead{margin:0 0 6px;color:var(--wa-muted)}
+.wt-find{width:100%;margin:10px 0 0;padding:9px 14px;border:1px solid var(--wa-line);border-radius:999px;background:transparent}
+.wt-sec{margin:22px 0 8px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700}.wt-sec:after{content:"";flex:1;border-top:1px dashed var(--wa-line)}
+.wt-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.cap{display:inline-block;padding:3px 11px;border:1px solid var(--wa-ink);border-radius:999px;font-size:11px;line-height:1.6;white-space:nowrap;background:transparent;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:var(--wa-muted)}
+.world-card{border-top:1px solid var(--wa-line);padding:12px 0}.world-card h3{margin:0 0 6px;display:flex;align-items:center;gap:8px;font:700 15px var(--wa-serif)}.world-card h3 button{border:0;padding:0;font:inherit}
+.world-field{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0}.world-field>span{flex:0 0 64px;font-size:11px}
+.wt-grp{font-size:11px;color:var(--wa-muted);margin:6px 0 3px}
+.wt-rule{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--wa-line);font-size:13px}.wt-rule b{min-width:150px;flex:none;font-family:var(--wa-serif)}.wt-rule button{border:0;padding:0;text-align:left;font:inherit;font-weight:700;min-width:150px;flex:none}
+.wt-rule span{color:var(--wa-ink);overflow-wrap:anywhere}.wt-rule small{color:var(--wa-muted)}
+.wt-empty{color:var(--wa-muted);font-size:12.5px;margin:6px 0}
+/* 시간표 (시안 E) */
+.wt-tt{width:100%;border-collapse:separate;border-spacing:6px;table-layout:fixed;margin:0 -6px}
+.wt-tt th{font:600 15px/1.2 var(--wt-gothic);padding:8px 0 10px;border-bottom:1.5px solid var(--wa-ink);text-align:center}
+.wt-tt th small{display:block;font:9px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted);margin-top:3px}
+.wt-tt th.today{background:var(--wt-cream);border-radius:10px 10px 0 0}.wt-tt th.blank{width:64px;border:0}
+.wt-tt td{vertical-align:top;padding:0}.wt-tt td.t{width:64px;text-align:right;padding:10px 6px 0 0;font-size:11px;color:var(--wa-muted)}.wt-tt td.t b{display:block;color:var(--wa-ink);font:600 12px var(--wt-gothic)}
+.wt-tt td.todaycol{background:var(--wt-cream);border-radius:0 0 10px 10px}
+.wt-c{border-radius:12px;padding:10px 10px 9px;height:100%;min-height:58px;border:1px solid transparent;text-align:left;width:100%;display:block}
+.wt-c b{display:block;font:600 14px/1.25 var(--wt-gothic);overflow-wrap:anywhere}.wt-c small{display:block;font-size:10px;color:var(--wa-muted);margin-top:3px}
+.wt-c.s1{background:var(--wt-c1);border-color:var(--wt-c1-line)}.wt-c.s2{background:var(--wt-cream);border-color:var(--wt-cream-line)}.wt-c.s3{background:var(--wt-c3);border-color:var(--wt-c3-line)}
+.wt-c.s4{background:var(--wt-c4);border-color:var(--wt-c4-line)}.wt-c.s5{background:var(--wt-c6);border-color:var(--wt-c6-line)}.wt-c.s6{background:var(--wt-c7);border-color:var(--wt-c7-line)}.wt-c.s7{background:var(--wt-c8);border-color:var(--wt-c8-line)}
+.wt-c.changed{background:var(--wt-white);border-color:var(--wa-ink)}.wt-c.wide{opacity:.55}
+.wt-was{font-size:10px;color:var(--wt-blue);margin-top:4px}
+.wt-free{border:1px dashed var(--wa-line);border-radius:12px;min-height:58px}
+.wt-lunch td.l{text-align:center;font-size:11px;color:var(--wa-muted);letter-spacing:6px;padding:4px 0;border-top:1px dashed var(--wa-line);border-bottom:1px dashed var(--wa-line)}
+.wt-night{background:var(--wt-night);color:var(--wt-night-ink);border-radius:12px;padding:10px;position:relative;overflow:hidden;min-height:58px;border:1px solid var(--wt-night);text-align:left;width:100%;display:block}
+:host([data-theme=dark]) .wt-night{border-color:var(--wa-field-line)}
+.wt-night b{display:block;color:var(--wt-night-ink);font:600 14px/1.25 var(--wt-gothic)}.wt-night small{display:block;color:var(--wt-night-sub);font-size:10px;margin-top:3px}
+.wt-night i{position:absolute;width:2px;height:2px;border-radius:50%;background:var(--wt-night-ink);opacity:.75}
+.wt-clash{font-size:12px;margin:6px 0;color:var(--wa-muted)}
+.wt-dtab{display:none;gap:6px;margin:6px 0 14px}.wt-dtab button{flex:1;text-align:center;padding:8px 0;border:1px solid var(--wa-ink);border-radius:999px;font:600 14px var(--wt-gothic)}
+.wt-dtab button.td{background:var(--wt-cream)}.wt-dtab button.on{background:var(--wa-ink);color:var(--wa-paper)}
+.wt-day{display:none}.wt-drow{display:grid;grid-template-columns:58px minmax(0,1fr);gap:10px;margin-bottom:8px;align-items:stretch}
+.wt-drow .t{text-align:right;font-size:11px;color:var(--wa-muted);padding-top:10px}.wt-drow .t b{display:block;color:var(--wa-ink);font:600 12px var(--wt-gothic)}
+.wt-dlunch{text-align:center;font-size:11px;letter-spacing:6px;color:var(--wa-muted);border-top:1px dashed var(--wa-line);border-bottom:1px dashed var(--wa-line);padding:4px 0;margin:4px 0 10px 68px}
+/* 학사일정 (시안 F) */
+.wt-mon{display:flex;align-items:baseline;gap:10px;margin:22px 0 8px}.wt-mon b{font:600 20px var(--wt-gothic)}.wt-mon small{font:9px var(--wa-mono);letter-spacing:2px;color:var(--wa-muted)}
+.wt-mon:after{content:"";flex:1;border-top:1.5px solid var(--wa-ink);transform:translateY(-5px)}
+.wt-newyear{display:flex;align-items:center;gap:12px;margin:28px 0 4px}.wt-newyear b{font:600 26px var(--wt-gothic)}.wt-newyear:after{content:"";flex:1;border-top:3px double var(--wa-ink)}
+.wt-ev{display:grid;grid-template-columns:62px minmax(0,1fr) auto;gap:12px;align-items:center;padding:9px 12px;border-radius:12px;margin:6px 0;background:var(--wa-paper);border:1px solid var(--wa-line);width:100%;text-align:left;font-weight:400}
+.wt-ev:hover{background:var(--wa-paper);filter:brightness(.98)}
+.wt-ev .d{text-align:center;font:600 20px/1 var(--wt-gothic)}.wt-ev .d small{display:block;font:10px var(--wa-mono);color:var(--wa-muted);margin-top:4px;letter-spacing:1px}
+.wt-ev .n b{display:block;font:600 15px var(--wt-gothic);overflow-wrap:anywhere}.wt-ev .n small{color:var(--wa-muted);font-size:11px}
+.wt-ev .k{font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--wa-ink);white-space:nowrap}
+.wt-ev.past{opacity:.45}.wt-ev.c1{background:var(--wt-c1);border-color:var(--wt-c1-line)}.wt-ev.c2{background:var(--wt-cream);border-color:var(--wt-cream-line)}.wt-ev.c3{background:var(--wt-c3);border-color:var(--wt-c3-line)}
+.wt-ev.next{background:var(--wt-night);color:var(--wt-night-ink);border-color:var(--wt-night)}:host([data-theme=dark]) .wt-ev.next{border-color:var(--wa-field-line)}
+.wt-ev.next .n small,.wt-ev.next .d small{color:var(--wt-night-sub)}.wt-ev.next .k{border-color:var(--wt-night-ink)}
+.wt-ev.cancel .n b{text-decoration:line-through}.wt-ev.cancel .k{border-style:dashed;color:var(--wa-muted)}.wt-ev.noyear{border-style:dashed}
+.wt-today{display:flex;align-items:center;gap:8px;margin:12px 0;color:var(--wt-blue);font-size:11px;font-weight:700}
+.wt-today:before{content:"";width:9px;height:9px;border-radius:50%;background:var(--wt-blue)}.wt-today:after{content:"";flex:1;border-top:1.5px solid var(--wt-blue)}
+.wt-ev .was{color:var(--wt-blue);font-size:10px;margin-left:6px}
+/* 오른쪽 칸 (기억 서재 inspector와 같은 모양) */
+.rail-stat{display:flex;align-items:center;gap:14px;padding:8px 0}.rail-stat b{flex:none;width:64px;height:64px;border-radius:50%;display:grid;place-items:center;font:700 15px var(--wa-serif);color:#151515;
+  background:radial-gradient(circle,#151515 0 1.6px,#f4f1ea 2.2px 14px,#151515 14.5px 15.5px,#0000 16px),repeating-radial-gradient(circle,#151515 0 1.1px,#2a2a2a 1.5px 2.4px);box-shadow:0 3px 8px #0004;transition:transform .6s}
+.rail-stat:hover b{transform:rotate(200deg)}
+.rail-stat span{font-size:13px;line-height:1.5}.rail-stat small{display:block;font-size:11px;color:var(--wa-muted)}
+.rail-divider{border-top:1.5px dashed var(--wa-line);margin:18px 0}.rail-note h3{font:700 13px var(--wa-serif);margin:0 0 6px}.rail-note p{font-size:11px;color:var(--wa-muted);margin:0;line-height:1.8}
+/* 기억 서재의 「세계관」 칸 안: 옆 메뉴 · 위 · 오른쪽 칸 없이 내용만(기억 서재가 그 셋을 가짐) */
+:host([data-embedded]) #panel{grid-template-columns:minmax(0,1fr);border:0;background:transparent}
+:host([data-embedded]) .side,:host([data-embedded]) .top,:host([data-embedded]) .rail{display:none!important}
+:host([data-embedded]) main{padding:24px 30px 40px}
+@media(max-width:720px){
+  .wt-tt{display:none}.wt-dtab{display:flex}.wt-day.on{display:block}
+  .wt-rule{flex-direction:column;gap:2px}.wt-rule b,.wt-rule button{min-width:0}
+  .wt-ev{grid-template-columns:46px minmax(0,1fr);gap:10px}.wt-ev .k{grid-column:2;justify-self:start}
+  :host([data-embedded]) main{padding:16px 14px 40px}
+}
 `;
 
   // ------------------------------------------------------------------ mount
@@ -286,7 +368,13 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     room: null,
     roomName: '',
     preview: null,
-    view: 'overview', // overview | <type> | world | new-world
+    view: 'tabs', // tabs (v0.6.0 세계관 칸) | overview | <type> | world | new-world
+    tab: null, // 세계관 칸: 'world' | 'unknown' | a big place's id
+    year: null, // 학년도 shown (null: the story's now)
+    tabQuery: '',
+    ttDay: null, // 시간표 on a phone: the day shown
+    rosterOpen: new Set(),
+    fromTabs: false, // a card opened from the 세계관 칸: 「돌아가기」 goes back there
     detail: null, // entityId shown in full
     editing: null, // entityId | 'new'
     draft: null, // form values kept while switching kind in the form
@@ -423,7 +511,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   const roomTitle = () => esc(st.roomName || (activeChatId() ? '지금 채팅방' : '열린 채팅방 없음'));
 
   function sideHtml() {
-    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)]), ...(world()?.scoreboard?.name ? [['scores', '점수판', 'score', null]] : []), ['log', '기록', 'log', null]];
+    const items = [['tabs', '세계관', 'world', null], ['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)]), ...(world()?.scoreboard?.name ? [['scores', '점수판', 'score', null]] : []), ['log', '기록', 'log', null]];
     return `
       <div class="brand">${BRAND}<div><b>세계관 설정집</b><small>WORLD ARCHIVE</small></div></div>
       <div class="nav-label">YOUR WORLD</div>
@@ -501,7 +589,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   function railHtml() {
     const p = st.preview;
     const s = roomState();
-    return `
+    return `${st.view === 'tabs' && world() ? `${worldRailHtml()}<hr>` : ''}
       <div class="rail-title">이 방</div>
       <div class="room">${roomTitle()}</div>
       <p>${roomLine()}</p>
@@ -594,7 +682,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     if (st.rosters[id]) return;
     st.rosters[id] = { loading: true };
     try { st.rosters[id] = await api('GET', `/worlds/${st.worldId}/entities/${id}/members`); } catch { st.rosters[id] = { members: [], failed: true }; }
-    if (st.detail === id) render();
+    if (st.detail === id || st.view === 'tabs') render();
   }
   function rosterHtml(g) {
     const r = st.rosters?.[g.entityId];
@@ -732,7 +820,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     const empty = !facts && !secs && !extra && !memo && !f.state && !rels;
     const askKey = `entity:${e.entityId}`;
     return `
-      <button class="back" type="button" data-act="go" data-view="${e.type}">${icon('back')}${k.label} 목록</button>
+      ${st.fromTabs ? `<button class="back" type="button" data-act="go" data-view="tabs">${icon('back')}세계관 칸으로</button>` : `<button class="back" type="button" data-act="go" data-view="${e.type}">${icon('back')}${k.label} 목록</button>`}
       <div class="paper">
         <div class="sheet-head">
           <div>
@@ -994,10 +1082,289 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     return head + `<div class="paper">${totals}</div>` + add + list;
   }
 
+  // ------------------------------------------------------------------ 세계관 칸 (v0.6.0 · 시안 C · E · F · G)
+  // 장소별 탭: a tab per big place (a place in no other place) holding the places inside it, the groups based there
+  // (and their smaller groups), the rules and systems that hold there, and their 시간표 · 학사일정. 「세계 전체」: what
+  // holds everywhere. 「모름」: what no place has yet. All worked out here from the settings and relations (no new API).
+  const DAY_EN = { 월: 'MON', 화: 'TUE', 수: 'WED', 목: 'THU', 금: 'FRI', 토: 'SAT', 일: 'SUN' };
+  const MONTH_EN = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+  const KO_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+  const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
+  const ROLE_RE = /(교수|교사|선생|사감|기숙사장|반장|감독생|교장|부교장|학장|원장|단장|부단장|회장|부회장|대장|주장|관리인|관리자|사서|집사|하인|하녀|시종|주인|점원|지배인|족장|우두머리|지도자|수장|창립자|설립자|출신|졸업)/;
+  const hasYear = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+  const utc = (d) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
+  const dowOf = (d) => KO_DAYS[new Date(utc(d)).getUTCDay()];
+  const fmtKo = (d) => (hasYear(d) ? `${Number(d.slice(0, 4))}년 ${Number(d.slice(5, 7))}월 ${Number(d.slice(8, 10))}일` : String(d || '').replace(/^--(\d\d)-(\d\d)$/, (_, m, dd) => `${Number(m)}월 ${Number(dd)}일`));
+  /** The school year (학년도) a date belongs to — the same as world-archive/lib/calendar.cjs schoolYear. */
+  function schoolYearOf(date) {
+    if (!hasYear(date)) return null;
+    const start = world()?.yearStart || 9;
+    const y = Number(date.slice(0, 4));
+    const first = Number(date.slice(5, 7)) >= start ? y : y - 1;
+    return start === 1 ? String(first) : `${first}–${String(first + 1).slice(-2)}`;
+  }
+  /** The story's today in this room (when the room reads the world on screen): { date, weekday } or null. */
+  const storyToday = () => (st.room?.worldId === st.worldId && st.room?.story?.date ? st.room.story : null);
+
+  function worldMap() {
+    const byId = new Map(st.entities.map((e) => [e.entityId, e]));
+    const rels = st.relations || [];
+    const up = new Map(); // a place → the place it is in (위치)
+    for (const r of rels) if (r.type === '위치' && byId.get(r.from)?.type === 'place' && byId.get(r.to)?.type === 'place' && !up.has(r.from)) up.set(r.from, r.to);
+    const chain = (id) => { const out = []; const seen = new Set([id]); let x = id; while (up.has(x) && !seen.has(up.get(x))) { x = up.get(x); seen.add(x); out.push(x); } return out; }; // the places it is in, nearest first
+    const top = (id) => chain(id).at(-1) || id;
+    const groupUp = new Map(); // a group → the bigger group it belongs to (소속, smaller → bigger)
+    for (const r of rels) if (r.type === '소속' && byId.get(r.from)?.type === 'group' && byId.get(r.to)?.type === 'group' && !groupUp.has(r.from)) groupUp.set(r.from, r.to);
+    const groupHome = (g) => { const seen = new Set(); let x = g; while (x && !seen.has(x.entityId)) { seen.add(x.entityId); if (x.base && byId.get(x.base)?.type === 'place') return top(x.base); x = byId.get(groupUp.get(x.entityId)); } return null; };
+    const homeOf = (id) => { const e = byId.get(id); return !e ? null : e.type === 'place' ? top(id) : e.type === 'group' ? groupHome(e) : e.type === 'person' && e.room && byId.has(e.room) ? top(e.room) : null; };
+    const tabs = new Map();
+    const tabOf = (id) => { if (!tabs.has(id)) tabs.set(id, { key: id, place: byId.get(id), places: [], groups: [], rules: [], sheets: [], cals: [] }); return tabs.get(id); };
+    const everywhere = { key: 'world', rules: [], sheets: [], cals: [] };
+    const lost = { key: 'unknown', rules: [], groups: [], places: [], sheets: [], cals: [] };
+    for (const p of st.entities.filter((e) => e.type === 'place')) { if (up.has(p.entityId)) tabOf(top(p.entityId)).places.push(p); else tabOf(p.entityId); }
+    for (const g of st.entities.filter((e) => e.type === 'group')) { const h = groupHome(g); (h ? tabOf(h).groups : lost.groups).push(g); }
+    for (const e of st.entities) {
+      if (RULEISH.has(e.type)) { if (e.appliesTo === 'world') everywhere.rules.push(e); else { const h = e.appliesTo && homeOf(e.appliesTo); (h ? tabOf(h).rules : lost.rules).push(e); } }
+      if (e.timetable) { const h = homeOf(e.timetable.ownerId); (h ? tabOf(h).sheets : lost.sheets).push(e); }
+      if (e.calendar) { if (!e.calendar.ownerId) everywhere.cals.push(e); else { const h = homeOf(e.calendar.ownerId); (h ? tabOf(h).cals : lost.cals).push(e); } }
+    }
+    const size = (t) => t.places.length + t.groups.length + t.rules.length + t.sheets.length + t.cals.length;
+    const list = [...tabs.values()].filter((t) => t.place);
+    for (const t of list) if (!size(t)) lost.places.push(t.place);
+    const big = list.filter((t) => size(t)).sort((a, b) => size(b) - size(a) || a.place.name.localeCompare(b.place.name, 'ko'));
+    const pathOf = (p) => [...chain(p.entityId).slice(0, -1).reverse().map((id) => byId.get(id)?.name), p.name].filter(Boolean).join(' › ');
+    return { byId, big, everywhere, lost, size, pathOf, top, homeOf, up, groupUp };
+  }
+  const RULEISH = new Set(['rule', 'system']);
+  const caps = (list, label = (e) => e.name) => `<div class="wt-row">${list.map((e) => `<button class="cap" type="button" data-act="open" data-id="${esc(e.entityId)}" data-q="${esc(label(e).toLowerCase())}">${esc(label(e))}</button>`).join('')}</div>`;
+  const ruleText = (e) => e.description || e.fields?.how || e.fields?.category || '';
+  const rulesHtml = (list) => list.slice().sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((e) => `<div class="wt-rule" data-q="${esc(`${e.name} ${ruleText(e)}`.toLowerCase())}"><button type="button" data-act="open" data-id="${esc(e.entityId)}">${esc(e.name)}</button><span>${esc(clip(ruleText(e), 140))}${e.type === 'system' ? ' <small>· 시스템</small>' : ''}</span></div>`).join('');
+
+  /** The part of a 소속 칸 that says what the person is there (「5학년 반장」 of 「은사슴 기숙사생 5학년 반장」). */
+  function roleIn(p, g) {
+    const aff = String(p?.fields?.affiliation || '');
+    // the piece of the 소속 칸 that names this group; another group's role is not this one's
+    const named = aff.split(/[,，、]/).filter((x) => [g.name, ...(g.aliases || [])].some((n) => n && x.includes(n)));
+    const piece = (named.length ? named : aff.split(/[,，、]/)).find((x) => ROLE_RE.test(x)) || '';
+    let t = piece;
+    for (const n of [g.name, ...(g.aliases || [])]) t = t.split(n).join(' ');
+    t = t.replace(/\s+/g, ' ').trim();
+    return t || (piece.match(ROLE_RE) || [''])[0];
+  }
+  /** 「은사슴 1학년」 under 「은사슴 기숙사생」: only the words the bigger group's name does not have (「1학년」). */
+  const shortVia = (via, g) => { const have = new Set(String(g.name).split(/\s+/)); const left = String(via).split(/\s+/).filter((x) => !have.has(x) && !String(g.name).includes(x)).join(' '); return left || via; };
+  function rosterCard(g, subs = []) {
+    const r = st.rosters?.[g.entityId];
+    if (!r || r.loading) { if (!r) void loadRoster(g.entityId); return `<div class="world-card" data-q="${esc(g.name.toLowerCase())}"><h3><button type="button" data-act="open" data-id="${esc(g.entityId)}">${esc(g.name)}</button> <span class="pill">집단</span></h3><p class="wt-empty">명단을 불러오는 중…</p></div>`; }
+    const list = r.members || [];
+    const byId = new Map(st.entities.map((e) => [e.entityId, e]));
+    const open = st.rosterOpen?.has(g.entityId);
+    const cap = (m, extra) => `<button class="cap" type="button" data-act="open" data-id="${esc(m.entityId)}" data-q="${esc(m.name.toLowerCase())}">${esc(m.name)}${m.unnamed ? ' (이름 모름)' : extra ? ` · ${esc(extra)}` : ''}</button>`;
+    const part = (kind, label, more) => {
+      const rows = list.filter((m) => m.kind === kind);
+      if (!rows.length) return '';
+      const shown = kind === 'member' && !open && rows.length > 6 ? rows.slice(0, 5) : rows;
+      const rest = rows.length - shown.length;
+      return `<div class="wt-grp">${label}${more || ''}</div><div class="wt-row">${shown.map((m) => cap(m, kind === 'member' ? (m.via ? shortVia(m.via, g) : '') : roleIn(byId.get(m.entityId), g))).join('')}${rest ? `<button class="cap ghost" type="button" data-act="roster-more" data-id="${esc(g.entityId)}">+ ${rest}명</button>` : ''}</div>`;
+    };
+    const c = r.counts || {};
+    const head = c.total ? ` · 이름 아는 사람 ${c.known}명 / 전체 ${c.total}명` : ` · ${list.filter((m) => m.kind === 'member').length}명`;
+    const small = subs.length ? `<div class="wt-grp">작은 집단</div><div class="wt-row">${subs.map((x) => `<button class="cap" type="button" data-act="open" data-id="${esc(x.entityId)}" data-q="${esc(x.name.toLowerCase())}">${esc(x.name)}${x.fields?.size ? ` · ${esc(x.fields.size)}` : ''}</button>`).join('')}</div>` : '';
+    const body = list.length ? part('member', '구성원', head) + small + part('staff', '맡은 사람') + part('past', '지난 구성원') : small + `<p class="wt-empty">아직 이 집단에 소속된 인물이 없습니다.${c.total ? ` 전체 ${c.total}명` : ''}</p>`;
+    return `<div class="world-card" data-q="${esc([g.name, ...list.map((m) => m.name)].join(' ').toLowerCase())}"><h3><button type="button" data-act="open" data-id="${esc(g.entityId)}">${esc(g.name)}</button> <span class="pill">집단</span></h3>${body}</div>`;
+  }
+
+  // 시간표 (시안 E): days across, times down; the same subject the same soft tone; a lesson that runs two hours joins
+  // the next 교시; the story's weekday a cream band; a night lesson dark with stars; 「이전」 in blue. On a phone: one
+  // day at a time, picked by capsules.
+  function ttGrid(e) {
+    const cellsAll = Object.entries(e.timetable?.cells || {});
+    if (!cellsAll.length) return '<p class="wt-empty">아직 칸이 없습니다.</p>';
+    const today = storyToday()?.weekday || (storyToday() ? dowOf(storyToday().date) : null);
+    const spread = (d) => (d === '평일' ? ['월', '화', '수', '목', '금'] : d === '매일' ? WEEK : [d]);
+    const at = new Map(); // `${day}|${slot}` → [key, cell]
+    for (const [k, c] of cellsAll) for (const d of spread(c.day)) if (!at.has(`${d}|${c.slot}`)) at.set(`${d}|${c.slot}`, [k, c]);
+    const days = WEEK.filter((d, i) => i < 5 || cellsAll.some(([, c]) => spread(c.day).includes(d)));
+    const slots = [...new Set(cellsAll.map(([, c]) => c.slot))].sort((a, b) => ttSlotRank(a) - ttSlotRank(b) || a.localeCompare(b, 'ko'));
+    const tones = new Map();
+    const TONES = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
+    for (const s of slots) for (const d of days) { const c = at.get(`${d}|${s}`)?.[1]; const subj = c && (c.subject || c.value); if (subj && !tones.has(subj)) tones.set(subj, TONES[tones.size % TONES.length]); }
+    const night = (s) => /밤|자정|새벽/.test(s) || ttSlotRank(s) >= 1200 && ttSlotRank(s) < 2000;
+    const lesson = (s) => Number((String(s).match(/^(\d+)\s*교시/) || [])[1]) || null;
+    const HOURS = ['', '한', '두', '세', '네', '다섯'];
+    // which cells a two-hour lesson covers below it (only the next 교시 numbers, only when they are empty)
+    const covered = new Set();
+    const span = new Map();
+    for (const d of days) for (let i = 0; i < slots.length; i++) {
+      const c = at.get(`${d}|${slots[i]}`)?.[1];
+      if (!c || !(c.hours > 1) || !lesson(slots[i])) continue;
+      let n = 1;
+      while (n < c.hours && slots[i + n] && lesson(slots[i + n]) === lesson(slots[i]) + n && !at.has(`${d}|${slots[i + n]}`)) { covered.add(`${d}|${slots[i + n]}`); n++; }
+      span.set(`${d}|${slots[i]}`, n);
+    }
+    const stars = '<i style="left:14%;top:22%"></i><i style="left:72%;top:18%"></i><i style="left:46%;top:76%"></i><i style="left:88%;top:62%"></i><i style="left:28%;top:58%"></i>';
+    const box = (d, s, tall) => {
+      const hit = at.get(`${d}|${s}`);
+      if (!hit) return night(s) ? '' : '<div class="wt-free"></div>';
+      const [k, c] = hit;
+      const subj = c.subject || c.value;
+      const sub = [c.place, c.hours > 1 ? `${HOURS[c.hours] || c.hours} 시간` : '', c.value !== subj ? c.value : ''].filter(Boolean).join(' · ');
+      const was = c.past?.[0] ? `<div class="wt-was">이전: ${esc(c.past[0].value)}</div>` : '';
+      const wait = c.pending ? `<div class="wt-was">대화에서는 「${esc(c.pending.value)}」</div>` : '';
+      const q = esc(`${c.value} ${c.place || ''}`.toLowerCase());
+      if (night(s)) return `<button class="wt-night" type="button" data-act="open" data-id="${esc(e.entityId)}" data-q="${q}" title="${esc(c.evidence || '')}">${stars}<b>${esc(subj)}</b><small>${esc(sub)}</small>${was}</button>`;
+      const cls = c.past?.[0] ? 'changed' : tones.get(subj) || 's3';
+      return `<button class="wt-c ${cls}${(e.timetable.wide || []).includes(k) ? ' wide' : ''}" type="button" data-act="open" data-id="${esc(e.entityId)}" data-q="${q}" title="${esc(c.evidence || '')}" ${tall ? `style="min-height:${58 * tall + 6 * (tall - 1)}px"` : ''}><b>${esc(subj)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}${was}${wait}</button>`;
+    };
+    const morning = (s) => ttSlotRank(s) < 720;
+    const lunchAt = slots.findIndex((s, i) => i > 0 && morning(slots[i - 1]) && !morning(s));
+    const rows = slots.map((s, i) => `${i === lunchAt ? `<tr class="wt-lunch"><td></td><td colspan="${days.length}" class="l">점 심</td></tr>` : ''}<tr><td class="t"><b>${esc(s)}</b></td>${days.map((d) => (covered.has(`${d}|${s}`) ? '' : `<td ${span.get(`${d}|${s}`) > 1 ? `rowspan="${span.get(`${d}|${s}`)}"` : ''} class="${d === today ? 'todaycol' : ''}">${box(d, s, span.get(`${d}|${s}`))}</td>`)).join('')}</tr>`).join('');
+    const table = `<table class="wt-tt"><thead><tr><th class="blank"></th>${days.map((d) => `<th class="${d === today ? 'today' : ''}">${d}<small>${DAY_EN[d]}</small></th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+    // phone: one day
+    const pick = st.ttDay && days.includes(st.ttDay) ? st.ttDay : today && days.includes(today) ? today : days[0];
+    const dayRows = (d) => { let out = ''; for (let i = 0; i < slots.length; i++) { const s = slots[i]; if (covered.has(`${d}|${s}`)) continue; if (i === lunchAt) out += '<div class="wt-dlunch">점 심</div>'; const n = span.get(`${d}|${s}`) || 1; const label = n > 1 && lesson(s) ? `${lesson(s)}–${lesson(s) + n - 1}교시` : s; out += `<div class="wt-drow"><div class="t"><b>${esc(label)}</b></div>${box(d, s) || '<div class="wt-free"></div>'}</div>`; } return out; };
+    const phone = `<div class="wt-dtab">${days.map((d) => `<button type="button" data-act="tt-day" data-day="${d}" class="${d === pick ? 'on' : d === today ? 'td' : ''}">${d}</button>`).join('')}</div>${days.map((d) => `<div class="wt-day ${d === pick ? 'on' : ''}">${dayRows(d)}</div>`).join('')}`;
+    const clash = (e.timetable.overlaps || []).length ? `<p class="wt-clash">시간이 겹치는 칸이 ${e.timetable.overlaps.length}쌍 있어요 — 칸을 눌러 고르세요.</p>` : '';
+    return clash + table + phone;
+  }
+
+  // 학사일정 (시안 F): the chosen school year by month; a new calendar year with a big year and a double line; what is
+  // over faded; today a blue line; the very next one dark; cancelled struck through; 「N일 뒤」 for what is ahead.
+  const kindWord = (n) => (/시험/.test(n) ? '시험' : /방학/.test(n) ? '방학' : /경기|시합|대회/.test(n) ? '경기' : /연회|축제|파티/.test(n) ? '연회' : '행사');
+  const kindTone = (k) => ({ 시험: 'c3', 경기: 'c1', 방학: 'c2', 연회: 'c2', 행사: 'c2' })[k] || 'c2';
+  function calList(e, year) {
+    const all = Object.values(e.calendar?.events || {});
+    const evs = all.filter((x) => (year === 'none' ? !hasYear(x.date) : schoolYearOf(x.date) === year)).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    if (!evs.length) return '<p class="wt-empty">이 학년도에는 일정이 없습니다.</p>';
+    const today = storyToday()?.date || null;
+    const next = today ? evs.find((x) => hasYear(x.date) && x.date >= today && !x.cancelled) : null;
+    let out = '';
+    let lastMonth = '';
+    let lastYear = '';
+    let todayShown = !today || year === 'none';
+    for (const x of evs) {
+      if (hasYear(x.date)) {
+        const y = x.date.slice(0, 4);
+        const m = x.date.slice(5, 7);
+        if (!todayShown && x.date >= today) { out += `<div class="wt-today">오늘 · ${esc(fmtKo(today))}</div>`; todayShown = true; }
+        if (lastYear && y !== lastYear) out += `<div class="wt-newyear"><b>${y}</b></div>`;
+        if (`${y}-${m}` !== lastMonth) out += `<div class="wt-mon"><b>${Number(m)}월</b><small>${MONTH_EN[Number(m) - 1]} ${y}</small></div>`;
+        lastYear = y; lastMonth = `${y}-${m}`;
+      }
+      const left = today && hasYear(x.date) ? Math.round((utc(x.date) - utc(today)) / 86400000) : null;
+      const kw = kindWord(x.name);
+      const k = x.cancelled ? '취소' : left != null && left > 0 ? `${left}일 뒤` : left === 0 ? '오늘' : kw;
+      const sub = x.end ? `${fmtKo(x.date)} ~ ${fmtKo(x.end)}${x.place ? ` · ${x.place}` : ''}` : [x.place, x.who].filter(Boolean).join(' · ') || (x.cancelled ? '취소됨' : '');
+      const was = x.past?.[0]?.date ? `<span class="was">이전: ${esc(x.past[0].date.slice(5).replace('-', '/'))}</span>` : '';
+      const cls = ['wt-ev', x === next ? 'next' : kindTone(kw), left != null && left < 0 ? 'past' : '', x.cancelled ? 'cancel' : '', hasYear(x.date) ? '' : 'noyear'].filter(Boolean).join(' ');
+      const d = hasYear(x.date) ? `${Number(x.date.slice(8, 10))}<small>${dowOf(x.date)}</small>` : `${Number(String(x.date).slice(-2)) || '?'}<small>${Number(String(x.date).slice(2, 4)) || '?'}월</small>`;
+      out += `<button class="${cls}" type="button" data-act="open" data-id="${esc(e.entityId)}" data-q="${esc(`${x.name} ${x.place || ''}`.toLowerCase())}" title="${esc(x.evidence || '')}"><div class="d">${d}</div><div class="n"><b>${esc(x.name)}</b><small>${esc(sub)}${was}</small></div><span class="k">${esc(k)}</span></button>`;
+    }
+    if (!todayShown) out += `<div class="wt-today">오늘 · ${esc(fmtKo(today))}</div>`;
+    return out;
+  }
+
+  /** 학년도 capsules (시안 G): the years the tab's 시간표 · 학사일정 have — before faded, now black, after dashed. */
+  function yearsOf(t) {
+    const set = new Set();
+    let none = 0;
+    for (const s of t.sheets) if (s.timetable.year) set.add(s.timetable.year);
+    for (const c of t.cals) for (const x of Object.values(c.calendar.events || {})) { const y = schoolYearOf(x.date); if (y) set.add(y); else none++; }
+    const today = storyToday()?.date;
+    const years = [...set].sort();
+    const now = today ? schoolYearOf(today) : years.at(-1) || null;
+    if (now && !set.has(now) && years.length) years.push(now), years.sort();
+    const chosen = st.year === 'none' && none ? 'none' : st.year && years.includes(st.year) ? st.year : now || years.at(-1) || (none ? 'none' : null);
+    return { years, now, none, chosen };
+  }
+  function yearsHtml(y) {
+    if (!y.years.length && !y.none) return '';
+    const cap = (v) => `<button class="wt-year ${v < y.now ? 'past' : v === y.now ? 'now' : 'next'}${v === y.chosen ? ' on' : ''}" type="button" data-act="year" data-year="${esc(v)}">${esc(v)}${v === y.now && storyToday() ? ' · 지금' : ''}</button>`;
+    return `<div class="wt-years"><span>학년도</span>${y.years.map(cap).join('')}${y.none ? `<button class="wt-year none${y.chosen === 'none' ? ' on' : ''}" type="button" data-act="year" data-year="none">연도 모름 ${y.none}</button>` : ''}</div>`;
+  }
+
+  function subtabsHtml(m, sel) {
+    const t = (key, label, n) => `<button class="subtab${sel === key ? ' selected' : ''}" type="button" data-act="tab" data-tab="${esc(key)}" role="tab" aria-selected="${sel === key}">${esc(label)}${n != null ? ` ${n}` : ''}</button>`;
+    const go2 = (view, label) => `<button class="subtab${st.view === view ? ' selected' : ''}" type="button" data-act="go" data-view="${view}">${label}</button>`;
+    const w = m.everywhere;
+    const lostN = m.lost.rules.length + m.lost.groups.length + m.lost.places.length + m.lost.sheets.length + m.lost.cals.length;
+    return `<div class="subtabs" role="tablist">${t('world', '세계 전체', w.rules.length + w.cals.length)}${m.big.map((x) => t(x.key, x.place.name, m.size(x))).join('')}${lostN ? t('unknown', '모름', lostN) : ''}${world()?.scoreboard?.name ? go2('scores', '점수판') : ''}${go2('log', '기록')}${EMBEDDED ? `${go2('overview', '모든 설정')}${go2('world', '세계관 정보')}` : ''}</div>`;
+  }
+
+  function tabsHtml() {
+    const m = worldMap();
+    const keys = ['world', 'unknown', ...m.big.map((x) => x.key)];
+    const sel = keys.includes(st.tab) ? st.tab : m.big[0]?.key || 'world';
+    const today = storyToday();
+    const todayLine = today ? ` · 이야기 속 오늘은 ${fmtKo(today.date)}(${today.weekday || dowOf(today.date)})` : '';
+    const find = `<input class="wt-find" id="tabq" type="search" placeholder="이 탭에서 찾기" value="${esc(st.tabQuery || '')}" aria-label="이 탭에서 찾기">`;
+    const timeParts = (t, y) => {
+      const sheets = t.sheets.filter((s) => !y.chosen || y.chosen === 'none' || !s.timetable.year || s.timetable.year === y.chosen);
+      const ownerName = (s) => m.byId.get(s.timetable.ownerId)?.name || s.name;
+      return (y.chosen === 'none' ? '' : sheets.map((s) => `<div class="wt-sec">시간표 · ${esc(ownerName(s))}${s.timetable.year ? ` <small class="sub">${esc(s.timetable.year)}</small>` : ''}</div>${ttGrid(s)}`).join(''))
+        + t.cals.map((c) => `<div class="wt-sec">학사일정 · ${esc(m.byId.get(c.calendar.ownerId)?.name || '세계')}${y.chosen ? ` <small class="sub">${y.chosen === 'none' ? '연도 모름' : `${esc(y.chosen)} 학년도`}</small>` : ''}</div>${calList(c, y.chosen)}`).join('');
+    };
+    let body;
+    if (sel === 'world') {
+      const t = m.everywhere;
+      const y = yearsOf(t);
+      body = `${yearsHtml(y)}<p class="wt-eyebrow">세계 전체</p><h1 class="wt-h1">${esc(world().name)}</h1><p class="wt-lead">어디서나 통하는 규칙 · 시스템이에요. 장면과 상관없이 {{세계}}에 들어가요(장면 방식에서는 한도의 3분의 1까지)${todayLine}.</p>${find}
+        <div class="wt-sec">규칙 · 시스템</div>${t.rules.length ? rulesHtml(t.rules) : '<p class="wt-empty">아직 세계 전체에 통하는 규칙이 없습니다.</p>'}${timeParts(t, y)}`;
+    } else if (sel === 'unknown') {
+      const t = m.lost;
+      body = `<p class="wt-eyebrow">모름</p><h1 class="wt-h1">어디 것인지 모름</h1><p class="wt-lead">아직 어느 장소에도 붙지 않은 것이에요. 카드에서 「적용되는 곳」 · 「본거지」 · 위치 관계를 정하면 그 장소 탭으로 옮겨 가요. 장면 방식에서는 맨 뒤에 들어가요.</p>${find}
+        ${t.rules.length ? `<div class="wt-sec">규칙 · 시스템</div>${rulesHtml(t.rules)}` : ''}${t.groups.length ? `<div class="wt-sec">본거지를 모르는 집단</div>${t.groups.map((g) => rosterCard(g)).join('')}` : ''}
+        ${t.places.length ? `<div class="wt-sec">따로 있는 장소</div>${caps(t.places)}` : ''}${t.sheets.length || t.cals.length ? timeParts(t, yearsOf(t)) : ''}`;
+    } else {
+      const t = m.big.find((x) => x.key === sel);
+      const y = yearsOf(t);
+      const p = t.place;
+      const based = t.groups.some((g) => g.base);
+      const lead = p.description || p.fields?.use || '';
+      const staying = st.entities.filter((e) => e.type === 'person' && e.room && m.top(e.room) === p.entityId);
+      body = `${yearsHtml(y)}<p class="wt-eyebrow">${based ? '큰 장소 · 집단 본거지' : '큰 장소'}</p><h1 class="wt-h1">${esc(p.name)}</h1><p class="wt-lead">${esc(lead)}${lead ? (/[.!?。」)]$/.test(lead.trim()) ? ' ' : '. ') : ''}이 탭의 규칙은 장면이 여기일 때 모델에게 들어가요${todayLine}.</p>${find}
+        ${t.places.length ? `<div class="wt-sec">안의 장소</div>${caps(t.places.slice().sort((a, b) => m.pathOf(a).localeCompare(m.pathOf(b), 'ko')), m.pathOf)}` : ''}
+        ${t.groups.length ? `<div class="wt-sec">집단 · 명단</div>${t.groups.filter((g) => !t.groups.some((x) => x.entityId === m.groupUp.get(g.entityId))).map((g) => rosterCard(g, t.groups.filter((x) => m.groupUp.get(x.entityId) === g.entityId))).join('')}` : ''}
+        ${staying.length ? `<div class="wt-sec">여기서 지내는 사람</div>${caps(staying, (e) => `${e.name} · ${m.byId.get(e.room)?.name || ''}`)}` : ''}
+        ${timeParts(t, y)}
+        ${t.rules.length ? `<div class="wt-sec">규칙 · 시스템</div>${rulesHtml(t.rules)}` : ''}
+        <p class="wt-empty" style="margin-top:18px"><button class="quiet" type="button" data-act="open" data-id="${esc(p.entityId)}">「${esc(p.name)}」 카드 열기</button></p>`;
+    }
+    return `${subtabsHtml(m, sel)}${body}<p class="sub" id="tabNoHit" hidden>이 탭에는 찾는 것이 없습니다.</p>`;
+  }
+  function filterTab() {
+    const q = String(st.tabQuery || '').trim().toLowerCase();
+    let shown = 0;
+    root.querySelectorAll('main [data-q]').forEach((x) => { const hit = !q || x.dataset.q.includes(q); x.hidden = !hit; if (hit) shown++; });
+    const none = $('#tabNoHit');
+    if (none) none.hidden = !q || shown > 0;
+  }
+
+  /** The right column in 기억 서재 (its inspector, in its own classes): this world at a glance, this room, {{세계}}. */
+  function worldRailHtml() {
+    const w = world();
+    if (!w) return '';
+    const m = worldMap();
+    const people = st.entities.filter((e) => e.type === 'person');
+    const animals = people.filter((e) => String(e.fields?.species || '').trim()).length;
+    const rules = st.entities.filter((e) => RULEISH.has(e.type));
+    const inside = m.big.reduce((n, t) => n + t.places.length, 0);
+    const p = st.preview;
+    const today = storyToday();
+    return `<div class="rail-title">이 세계관</div>
+      <div class="rail-stat"><b>${people.length}</b><span>인물<small>${animals ? `동물 ${animals} 포함` : '&nbsp;'}</small></span></div>
+      <div class="rail-stat"><b>${m.big.length}</b><span>큰 장소<small>안의 장소 ${inside}</small></span></div>
+      <div class="rail-stat"><b>${rules.length}</b><span>규칙 · 시스템<small>세계 전체 ${m.everywhere.rules.length}</small></span></div>
+      <div class="rail-divider"></div>
+      <div class="rail-note"><h3>이 방</h3><p>${roomState().kind === 'this' ? `「${esc(w.name)}」 세계관을 읽는 중이에요.` : esc(roomLine())}${today ? `<br>이야기 속 오늘: ${esc(fmtKo(today.date))}` : ''}</p></div>
+      ${p && roomState().kind === 'this' ? `<div class="rail-divider"></div><div class="rail-note"><h3>{{세계}}에 들어갈 내용</h3><p>${p.chars.toLocaleString()} / ${p.budget.toLocaleString()}자<br>설정 ${p.included.length}개${p.omitted.length ? ` · 한도 때문에 빠진 것 ${p.omitted.length}개` : ''}${p.skipped > 0 ? ` · 장면 밖 ${p.skipped}개` : ''}</p></div>` : ''}`;
+  }
+
   function mainHtml() {
     if (!st.loaded) return st.bad ? '' : '<p class="sub">불러오는 중…</p>';
     if (st.view === 'new-world' || !world()) return newWorldHtml(!st.worlds.length);
     if (st.view === 'world') return worldHtml();
+    if (st.view === 'tabs') return tabsHtml();
     if (st.view === 'log') return historyHtml();
     if (st.view === 'scores') return scoresHtml();
     if (KIND[st.view]) {
@@ -1017,17 +1384,19 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     el.side.innerHTML = sideHtml();
     el.top.innerHTML = topHtml();
     el.rail.innerHTML = railHtml();
-    const screen = `${st.view}|${st.worldId}|${st.detail}|${st.editing}|${st.dupes}`;
+    const screen = `${st.view}|${st.worldId}|${st.detail}|${st.editing}|${st.dupes}|${st.tab}|${st.year}`;
     const keep = screen === lastScreen ? el.main.scrollTop : 0;
     const skew = st.readOnly
       ? `<p class="msg bad" role="status">${esc(UPDATE_MSG)}</p>`
       : !target && st.serverVersion && st.serverVersion !== VERSION
       ? `<p class="msg bad" role="status">서버 쪽 World Archive(v${esc(st.serverVersion)})와 이 화면(v${esc(VERSION)})의 판이 달라요. 서버 쪽을 업데이트해 주세요 — 서버에서 설치 명령을 다시 실행하면 됩니다.</p>`
       : '';
-    el.main.innerHTML = skew + (st.msg && !(st.readOnly && st.msg === UPDATE_MSG) ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + mainHtml();
+    const nav = EMBEDDED && st.loaded && world() && st.view !== 'tabs' && !st.detail && !st.editing && (['log', 'scores', 'world', 'overview'].includes(st.view) || KIND[st.view]) ? subtabsHtml(worldMap(), null) : '';
+    el.main.innerHTML = skew + (st.msg && !(st.readOnly && st.msg === UPDATE_MSG) ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + nav + mainHtml();
     el.main.scrollTop = keep;
     lastScreen = screen;
     if (st.query) filterCards();
+    if (st.view === 'tabs' && st.tabQuery) filterTab();
     if (st.busy) root.querySelectorAll('main button, .rail button').forEach((b) => { b.disabled = true; });
   }
 
@@ -1086,7 +1455,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     };
   }
 
-  const go = (view) => { st.view = view; st.hits = null; st.dupes = false; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; };
+  const go = (view) => { st.view = view; st.hits = null; st.dupes = false; st.detail = null; st.editing = null; st.draft = null; st.ask = null; st.query = ''; st.msg = ''; st.fromTabs = false; };
 
   const actions = {
     go: (b) => {
@@ -1138,7 +1507,11 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     }, '저장했습니다.'),
     theme: () => { st.theme = st.theme === 'dark' ? 'light' : 'dark'; store.set('world-archive-theme', st.theme); render(); },
     close: () => toggle(false),
-    open: (b) => { st.detail = b.dataset.id; st.editing = null; st.ask = null; st.msg = ''; render(); },
+    open: (b) => { if (st.view === 'tabs') { st.fromTabs = true; st.view = st.entities.find((x) => x.entityId === b.dataset.id)?.type || st.view; } st.detail = b.dataset.id; st.editing = null; st.ask = null; st.msg = ''; render(); },
+    tab: (b) => { st.tab = b.dataset.tab; st.year = null; st.tabQuery = ''; st.ttDay = null; render(); },
+    year: (b) => { st.year = b.dataset.year; render(); },
+    'tt-day': (b) => { st.ttDay = b.dataset.day; render(); },
+    'roster-more': (b) => { st.rosterOpen.add(b.dataset.id); render(); },
     new: (b) => { st.view = b.dataset.type; st.editing = 'new'; st.detail = null; st.draft = null; st.msg = ''; render(); },
     edit: (b) => { st.editing = b.dataset.id; st.detail = b.dataset.id; st.draft = null; st.msg = ''; render(); },
     cancel: () => { if (st.editing !== 'new') st.view = st.entities.find((x) => x.entityId === st.editing)?.type || st.view; st.editing = null; st.draft = null; st.msg = ''; render(); },
@@ -1368,7 +1741,8 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     if (ev.target.id === 'worldSelect') {
       st.worldId = ev.target.value;
       store.set('world-archive-world', st.worldId);
-      const keep = KIND[st.view] || st.view === 'log' ? st.view : 'overview';
+      const keep = KIND[st.view] || st.view === 'log' || st.view === 'tabs' ? st.view : 'overview';
+      st.tab = null; st.year = null;
       go(keep);
       run(async () => { await loadEntities(); if (keep === 'log') await loadHistory(); });
       st.scores = null;
@@ -1399,6 +1773,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   });
   root.addEventListener('input', (ev) => {
     if (ev.target.id === 'q') { st.query = ev.target.value; runSearch(); }
+    if (ev.target.id === 'tabq') { st.tabQuery = ev.target.value; filterTab(); }
   });
   el.backdrop.addEventListener('click', () => toggle(false));
   root.addEventListener('keydown', (ev) => { if (!target && ev.key === 'Escape' && !el.panel.hidden) toggle(false); });
@@ -1427,7 +1802,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
   if (!target) setInterval(() => { if (el.panel.hidden) el.launch.hidden = tabShown(); }, 2000);
   if (target) toggle(true);
   else render();
-  return { host, setTheme(t) { if (t === 'dark' || t === 'light') { st.theme = t; render(); } } };
+  return { host, setTheme(t) { if (t === 'dark' || t === 'light') { st.theme = t; render(); } }, railHtml: () => (st.loaded ? worldRailHtml() : '') };
   }
 
   if (EMBEDDED) globalThis.__memoryWorldPanel = { version: VERSION, contract: PANEL_CONTRACT, start: (target, opts) => boot(target, opts) };

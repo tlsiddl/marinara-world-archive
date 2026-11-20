@@ -1425,7 +1425,9 @@ class Archive {
       }
       const k = squashName(name);
       const same = Object.values(sheet.calendar.events).find((x) => squashName(x.name) === k
-        && (!x.date || !date || CAL.schoolYear(x.date, start) === CAL.schoolYear(date, start) || x.date.slice(-5) === date.slice(-5)));
+        // the same school year — or, when one of the two has no year yet (「--09-01」), the same day of the year. Two dates
+        // in different school years are two events (입학식 every year), never one moved (v0.6.0)
+        && (!x.date || !date || CAL.schoolYear(x.date, start) === CAL.schoolYear(date, start) || ((!CAL.hasYear(x.date) || !CAL.hasYear(date)) && x.date.slice(-5) === date.slice(-5))));
       const facts = {
         ...(date ? { date } : {}), ...(end && end !== date ? { end } : {}), ...(when ? { when } : {}),
         ...(raw.place ? { place: String(raw.place).trim().slice(0, 60) } : {}), ...(raw.placeId ? { placeId: raw.placeId } : {}),
