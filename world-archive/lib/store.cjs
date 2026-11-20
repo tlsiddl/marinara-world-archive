@@ -152,6 +152,8 @@ const KEEP_AS_IS = new Set(['rule', 'system', 'schedule', 'history', 'custom']);
 /** 적용되는 곳 (v0.5.0 C): rules and systems can hold in one place or group; empty is the whole world. */
 const APPLIES_TYPES = new Set(['rule', 'system']);
 const APPLIES_TO = new Set(['place', 'group']);
+/** 적용되는 곳 「세계 전체」 (v0.5.0 D); none at all is 「모름」. */
+const WORLD = 'world';
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -423,7 +425,7 @@ function validEntity(e) {
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
     (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
-    (e.appliesTo === undefined || e.appliesTo === null || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
+    (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
@@ -844,7 +846,7 @@ class Archive {
           createdAt: t,
           updatedAt: t,
         };
-        if (APPLIES_TYPES.has(item.type) && item.appliesTo && doc.entities.some((x) => x.entityId === item.appliesTo && APPLIES_TO.has(x.type))) {
+        if (APPLIES_TYPES.has(item.type) && item.appliesTo && (item.appliesTo === WORLD || doc.entities.some((x) => x.entityId === item.appliesTo && APPLIES_TO.has(x.type)))) {
           entity.appliesTo = item.appliesTo;
           entity.sources.appliesTo = 'auto';
         }
@@ -1039,7 +1041,7 @@ class Archive {
     const doc = this.readEntities(worldId);
     const e = doc.entities.find((x) => x.entityId === entityId);
     if (!e || !APPLIES_TYPES.has(e.type)) throw new ArchiveError(404, '규칙이나 시스템을 찾지 못했습니다.');
-    if (targetId != null && !doc.entities.some((x) => x.entityId === targetId && APPLIES_TO.has(x.type))) throw new ArchiveError(400, '적용되는 곳은 장소나 집단이어야 합니다.');
+    if (targetId != null && targetId !== WORLD && !doc.entities.some((x) => x.entityId === targetId && APPLIES_TO.has(x.type))) throw new ArchiveError(400, '적용되는 곳은 장소나 집단(또는 세계 전체)이어야 합니다.');
     if (!force && e.sources?.appliesTo === 'manual') return null;
     const before = e.appliesTo || null;
     const after = targetId || null;
@@ -1052,7 +1054,7 @@ class Archive {
     e.revision++;
     e.updatedAt = now();
     this.writeJson(this.entityFile(worldId), doc);
-    const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
+    const nameOf = (id) => (id === WORLD ? '세계 전체' : doc.entities.find((x) => x.entityId === id)?.name || '');
     const c = { id: randomUUID(), at: e.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId, name: e.name, type: e.type, action: 'applies', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
     this.pushHistory(worldId, [c]);
     return c;
@@ -1110,7 +1112,7 @@ class Archive {
       }
       const before = cell ? structuredClone(cell) : null;
       const past = cell?.value ? [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX) : cell?.past;
-      sheet.timetable.cells[key] = { day, slot, value, evidence, source: 'auto', at: t, ...(past?.length ? { past } : {}) };
+      sheet.timetable.cells[key] = { day, slot, value, evidence, source: 'auto', at: t, ...TT.cellExtras(raw), ...(past?.length ? { past } : {}) };
       sheet.revision++;
       sheet.updatedAt = t;
       log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'cell', key, before: before?.value || '', after: value, cellBefore: before, evidence });
@@ -1159,7 +1161,7 @@ class Archive {
     const before = cell ? structuredClone(cell) : null;
     if (value) {
       const past = cell?.value && cell.value !== value ? [{ value: cell.value, until: t, evidence: cell.evidence || '' }, ...(cell.past || [])].slice(0, TT.PAST_MAX) : cell?.past;
-      sheet.timetable.cells[key] = { day, slot, value, evidence: '', source: 'manual', at: t, ...(past?.length ? { past } : {}) };
+      sheet.timetable.cells[key] = { day, slot, value, evidence: '', source: 'manual', at: t, ...TT.cellExtras(body), ...(past?.length ? { past } : {}) };
     } else delete sheet.timetable.cells[key];
     TT.refresh(sheet);
     sheet.revision++;

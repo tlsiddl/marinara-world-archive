@@ -206,7 +206,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           return false;
         });
         // v0.5.0 C: 적용되는 곳 — a place or group the world has (made in this batch: set after it is saved)
-        const whereOf = (ents, it) => { const t = it.where ? s.findByName(ents, it.where) : null; return t && (t.type === 'place' || t.type === 'group') ? t : null; };
+        // 「세계 전체」 (v0.5.0 D) is said to hold everywhere; nothing said is 「모름」
+        const whereOf = (ents, it) => { if (/^(세계 전체|세계전체|어디서나|전체|everywhere|the whole world)$/i.test(String(it.where || '').trim())) return { entityId: 'world', type: 'world' }; const t = it.where ? s.findByName(ents, it.where) : null; return t && (t.type === 'place' || t.type === 'group') ? t : null; };
         const before = s.readEntities(worldId).entities;
         for (const it of items) { const t = whereOf(before, it); if (t) it.appliesTo = t.entityId; }
         const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
@@ -249,7 +250,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         const cells = [];
         for (const c of tt.cells) {
           const owner = s.findByName(owners, c.owner);
-          if (owner) cells.push({ ...c, ownerId: owner.entityId });
+          const where = c.place ? s.findByName(owners.concat(s.readEntities(worldId).entities.filter((e) => e.type === 'place')), c.place) : null;
+          if (owner) cells.push({ ...c, ownerId: owner.entityId, ...(where?.type === 'place' ? { placeId: where.entityId } : {}) });
           else tt.dropped.push({ name: c.owner + ' ' + c.day + ' ' + c.slot, why: 'no such group or person' });
         }
         job.cells = (job.cells || 0) + s.applyTimetable(worldId, cells, meta).filter((c) => c.action === 'cell' || c.action === 'cell-pending').length;
@@ -496,7 +498,7 @@ async function routes(r) {
   // v0.5.0 C: 적용되는 곳 by hand ({ appliesTo: placeOrGroupId | null } — null is the whole world); theirs from then on.
   r.put('/worlds/:worldId/entities/:entityId/applies-to', handle(async (req) => {
     const t = body(req).appliesTo;
-    if (t !== null && typeof t !== 'string') throw new ArchiveError(400, 'appliesTo(장소·집단 id, 세계 전체는 null)를 보내 주세요.');
+    if (t !== null && typeof t !== 'string') throw new ArchiveError(400, 'appliesTo(장소·집단 id, 세계 전체는 "world", 모름은 null)를 보내 주세요.');
     s().setAppliesTo(req.params.worldId, req.params.entityId, t, {}, { force: true });
     return s().listEntities(req.params.worldId).find((e) => e.entityId === req.params.entityId);
   }));

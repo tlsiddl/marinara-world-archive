@@ -18,6 +18,8 @@ const TYPE_LABEL = {
 const TYPE_ORDER = ['person', 'place', 'group', 'rule', 'system', 'schedule', 'history', 'custom'];
 /** Kinds that hold everywhere: in 'scene' mode they go in whether or not the scene names them. */
 const ALWAYS = new Set(['rule', 'system']);
+/** 적용되는 곳 「세계 전체」 (v0.5.0 D): said to hold everywhere. No 적용되는 곳 at all is 「모름」. */
+const WORLD = 'world';
 
 /** Text taken from settings must never turn into new macros: {{ and }} get a zero-width space. */
 function sanitize(text) {
@@ -93,21 +95,55 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     if (desc) used += 1 + desc.length;
   }
 
-  // 'scene' mode: only what the scene needs — pinned settings, settings named in the latest messages, and rules
-  // and systems (they hold everywhere). Without scene information yet (a fresh start), everything is a candidate.
+  // 'scene' mode (v0.5.0 D): what the scene needs, in this order while the budget lasts —
+  //   pinned → the settings named in the scene → rules · systems of the whole world (the latest first) → rules ·
+  //   systems of the places and groups here, and their 시간표 → rules · systems nobody has said where for.
+  // 「Here」: the places and groups of the scene, the places they are in (위치) and the bigger groups (소속), the groups
+  // the people of the scene belong to. A rule of a place or group not here is left out.
+  // Without scene information yet (a fresh start), everything is a candidate in the plain order.
   let pool = entities || [];
   let skipped = 0;
-  if (world.injectMode === 'scene' && scene) {
-    // v0.5.0 B: a 시간표 when its owner is in the scene, or a group a person in the scene belongs to (소속)
-    const sceneGroups = new Set((relations || []).filter((r) => r.type === '소속' && scene.has(r.from)).map((r) => r.to));
-    const sheetHere = (e) => e.timetable && (scene.has(e.timetable.ownerId) || sceneGroups.has(e.timetable.ownerId));
-    const keep = pool.filter((e) => e.pinned || ALWAYS.has(e.type) || scene.has(e.entityId) || sheetHere(e));
-    skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
-    pool = keep;
-  }
   const byIdAll = new Map((entities || []).map((x) => [x.entityId, x]));
   const nameOf = (id) => byIdAll.get(id)?.name || '';
-  const ordered = orderEntities(pool, scene);
+  let ordered;
+  if (world.injectMode === 'scene' && scene) {
+    const rel = Array.isArray(relations) ? relations : [];
+    // here: id → how far from the scene (0 the scene's own places and groups; +1 for each place it is in or bigger group)
+    const here = new Map();
+    const queue = [];
+    const add = (id, d) => { if (id && (!here.has(id) || here.get(id) > d)) { here.set(id, d); queue.push(id); } };
+    for (const id of scene) {
+      const e = byIdAll.get(id);
+      if (!e) continue;
+      if (e.type === 'place' || e.type === 'group') add(id, 0);
+      if (e.type === 'person') for (const r of rel) if (r.type === '소속' && r.from === id && byIdAll.get(r.to)?.type === 'group') add(r.to, 1);
+    }
+    while (queue.length) {
+      const id = queue.shift();
+      for (const r of rel) {
+        if (r.from !== id || (r.type !== '위치' && r.type !== '소속')) continue;
+        const up = byIdAll.get(r.to);
+        if (up && (up.type === 'place' || up.type === 'group')) add(r.to, here.get(id) + 1);
+      }
+    }
+    const ruleLike = (e) => ALWAYS.has(e.type);
+    const whereKnown = (e) => ruleLike(e) && e.appliesTo && e.appliesTo !== WORLD && byIdAll.has(e.appliesTo);
+    const sheetHere = (e) => e.timetable && (scene.has(e.timetable.ownerId) || here.has(e.timetable.ownerId));
+    const keep = pool.filter((e) => e.pinned || scene.has(e.entityId) || sheetHere(e) || (ruleLike(e) && (!whereKnown(e) || here.has(e.appliesTo))));
+    skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
+    const rank = (e) => (e.pinned ? 0
+      : scene.has(e.entityId) && !ruleLike(e) ? 1
+      : ruleLike(e) && e.appliesTo === WORLD ? 2
+      : sheetHere(e) || whereKnown(e) ? 3
+      : ruleLike(e) ? 4 : 5);
+    // the nearest place or group first (the scene's own, then the place it is in, the bigger group …)
+    const near = (e) => (e.timetable ? (scene.has(e.timetable.ownerId) ? 0 : here.get(e.timetable.ownerId) ?? 99) : whereKnown(e) ? here.get(e.appliesTo) ?? 99 : 0);
+    ordered = keep.filter((e) => e.status === 'confirmed').map((e) => [rank(e), e]).sort(([ra, a], [rb, b]) => ra - rb
+      || (ra === 2 ? String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) : 0)
+      || (ra === 3 ? near(a) - near(b) : 0)
+      || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
+      || a.name.localeCompare(b.name, 'ko')).map(([, e]) => e);
+  } else ordered = orderEntities(pool, scene);
   const byType = new Map();
   const included = [];
   const omitted = [];
@@ -199,4 +235,4 @@ function assembleLooks(entities, scene, { recent = null, budget = LOOKS_CHARS } 
   return { text: lines.length ? `${head}\n${lines.join('\n')}` : '', included, omitted };
 }
 
-module.exports = { assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
+module.exports = { WORLD, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };

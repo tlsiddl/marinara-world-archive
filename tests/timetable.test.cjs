@@ -203,3 +203,14 @@ test('「시간표로 모으기」 asks the model once, small, for what code cou
   assert.deepEqual(r.left, ['쇼핑']);
   assert.equal(sheet('은사슴 1학년').timetable.cells['목|오후'].value, '비행술');
 });
+
+test('a cell can carry its subject, place and how long it runs (only what is given) — for the 시간표 screen to come', (t) => {
+  const { s, w, id, sheet } = world(t);
+  s.applyTimetable(w.worldId, [{ ownerId: id('은사슴 1학년'), day: '화', slot: '1교시', value: '약초학 — 노을 교수', subject: '약초학', place: '제1 온실', placeId: id('별시계탑'), hours: 2 }]);
+  const c = sheet('은사슴 1학년').timetable.cells['화|1교시'];
+  assert.deepEqual([c.subject, c.place, c.placeId, c.hours], ['약초학', '제1 온실', id('별시계탑'), 2]);
+  s.setCell(w.worldId, { entityId: sheet('은사슴 1학년').entityId, day: '수', slot: '09:00–12:00', value: '별자리학(합반)', hours: 99 });
+  const d = sheet('은사슴 1학년').timetable.cells['수|09:00–12:00'];
+  assert.equal(d.hours, undefined, 'out of range: not kept');
+  assert.deepEqual([TT.subjectOf(d), TT.hoursOf(d), TT.hoursOf(c)], ['별자리학', 3, 2], 'subject from the value; hours from the clock range');
+});

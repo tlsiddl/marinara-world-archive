@@ -125,6 +125,31 @@ function lookTogether(cells) {
   }
   return { overlaps, wide: [...wide] };
 }
+/**
+ * What else a cell can carry (v0.5.0 B, for the 시간표 screen to come — 시안 E): subject (과목 — the same subject the
+ * same colour), place (장소, and its setting when the world has it), hours (how many 교시 · hours it runs, to join the
+ * cells). Only what is given; never made up. Returns the cleaned facts.
+ */
+function cellExtras(raw) {
+  const out = {};
+  const subject = String(raw?.subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const place = String(raw?.place ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const hours = Number(raw?.hours);
+  if (subject) out.subject = subject;
+  if (place) out.place = place;
+  if (typeof raw?.placeId === 'string' && raw.placeId) out.placeId = raw.placeId;
+  if (Number.isInteger(hours) && hours >= 1 && hours <= 12) out.hours = hours;
+  return out;
+}
+/** The subject a cell shows (its own, or the part of its value before 「—」 · 「(」 · 「,」): 「마법약 — 스네이프」 → 마법약. */
+const subjectOf = (c) => c?.subject || String(c?.value || '').split(/\s*[—(,·]\s*|\s-\s/)[0].trim();
+/** How long a cell runs in hours: its own 「hours」, or from a clock range (09:00–12:00 → 3); 1 when it cannot be told. */
+function hoursOf(c) {
+  if (c?.hours) return c.hours;
+  const sp = /\d{1,2}:\d{2}\s*[–-]/.test(String(c?.slot || '')) ? span(c.slot) : null;
+  return sp ? Math.max(1, Math.round((sp[1] - sp[0]) / 60)) : 1;
+}
+
 /** Keeps a sheet's overlaps and wide cells up to date (after every change to its cells). */
 function refresh(sheet) {
   if (!sheet?.timetable) return sheet;
@@ -150,7 +175,9 @@ function validTimetable(t) {
     && typeof c.value === 'string' && (c.evidence === undefined || typeof c.evidence === 'string')
     && (c.source === 'auto' || c.source === 'manual')
     && (c.past === undefined || (Array.isArray(c.past) && c.past.every((p) => isObj(p) && typeof p.value === 'string')))
-    && (c.pending === undefined || (isObj(c.pending) && typeof c.pending.value === 'string')));
+    && (c.pending === undefined || (isObj(c.pending) && typeof c.pending.value === 'string'))
+    && (c.subject === undefined || typeof c.subject === 'string') && (c.place === undefined || typeof c.place === 'string')
+    && (c.placeId === undefined || typeof c.placeId === 'string') && (c.hours === undefined || (Number.isInteger(c.hours) && c.hours >= 1 && c.hours <= 12)));
 }
 
-module.exports = { DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, span, lookTogether, refresh, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };
+module.exports = { DAYS, normDay, normSlot, cellKey, sortCells, slotRank, parseWhen, span, lookTogether, refresh, cellExtras, subjectOf, hoursOf, timetableLine, validTimetable, CELL_MAX, SLOT_MAX, PAST_MAX };

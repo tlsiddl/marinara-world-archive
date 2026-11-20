@@ -659,8 +659,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     const where = st.entities.find((x) => x.entityId === e.appliesTo);
     const tag = e.sources?.appliesTo === 'auto' ? '<span class="auto-tag">· 자동</span>' : '';
     const opts = st.entities.filter((x) => x.type === 'place' || x.type === 'group').sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, 'ko') : a.type === 'group' ? -1 : 1));
-    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="appliesPick" aria-label="적용되는 곳"><option value="">세계 전체</option>${opts.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === e.appliesTo ? 'selected' : ''}>${esc(x.name)} · ${x.type === 'group' ? '집단' : '장소'}</option>`).join('')}</select><button class="quiet" type="button" data-act="applies-set" data-id="${esc(e.entityId)}">바꾸기</button></span>`;
-    return `<div class="sec"><small>적용되는 곳${tag}</small><p>${where ? `<button class="quiet" type="button" data-act="open" data-id="${esc(where.entityId)}">${esc(where.name)}</button>` : '세계 전체'}</p>${pick}</div>`;
+    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="appliesPick" aria-label="적용되는 곳"><option value="" ${e.appliesTo ? '' : 'selected'}>모름</option><option value="world" ${e.appliesTo === 'world' ? 'selected' : ''}>세계 전체</option>${opts.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === e.appliesTo ? 'selected' : ''}>${esc(x.name)} · ${x.type === 'group' ? '집단' : '장소'}</option>`).join('')}</select><button class="quiet" type="button" data-act="applies-set" data-id="${esc(e.entityId)}">바꾸기</button></span>`;
+    const shown = where ? `<button class="quiet" type="button" data-act="open" data-id="${esc(where.entityId)}">${esc(where.name)}</button>` : e.appliesTo === 'world' ? '세계 전체' : '모름 <small>(장면 방식에서 맨 뒤에 넣음)</small>';
+    return `<div class="sec"><small>적용되는 곳${tag}</small><p>${shown}</p>${pick}</div>`;
   }
 
   function detailHtml(e) {
