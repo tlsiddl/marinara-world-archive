@@ -1,0 +1,35 @@
+<style>
+.tbl{width:100%;border-collapse:separate;border-spacing:6px;table-layout:fixed}
+.tbl th{font:600 15px/1.2 "Gowun Batang",serif;padding:8px 0 10px;border-bottom:1.5px solid var(--im-ink)}
+.tbl th small{display:block;font:9px ui-monospace,monospace;letter-spacing:2px;color:var(--im-muted);margin-top:3px}
+.tbl th.today{background:#f3efe2;border-radius:10px 10px 0 0}
+.tbl td.t{width:64px;text-align:right;padding-right:6px;font-size:11px;color:var(--im-muted);vertical-align:top;padding-top:10px}
+.tbl td.t b{display:block;color:var(--im-ink);font:600 12px "Gowun Batang",serif}
+.c{border-radius:12px;padding:10px 10px 9px;height:100%;min-height:58px;border:1px solid transparent}
+.c b{display:block;font:600 14px/1.25 "Gowun Batang",serif}
+.c small{display:block;font-size:10px;color:var(--im-muted);margin-top:3px}
+.s1{background:#e3e8f2;border-color:#c9d2e3}   /* 별자리학 */
+.s2{background:#f3efe2;border-color:#ddd5bf}   /* 약초학 */
+.s3{background:#ecebe8;border-color:#d6d4cf}   /* 변환술 */
+.s4{background:#dfe6e9;border-color:#c5d0d5}   /* 비행 */
+.s5{background:#fff;border-color:var(--im-ink)} /* 마법약 */
+.s6{background:#eef0f6;border-color:#d3d8e6}   /* 마법 역사 */
+.free{border:1px dashed var(--im-line);border-radius:12px;min-height:58px}
+.lunch td.l{text-align:center;font-size:11px;color:var(--im-muted);letter-spacing:6px;padding:4px 0;border-top:1px dashed var(--im-line);border-bottom:1px dashed var(--im-line)}
+.night{background:#1b1c22;color:#eeebe3;border-radius:12px;padding:10px;position:relative;overflow:hidden;min-height:58px}
+.night small{display:block;color:#a9adbd;font-size:10px;margin-top:3px}.night b{display:block;color:#eeebe3;font:600 14px/1.25 "Gowun Batang",serif}
+.night i{position:absolute;width:2px;height:2px;border-radius:50%;background:#eeebe3;opacity:.75}
+.was{font-size:10px;color:#4c5d8f;margin-top:4px}
+.todaycol{background:#f3efe2;border-radius:0 0 10px 10px}
+</style>
+<div class="subtabs" role="tablist"><button class="subtab">세계 전체 6</button><button class="subtab selected">은사슴 학교 18</button><button class="subtab">하르트 저택 5</button><button class="subtab">별빛 시장 4</button><button class="subtab">모름 2</button></div>
+<h1 style="margin:16px 0 4px">시간표</h1>
+<p style="margin:0 0 14px;color:var(--im-muted)">은사슴 기숙사 1학년 · 이야기 속 오늘은 수요일</p>
+<table class="tbl">
+<tr><th style="width:64px;border:0"></th><th>월<small>MON</small></th><th>화<small>TUE</small></th><th class="today">수<small>WED</small></th><th>목<small>THU</small></th><th>금<small>FRI</small></th></tr>
+<tr><td class="t"><b>1교시</b>09:00</td><td><div class="c s1"><b>별자리학</b><small>별시계탑</small></div></td><td rowspan="2"><div class="c s2" style="min-height:122px"><b>약초학</b><small>약초 온실 · 두 시간</small></div></td><td rowspan="2" class="todaycol"><div class="c s3" style="min-height:122px"><b>변환술</b><small>2층 교실 · 두 시간</small></div></td><td><div class="c s1"><b>별자리학</b><small>별시계탑</small></div></td><td rowspan="2"><div class="c s5" style="min-height:122px"><b>마법약</b><small>지하 교실 · 두 시간</small><div class="was">이전: 변환술</div></div></td></tr>
+<tr><td class="t"><b>2교시</b>10:40</td><td><div class="c s6"><b>마법 역사</b><small>대강의실</small></div></td><td><div class="c s4"><b>비행</b><small>운동장</small></div></td></tr>
+<tr class="lunch"><td></td><td colspan="5" class="l">점 심</td></tr>
+<tr><td class="t"><b>오후</b>13:30</td><td><div class="free"></div></td><td><div class="free"></div></td><td class="todaycol"><div class="free"></div></td><td><div class="free"></div></td><td><div class="free"></div></td></tr>
+<tr><td class="t"><b>밤</b></td><td></td><td></td><td class="todaycol"><div class="night"><i style="left:14%;top:22%"></i><i style="left:72%;top:18%"></i><i style="left:46%;top:76%"></i><i style="left:88%;top:62%"></i><i style="left:28%;top:58%"></i><b>천문 관측</b><small>23:00 · 별시계탑</small></div></td><td></td><td></td></tr>
+</table>
