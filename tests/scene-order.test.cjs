@@ -75,3 +75,23 @@ test('a small budget fills in that order: the unknown rule is the first to be le
   const pinned = run(E, R, [by('하르트 저택')]);
   assert.equal(names(E, pinned.included)[0], '캠퍼스 안 비행 금지', 'pinned: in, and first, even out of the scene');
 });
+
+test('the budget after the scene: rules of the whole world take at most a third, the rules here the rest; a rule named in the scene comes first in its part', () => {
+  const E = [];
+  const school = ent('group', '별시계 학원');
+  E.push(school);
+  for (let i = 0; i < 12; i++) E.push(ent('rule', `세계 규칙 ${String(i).padStart(2, '0')} ${'가'.repeat(40)}`, { appliesTo: 'world', updatedAt: `2026-11-${String(10 + i).padStart(2, '0')}T00:00:00Z` }));
+  for (let i = 0; i < 12; i++) E.push(ent('rule', `학원 규칙 ${String(i).padStart(2, '0')} ${'나'.repeat(40)}`, { appliesTo: school.entityId }));
+  const old = E.find((e) => e.name.startsWith('세계 규칙 00'));
+  const scene = [school.entityId, old.entityId]; // the oldest world rule is named in the latest messages
+  const r = I.assembleWorld({ name: '별시계 학원', description: '', injectMode: 'scene' }, E, 1200, { scene: new Set(scene), relations: [] });
+  const inc = r.included.map((x) => E.find((e) => e.entityId === x).name);
+  const worldIn = inc.filter((n) => n.startsWith('세계'));
+  const schoolIn = inc.filter((n) => n.startsWith('학원'));
+  assert.ok(worldIn.length >= 1 && worldIn.length < schoolIn.length, `world ${worldIn.length} < school ${schoolIn.length}`);
+  assert.equal(worldIn[0], old.name, 'named in the scene: first of the world rules even though it is the oldest');
+  assert.ok(worldIn.slice(1).every((n, i, a) => i === 0 || a[i - 1] > n), 'then the latest first');
+  // no rules here: the whole space goes to the world rules
+  const lone = I.assembleWorld({ name: '별시계 학원', description: '', injectMode: 'scene' }, E.filter((e) => !e.name.startsWith('학원 규칙')), 1200, { scene: new Set(scene), relations: [] });
+  assert.ok(lone.included.length - 1 > worldIn.length, 'a part that does not use its share leaves it to the other');
+});

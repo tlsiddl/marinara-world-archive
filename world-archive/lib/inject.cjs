@@ -106,6 +106,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   const byIdAll = new Map((entities || []).map((x) => [x.entityId, x]));
   const nameOf = (id) => byIdAll.get(id)?.name || '';
   let ordered;
+  let part = null; // scene mode: which part of the budget a setting fills from (see below)
   if (world.injectMode === 'scene' && scene) {
     const rel = Array.isArray(relations) ? relations : [];
     // here: id → how far from the scene (0 the scene's own places and groups; +1 for each place it is in or bigger group)
@@ -138,28 +139,46 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
       : ruleLike(e) ? 4 : 5);
     // the nearest place or group first (the scene's own, then the place it is in, the bigger group …)
     const near = (e) => (e.timetable ? (scene.has(e.timetable.ownerId) ? 0 : here.get(e.timetable.ownerId) ?? 99) : whereKnown(e) ? here.get(e.appliesTo) ?? 99 : 0);
+    // in each part, a rule named in the latest messages (it is in the scene) comes first
+    const named = (e) => Number(!scene.has(e.entityId));
     ordered = keep.filter((e) => e.status === 'confirmed').map((e) => [rank(e), e]).sort(([ra, a], [rb, b]) => ra - rb
+      || (ra >= 2 ? named(a) - named(b) : 0)
       || (ra === 2 ? String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) : 0)
       || (ra === 3 ? near(a) - near(b) : 0)
       || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
       || a.name.localeCompare(b.name, 'ko')).map(([, e]) => e);
+    part = (e) => Math.min(rank(e), 5);
   } else ordered = orderEntities(pool, scene);
   const byType = new Map();
   const included = [];
   const omitted = [];
-  for (const e of ordered) {
-    const line = entityLine(e, nameOf);
-    const header = byType.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length;
-    const cost = header + 1 + line.length;
-    if (used + cost > budget) {
-      omitted.push(e.entityId);
-      continue;
+  const tried = new Set();
+  const fill = (list, limit) => {
+    for (const e of list) {
+      if (tried.has(e.entityId) && included.includes(e.entityId)) continue;
+      const line = entityLine(e, nameOf);
+      const header = byType.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length;
+      const cost = header + 1 + line.length;
+      tried.add(e.entityId);
+      if (used + cost > limit) continue;
+      used += cost;
+      if (!byType.has(e.type)) byType.set(e.type, []);
+      byType.get(e.type).push(line);
+      included.push(e.entityId);
     }
-    used += cost;
-    if (!byType.has(e.type)) byType.set(e.type, []);
-    byType.get(e.type).push(line);
-    included.push(e.entityId);
-  }
+  };
+  if (part) {
+    // v0.5.0 D: pinned and the scene first; what is left goes at most a third to the rules of the whole world, the
+    // rest to the rules · 시간표 here — a part that does not use its share leaves it to the other — then the unknown.
+    const of = (k) => ordered.filter((e) => part(e) === k);
+    fill([...of(0), ...of(1)], budget);
+    const worldCap = used + Math.floor((budget - used) / 3);
+    fill(of(2), worldCap);
+    fill(of(3), budget);
+    fill(of(2), budget);
+    fill([...of(4), ...of(5)], budget);
+  } else fill(ordered, budget);
+  for (const e of ordered) if (!included.includes(e.entityId)) omitted.push(e.entityId);
 
   // Scene mode: relations of people in the scene whose other end is in the scene too, one line each, if they fit.
   const relLines = [];
