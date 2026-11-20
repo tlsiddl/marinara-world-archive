@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check world-archive/marinara-world-archive-runtime.cjs && node --check world-archive/lib/store.cjs && node --check world-archive/lib/inject.cjs && node --check world-archive/lib/service.cjs && node --check world-archive/lib/extract.cjs && node --check world-archive/lib/same.cjs && node --check world-archive/lib/names.cjs && node --check world-archive/lib/search.cjs && node --check world-archive/lib/roster.cjs && node --check world-archive/lib/timetable.cjs && node --check world-archive/lib/vendor/engine.cjs && node --check world-archive/lib/vendor/sentences.cjs && node --check world-archive/lib/vendor/glossary.cjs && node --check extension/extension.js && sh -n install.sh"
+    "check": "node --check world-archive/marinara-world-archive-runtime.cjs && node --check world-archive/lib/store.cjs && node --check world-archive/lib/inject.cjs && node --check world-archive/lib/service.cjs && node --check world-archive/lib/extract.cjs && node --check world-archive/lib/same.cjs && node --check world-archive/lib/names.cjs && node --check world-archive/lib/search.cjs && node --check world-archive/lib/roster.cjs && node --check world-archive/lib/timetable.cjs && node --check world-archive/lib/vendor/engine.cjs && node --check world-archive/lib/vendor/sentences.cjs && node --check world-archive/lib/vendor/glossary.cjs && node --check world-archive/lib/vendor/storydate.cjs && node --check world-archive/lib/calendar.cjs && node --check extension/extension.js && sh -n install.sh"
   },
   "engines": {
     "node": ">=22.15"

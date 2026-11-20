@@ -12,6 +12,7 @@ const { randomUUID } = require('node:crypto');
 const { findPairs, describedPairs, speciesPairs, thingPairs } = require('./same.cjs');
 const { rosterOf, ROLE_WORDS } = require('./roster.cjs');
 const TT = require('./timetable.cjs');
+const CAL = require('./calendar.cjs');
 const N = require('./names.cjs');
 
 const SCHEMA = 1;
@@ -407,6 +408,8 @@ function validWorld(w) {
     (w.injectMode === undefined || INJECT_MODES.includes(w.injectMode)) &&
     (w.scoreboard === undefined || w.scoreboard === null || (isObject(w.scoreboard) && typeof w.scoreboard.name === 'string')) &&
     (w.auto === undefined || isObject(w.auto)) &&
+    (w.yearStart === undefined || (Number.isInteger(w.yearStart) && w.yearStart >= 1 && w.yearStart <= 12)) &&
+    (w.nameStyle === undefined || ['auto', 'ko', 'original'].includes(w.nameStyle)) &&
     typeof w.createdAt === 'string' &&
     typeof w.updatedAt === 'string' &&
     Number.isSafeInteger(w.revision) &&
@@ -431,6 +434,7 @@ function validEntity(e) {
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
     (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
+    (e.calendar === undefined || CAL.validCalendar(e.calendar)) &&
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
     (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
@@ -601,6 +605,17 @@ class Archive {
     if (body.injectMode !== undefined) (next.injectMode = cleanMode(body.injectMode)), (changed = true);
     if (body.scoreboard !== undefined) (next.scoreboard = cleanBoard(body.scoreboard)), (changed = true);
     if (body.auto !== undefined) (next.auto = cleanAuto(body.auto, { ...defaultAuto(), ...(world.auto || {}) })), (changed = true);
+    // v0.5.0 K: the month a school year starts (학년도); 2) how names are written in {{세계}} (auto · ko · original)
+    if (body.yearStart !== undefined) {
+      if (!Number.isInteger(body.yearStart) || body.yearStart < 1 || body.yearStart > 12) throw new ArchiveError(400, '학년도 시작 달은 1~12입니다.');
+      next.yearStart = body.yearStart;
+      changed = true;
+    }
+    if (body.nameStyle !== undefined) {
+      if (!['auto', 'ko', 'original'].includes(body.nameStyle)) throw new ArchiveError(400, '이름 표기는 auto · ko · original 중 하나입니다.');
+      next.nameStyle = body.nameStyle;
+      changed = true;
+    }
     if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     next.revision++;
     next.updatedAt = now();
@@ -1041,6 +1056,16 @@ class Archive {
         if ((e.appliesTo || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.appliesTo = c.before; else delete e.appliesTo;
         if (c.by === 'person') delete e.sources?.appliesTo;
+      } else if (c.action === 'event') {
+        const events = e.calendar?.events;
+        if (!events) throw new ArchiveError(409, later);
+        const cur = c.eventId ? events[c.eventId] || null : null;
+        if (JSON.stringify(cur) !== JSON.stringify(c.after)) throw new ArchiveError(409, later);
+        if (c.before) events[c.before.id] = structuredClone(c.before);
+        else if (c.eventId) delete events[c.eventId];
+      } else if (c.action === 'event-pending') {
+        const ev = e.calendar?.events?.[c.eventId];
+        if (ev?.pending) delete ev.pending;
       } else if (c.action === 'cell') {
         // a 시간표 cell back as it was, only while it still holds what this change wrote
         const cells = e.timetable?.cells;
@@ -1227,11 +1252,190 @@ class Archive {
     return c;
   }
 
+  // ---------------------------------------------------------------- 학사일정 (v0.5.0 K)
+
+  /** The owner's 학사일정 (ownerId null: the whole world's), or null. */
+  calendarOf(doc, ownerId) {
+    return doc.entities.find((e) => e.type === 'schedule' && e.calendar && (e.calendar.ownerId ?? null) === (ownerId ?? null)) || null;
+  }
+
+  /**
+   * Dated events the reader (or 「학사일정으로 모으기」) found: [{ ownerId|null, date, end, when, name, place, placeId,
+   * who, cancelled, evidence }]. The same event (same name, same school year or no date yet) is changed, not added: a
+   * new date keeps the old one as 「이전」; cancelled marks it (never deleted); an event the person wrote only gets
+   * 「대화에서는 ○○예요 [적용] [무시]」. meta.yearStart: the school year's first month. Recorded ('event', undoable).
+   */
+  applyCalendar(worldId, events, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const by = typeof meta.by === 'string' && /^[a-z0-9-]{1,40}$/.test(meta.by) ? meta.by : 'reader';
+    const start = Number.isInteger(meta.yearStart) ? meta.yearStart : 9;
+    const t = now();
+    const changes = [];
+    const log = (c) => changes.push({ id: randomUUID(), at: t, by, roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], ...c });
+    for (const raw of Array.isArray(events) ? events : []) {
+      const name = String(raw?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, CAL.NAME_MAX);
+      if (!name) continue;
+      const ownerId = raw.ownerId ?? null;
+      const owner = ownerId ? doc.entities.find((e) => e.entityId === ownerId && (e.type === 'group' || e.type === 'place')) : null;
+      if (ownerId && !owner) continue;
+      const date = raw.date ? CAL.normDate(raw.date) : null;
+      const end = raw.end ? CAL.normDate(raw.end) : null;
+      const when = !date && typeof raw.when === 'string' ? raw.when.trim().slice(0, 60) : '';
+      if (!date && !when) continue;
+      const evidence = typeof raw.evidence === 'string' ? raw.evidence.slice(0, 300) : '';
+      let sheet = this.calendarOf(doc, ownerId);
+      if (!sheet) {
+        if (doc.entities.length >= ENTITY_MAX) continue;
+        sheet = {
+          entityId: randomUUID(), type: 'schedule', name: owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
+          fields: owner ? { who: owner.name } : {}, extra: [], pinned: false, sources: {}, status: 'confirmed',
+          provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, calendar: { ownerId, events: {} },
+          revision: 1, createdAt: t, updatedAt: t,
+        };
+        doc.entities.push(sheet);
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create', evidence });
+      }
+      const k = squashName(name);
+      const same = Object.values(sheet.calendar.events).find((x) => squashName(x.name) === k
+        && (!x.date || !date || CAL.schoolYear(x.date, start) === CAL.schoolYear(date, start) || x.date.slice(-5) === date.slice(-5)));
+      const facts = {
+        ...(date ? { date } : {}), ...(end && end !== date ? { end } : {}), ...(when ? { when } : {}),
+        ...(raw.place ? { place: String(raw.place).trim().slice(0, 60) } : {}), ...(raw.placeId ? { placeId: raw.placeId } : {}),
+        ...(raw.who ? { who: String(raw.who).trim().slice(0, 80) } : {}),
+      };
+      if (!same) {
+        const id = randomUUID();
+        sheet.calendar.events[id] = { id, name, ...facts, ...(raw.cancelled ? { cancelled: true } : {}), evidence, source: 'auto', at: t };
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event', eventId: id, before: null, after: structuredClone(sheet.calendar.events[id]), evidence });
+        sheet.revision++;
+        sheet.updatedAt = t;
+        continue;
+      }
+      const before = structuredClone(same);
+      const next = { ...same };
+      if (date && date !== same.date) {
+        if (same.date) next.past = [{ date: same.date, until: t, evidence: same.evidence || '' }, ...(same.past || [])].slice(0, 3);
+        next.date = date;
+        delete next.when;
+      }
+      if (end && end !== next.end) next.end = end;
+      if (raw.cancelled && !same.cancelled) next.cancelled = true;
+      for (const f of ['place', 'placeId', 'who']) if (facts[f] && !same[f]) next[f] = facts[f];
+      if (JSON.stringify(next) === JSON.stringify(same)) continue;
+      if (same.source === 'manual') {
+        const offer = { ...(date && date !== same.date ? { date } : {}), ...(raw.cancelled && !same.cancelled ? { cancelled: true } : {}), evidence, at: t };
+        if (Object.keys(offer).length <= 2 || JSON.stringify(same.pending || {}) === JSON.stringify(offer)) continue;
+        same.pending = offer;
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event-pending', eventId: same.id, after: offer, evidence });
+      } else {
+        Object.assign(same, next, { evidence: evidence || same.evidence, at: t });
+        log({ entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event', eventId: same.id, before, after: structuredClone(same), evidence });
+      }
+      sheet.revision++;
+      sheet.updatedAt = t;
+    }
+    if (!changes.length) return [];
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return changes;
+  }
+
+  /**
+   * An event the person writes (theirs from then on): { entityId | ownerId (null: the world's), eventId?, name, date,
+   * end, place, who, cancelled }; name '' takes the event away. Recorded ('event', by person), undoable.
+   */
+  setEvent(worldId, body = {}) {
+    this.getWorld(worldId);
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
+    const doc = this.readEntities(worldId);
+    let sheet = body.entityId ? doc.entities.find((e) => e.entityId === body.entityId && e.calendar) : this.calendarOf(doc, body.ownerId ?? null);
+    const t = now();
+    const changes = [];
+    if (!sheet) {
+      const owner = body.ownerId ? doc.entities.find((e) => e.entityId === body.ownerId && (e.type === 'group' || e.type === 'place')) : null;
+      if (body.ownerId && !owner) throw new ArchiveError(404, '학사일정의 주인(집단이나 장소)을 찾지 못했습니다.');
+      sheet = {
+        entityId: randomUUID(), type: 'schedule', name: owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
+        fields: owner ? { who: owner.name } : {}, extra: [], pinned: false, sources: { name: 'manual' }, status: 'confirmed',
+        provenance: { source: 'manual' }, calendar: { ownerId: owner?.entityId ?? null, events: {} }, revision: 1, createdAt: t, updatedAt: t,
+      };
+      doc.entities.push(sheet);
+      changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'create' });
+    }
+    const ev = body.eventId ? sheet.calendar.events[body.eventId] : null;
+    if (body.eventId && !ev) throw new ArchiveError(404, '그 일정을 찾지 못했습니다.');
+    const before = ev ? structuredClone(ev) : null;
+    const name = String(body.name ?? ev?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, CAL.NAME_MAX);
+    if (!name) {
+      if (!ev) throw new ArchiveError(400, '행사 이름을 적어 주세요.');
+      delete sheet.calendar.events[ev.id];
+    } else {
+      const date = body.date !== undefined ? (body.date ? CAL.normDate(body.date) : null) : ev?.date || null;
+      if (body.date && !date) throw new ArchiveError(400, '날짜는 1991-10-31이나 10월 31일처럼 적어 주세요.');
+      const id = ev?.id || randomUUID();
+      const next = { ...(ev || {}), id, name, source: 'manual', at: t };
+      if (date) next.date = date; else delete next.date;
+      for (const f of ['place', 'who']) if (body[f] !== undefined) { if (String(body[f]).trim()) next[f] = String(body[f]).trim().slice(0, 80); else delete next[f]; }
+      if (body.end !== undefined) { const e2 = body.end ? CAL.normDate(body.end) : null; if (e2) next.end = e2; else delete next.end; }
+      if (body.cancelled !== undefined) { if (body.cancelled) next.cancelled = true; else delete next.cancelled; }
+      if (ev?.date && date && ev.date !== date) next.past = [{ date: ev.date, until: t, evidence: '' }, ...(ev.past || [])].slice(0, 3);
+      delete next.pending;
+      sheet.calendar.events[id] = next;
+    }
+    sheet.revision++;
+    sheet.updatedAt = t;
+    const after = name ? structuredClone(Object.values(sheet.calendar.events).find((x) => x.name === name && x.source === 'manual' && x.at === t) || null) : null;
+    changes.push({ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId: sheet.entityId, name: sheet.name, type: 'schedule', action: 'event', eventId: after?.id || ev?.id, before, after });
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, changes);
+    return sheet;
+  }
+
+  /** 「대화에서는 ○○예요」 on an event the person wrote: [적용] or [무시]. */
+  applyEventPending(worldId, entityId, eventId, { discard = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const sheet = doc.entities.find((e) => e.entityId === entityId && e.calendar);
+    const ev = sheet?.calendar.events[eventId];
+    if (!ev?.pending) throw new ArchiveError(404, '대화에서 온 값이 없습니다.');
+    const before = structuredClone(ev);
+    const p = ev.pending;
+    delete ev.pending;
+    const t = now();
+    if (!discard) {
+      if (p.date && p.date !== ev.date) { if (ev.date) ev.past = [{ date: ev.date, until: t, evidence: ev.evidence || '' }, ...(ev.past || [])].slice(0, 3); ev.date = p.date; }
+      if (p.cancelled) ev.cancelled = true;
+      ev.at = t;
+    }
+    sheet.revision++;
+    sheet.updatedAt = t;
+    this.writeJson(this.entityFile(worldId), doc);
+    if (!discard) this.pushHistory(worldId, [{ id: randomUUID(), at: t, by: 'person', roomId: null, messageIds: [], entityId, name: sheet.name, type: 'schedule', action: 'event', eventId, before, after: structuredClone(ev) }]);
+    return sheet;
+  }
+
+  /** The story's today the room last showed (§RP header): { date, weekday, written, at } or null. */
+  setRoomStory(roomId, story) {
+    needRoom(roomId);
+    const rooms = this.readRooms();
+    if (!rooms.rooms[roomId]) return;
+    const prev = rooms.rooms[roomId].story;
+    if (!story) { if (!prev) return; delete rooms.rooms[roomId].story; }
+    else if (prev?.date === story.date && prev?.weekday === story.weekday) return;
+    else rooms.rooms[roomId].story = { date: story.date, weekday: story.weekday, written: !!story.written, at: now() };
+    this.writeJson(this.roomsFile, rooms);
+  }
+
   // ---------------------------------------------------------------- 시간표 (v0.5.0 B)
 
   /** The owner's 시간표 setting (a schedule with a timetable), or null. */
-  timetableOf(doc, ownerId) {
-    return doc.entities.find((e) => e.type === 'schedule' && e.timetable?.ownerId === ownerId) || null;
+  timetableOf(doc, ownerId, year = null) {
+    // v0.5.0 K: with a 학년도 — that year's sheet, or one with no year yet (it takes the year); a new year gets a new
+    // sheet and last year's stays. Without one — the newest.
+    const mine = doc.entities.filter((e) => e.type === 'schedule' && e.timetable?.ownerId === ownerId);
+    if (year) return mine.find((e) => e.timetable.year === year) || mine.find((e) => !e.timetable.year) || null;
+    return mine.sort((a, b) => String(b.timetable.year || '').localeCompare(String(a.timetable.year || '')))[0] || null;
   }
 
   /**
@@ -1254,13 +1458,16 @@ class Archive {
       const value = String(raw?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, TT.CELL_MAX);
       if (!owner || !day || !slot || !value) continue;
       const evidence = typeof raw.evidence === 'string' ? raw.evidence.slice(0, 300) : '';
-      let sheet = this.timetableOf(doc, owner.entityId);
+      const year = typeof meta.year === 'string' && meta.year ? meta.year : null;
+      let sheet = this.timetableOf(doc, owner.entityId, year);
+      if (sheet && year && !sheet.timetable.year) sheet.timetable.year = year;
       if (!sheet) {
         if (doc.entities.length >= ENTITY_MAX) continue;
+        const older = doc.entities.some((e) => e.type === 'schedule' && e.timetable?.ownerId === owner.entityId);
         sheet = {
-          entityId: randomUUID(), type: 'schedule', name: owner.name + ' 시간표', aliases: [], description: '',
+          entityId: randomUUID(), type: 'schedule', name: owner.name + ' 시간표' + (year && older ? ` (${year})` : ''), aliases: [], description: '',
           fields: { when: '매주', who: owner.name }, extra: [], pinned: false, sources: { when: 'auto', who: 'auto' }, status: 'confirmed',
-          provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, timetable: { ownerId: owner.entityId, cells: {} },
+          provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, timetable: { ownerId: owner.entityId, cells: {}, ...(year ? { year } : {}) },
           revision: 1, createdAt: t, updatedAt: t,
         };
         doc.entities.push(sheet);

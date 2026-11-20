@@ -1,6 +1,7 @@
 'use strict';
 const { FIELDS } = require('./store.cjs');
 const TT = require('./timetable.cjs');
+const CAL = require('./calendar.cjs');
 // What {{세계}} becomes. Pure functions: no files, no engine.
 // Budget handling follows the idea of the Memory Module's renderMemorySource (tlsiddl/marinara-memory-module
 // refactor/modular e873fd1): whole items only, most important first, never cut in the middle of a line.
@@ -40,7 +41,9 @@ const oneLine = (t) => String(t).replace(/\s*\n+\s*/g, ' / ').trim();
 /** 할 일 10: the earlier value, only for a field the person switched on (「이전 값도 프롬프트에」). */
 const was = (e, k) => (e.pastInPrompt?.[k] && e.past?.[k]?.[0]?.value ? ` (과거: ${oneLine(e.past[k][0].value)})` : '');
 
-function entityLine(e, nameOf = () => '') {
+function entityLine(e, nameOf = () => '', today = null) {
+  // v0.5.0 K: a 학사일정 is the next three events on one line (nothing ahead: nothing)
+  if (e.calendar) { const l = CAL.calendarLine(e, today); return l ? sanitize(`- ${e.name}\n  ${l}`) : ''; }
   // v0.5.0 B: a 시간표 is its cells on one line
   if (e.timetable) return sanitize(`- ${e.name}\n  시간표: ${TT.timetableLine(e) || '(비어 있음)'}`);
   const aliases = e.aliases?.length ? ` (다른 이름: ${e.aliases.join(', ')})` : '';
@@ -84,7 +87,7 @@ function orderEntities(entities, scene = null) {
  * included / omitted are entity IDs. An item that does not fit is left out whole; smaller ones after it can
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null } = {}) {
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
@@ -137,16 +140,18 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     }
     const ruleLike = (e) => ALWAYS.has(e.type);
     const whereKnown = (e) => ruleLike(e) && e.appliesTo && e.appliesTo !== WORLD && byIdAll.has(e.appliesTo);
-    const sheetHere = (e) => e.timetable && (scene.has(e.timetable.ownerId) || here.has(e.timetable.ownerId));
-    const keep = pool.filter((e) => e.pinned || scene.has(e.entityId) || sheetHere(e) || (ruleLike(e) && (!whereKnown(e) || here.has(e.appliesTo))));
+    const sheetHere = (e) => (e.timetable && (scene.has(e.timetable.ownerId) || here.has(e.timetable.ownerId))) || (e.calendar?.ownerId && (scene.has(e.calendar.ownerId) || here.has(e.calendar.ownerId)));
+    const worldCalendar = (e) => e.calendar && !e.calendar.ownerId;
+    const keep = pool.filter((e) => e.pinned || scene.has(e.entityId) || sheetHere(e) || worldCalendar(e) || (ruleLike(e) && (!whereKnown(e) || here.has(e.appliesTo))));
     skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
     const rank = (e) => (e.pinned ? 0
       : scene.has(e.entityId) && !ruleLike(e) ? 1
-      : ruleLike(e) && e.appliesTo === WORLD ? 2
+      : (ruleLike(e) && e.appliesTo === WORLD) || worldCalendar(e) ? 2
       : sheetHere(e) || whereKnown(e) ? 3
       : ruleLike(e) ? 4 : 5);
     // the nearest place or group first (the scene's own, then the place it is in, the bigger group …)
-    const near = (e) => (e.timetable ? (scene.has(e.timetable.ownerId) ? 0 : here.get(e.timetable.ownerId) ?? 99) : whereKnown(e) ? here.get(e.appliesTo) ?? 99 : 0);
+    const sheetOwner = (e) => e.timetable?.ownerId || e.calendar?.ownerId;
+    const near = (e) => (sheetOwner(e) ? (scene.has(sheetOwner(e)) ? 0 : here.get(sheetOwner(e)) ?? 99) : whereKnown(e) ? here.get(e.appliesTo) ?? 99 : 0);
     // in each part, a rule named in the latest messages (it is in the scene) comes first
     const named = (e) => Number(!scene.has(e.entityId));
     ordered = keep.filter((e) => e.status === 'confirmed').map((e) => [rank(e), e]).sort(([ra, a], [rb, b]) => ra - rb
@@ -164,7 +169,8 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   const fill = (list, limit) => {
     for (const e of list) {
       if (tried.has(e.entityId) && included.includes(e.entityId)) continue;
-      const line = entityLine(e, nameOf);
+      const line = entityLine(e, nameOf, today);
+      if (!line) continue;
       const header = byType.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length;
       const cost = header + 1 + line.length;
       tried.add(e.entityId);

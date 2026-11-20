@@ -6,6 +6,7 @@
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
 const { TYPES, FIELDS, REL_TYPES, relationFits } = require('./store.cjs');
 const TT = require('./timetable.cjs');
+const CAL = require('./calendar.cjs');
 const { speciesName } = require('./same.cjs');
 const S = require('./vendor/sentences.cjs');
 const N = require('./names.cjs');
@@ -133,7 +134,7 @@ function fieldGuide() {
  * The messages for one batch. world: { name, description }; entities: the world's settings; cast: names to skip;
  * glossary: the room's translation glossary pairs [{ from, to }] — only those named in the batch go in.
  */
-function buildPrompt(world, entities, part, cast, glossary = []) {
+function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
   // 할 일 11: only a world with a board asks for score events (the model never adds them up).
   const board = world.scoreboard?.name ? world.scoreboard : null;
   const scoreRules = board
@@ -208,10 +209,13 @@ ${fieldGuide()}
 {"owner":"그 시간표의 주인 — 집단이나 인물 이름(예: 슬리데린 1학년)","day":"월|화|수|목|금|토|일|평일|매일","slot":"교시나 때(예: 1교시, 오전, 09:00–10:30)","value":"무엇을 하는지(예: 마법약 — 스네이프 교수)","subject":"과목 이름만(예: 마법약 — 같은 과목은 늘 같은 이름)","place":"어디서(원문에 있을 때만)","hours":"몇 교시·몇 시간 이어지는지 숫자(원문에 있을 때만)","evidence":[{"n":"12.3","q":"핵심 구절"}]}
 - 요일과 시간(교시·오전·오후·몇 시)이 둘 다 원문에 있을 때만 적는다. 한 번만 있는 일(「내일 아침 시험」)은 적지 않는다. 주인은 [이미 있는 항목]이나 items의 집단·인물 이름 그대로 쓴다.
 ${scoreRules}
-JSON만 출력: {"items":[...],"relations":[...],"timetable":[...]${board ? ',"scores":[...]' : ''}} (적을 게 없으면 빈 배열)`;
+학사일정: 날짜가 정해진 한 번뿐인 행사(입학식 · 연회 · 경기 · 방학 · 시험 · 무도회 같은 것)는 calendar에 적는다. 되풀이되는 수업 · 일과는 timetable로 적는다.
+{"owner":"그 일정의 주인 — 집단이나 장소 이름(세계 전체면 빈 문자열)","date":"1991-10-31처럼(연도를 모르면 10-31)","end":"기간이면 끝나는 날","when":"날짜로 바꿀 수 없는 말(예: 다음 주 금요일)","name":"행사 이름","place":"장소","who":"참가하는 집단 · 사람","status":"취소되면 cancelled","evidence":[{"n":"12.3","q":"핵심 구절"}]}
+- 날짜가 근거 문장에 실제로 있어야 적는다. 「다음 주」처럼 상대 날짜는 [이야기 속 오늘]이 있을 때만 날짜로 바꾸고, 없으면 when에 글 그대로 둔다. 미뤄졌으면 새 날짜를 적는다(코드가 이전 날짜를 남긴다).
+JSON만 출력: {"items":[...],"relations":[...],"timetable":[...],"calendar":[...]${board ? ',"scores":[...]' : ''}} (적을 게 없으면 빈 배열)`;
   const user = `[세계관] ${world.name}${world.description ? `\n${clip(world.description, 1500)}` : ''}
 
-[카드가 있는 인물 — 적지 마]
+${today?.date ? `[이야기 속 오늘] ${today.date} (${today.weekday})\n\n` : ''}[카드가 있는 인물 — 적지 마]
 ${cast.length ? cast.join(', ') : '(없음)'}
 
 [이미 있는 항목]
@@ -234,7 +238,7 @@ ${part.batch.map((m) => `#${m.number} [${m.speaker}]\n${m.sentences.map((t, i) =
  */
 function readReply(text, parse) {
   const whole = parse(text);
-  if (whole && Array.isArray(whole.items)) return { items: whole.items, relations: Array.isArray(whole.relations) ? whole.relations : [], timetable: Array.isArray(whole.timetable) ? whole.timetable : [], scores: Array.isArray(whole.scores) ? whole.scores : [], cut: false };
+  if (whole && Array.isArray(whole.items)) return { items: whole.items, relations: Array.isArray(whole.relations) ? whole.relations : [], timetable: Array.isArray(whole.timetable) ? whole.timetable : [], calendar: Array.isArray(whole.calendar) ? whole.calendar : [], scores: Array.isArray(whole.scores) ? whole.scores : [], cut: false };
   const s = String(text || '');
   const at = s.search(/"items"\s*:\s*\[/);
   if (at < 0) return null;
@@ -265,7 +269,7 @@ function readReply(text, parse) {
       }
     } else if (ch === ']' && depth === 0) break;
   }
-  return items.length ? { items, relations: [], timetable: [], scores: [], cut: true } : null;
+  return items.length ? { items, relations: [], timetable: [], calendar: [], scores: [], cut: true } : null;
 }
 
 // ---------------------------------------------------------------- one field against its own evidence
@@ -444,6 +448,43 @@ function checkRelations(parsed, part, cast) {
 }
 
 /**
+ * v0.5.0 K: the dated events of a reply that hold up — a name, a date (or, when the story's today is not known and
+ * the text says 「다음 주」, its words), and an evidence sentence that says the date (its day number or those words).
+ * today: { date } or null (a date without a year takes the story's year). Returns { events, dropped }; owner a name.
+ */
+function checkCalendar(parsed, part, cast, today = null) {
+  const list = Array.isArray(parsed?.calendar) ? parsed.calendar : [];
+  const index = indexBlocks(part.batch);
+  const castSet = new Set(cast.map(squash));
+  const baseYear = today?.date ? Number(today.date.slice(0, 4)) : null;
+  const events = [];
+  const dropped = [];
+  for (const c of list) {
+    if (!c || typeof c !== 'object' || typeof c.name !== 'string' || !c.name.trim()) continue;
+    const label = c.name;
+    const owner = typeof c.owner === 'string' ? c.owner.trim() : '';
+    if (owner && castSet.has(squash(owner))) { dropped.push({ name: label, why: 'card' }); continue; }
+    const date = CAL.normDate(c.date, baseYear);
+    const end = c.end ? CAL.normDate(c.end, baseYear) : null;
+    const when = !date && typeof c.when === 'string' ? c.when.trim() : '';
+    if (!date && !when) { dropped.push({ name: label, why: 'no date' }); continue; }
+    const raw = Array.isArray(c.evidence) ? c.evidence : c.evidence ? [c.evidence] : [];
+    const found = S.resolveEvidence(raw.map((e) => (typeof e === 'string' ? { q: e } : e)), index).slice(0, 2);
+    if (!found.length) { dropped.push({ name: label, why: 'no evidence sentence' }); continue; }
+    const said = found.map((x) => x.text).join(' ');
+    const day = date ? String(Number(date.slice(-2))) : '';
+    const saysIt = date ? new RegExp(`(^|[^0-9])${day}(일|[^0-9]|$)`).test(said) || /\d{8}/.test(said) : overlap(when, said) >= 0.5;
+    if (!saysIt) { dropped.push({ name: label, why: 'evidence does not say the date' }); continue; }
+    events.push({
+      owner, name: clip(c.name.trim(), CAL.NAME_MAX), ...(date ? { date } : { when: clip(when, 60) }), ...(end ? { end } : {}),
+      place: typeof c.place === 'string' ? clip(c.place.trim(), 60) : '', who: typeof c.who === 'string' ? clip(c.who.trim(), 80) : '',
+      cancelled: c.status === 'cancelled' || c.cancelled === true, evidence: clip(said, 300),
+    });
+  }
+  return { events, dropped };
+}
+
+/**
  * v0.5.0 B: the 시간표 cells of a reply that hold up — an owner that is not a card person, a weekday (or 평일 · 매일),
  * a time slot, what happens, and at least one evidence sentence found in the batch. Returns { cells, dropped }; the
  * owner is a name still (the service finds the setting).
@@ -494,4 +535,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { HUMAN_SPECIES, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { HUMAN_SPECIES, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };

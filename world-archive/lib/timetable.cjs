@@ -170,7 +170,7 @@ function timetableLine(e) {
 
 function validTimetable(t) {
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
-  if (!isObj(t) || typeof t.ownerId !== 'string' || !isObj(t.cells)) return false;
+  if (!isObj(t) || typeof t.ownerId !== 'string' || !isObj(t.cells) || (t.year !== undefined && typeof t.year !== 'string')) return false;
   return Object.entries(t.cells).every(([k, c]) => isObj(c) && typeof c.day === 'string' && typeof c.slot === 'string' && k === cellKey(c.day, c.slot)
     && typeof c.value === 'string' && (c.evidence === undefined || typeof c.evidence === 'string')
     && (c.source === 'auto' || c.source === 'manual')

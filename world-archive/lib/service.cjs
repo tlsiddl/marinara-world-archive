@@ -5,6 +5,7 @@
 const path = require('node:path');
 const { Archive, ArchiveError, mentions, isDescriptiveName, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY, namesGroup } = require('./store.cjs');
 const TT = require('./timetable.cjs');
+const CAL = require('./calendar.cjs');
 const X = require('./extract.cjs');
 const N = require('./names.cjs');
 const { speciesName } = require('./same.cjs');
@@ -170,7 +171,9 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         let parsed = null;
         let split = false;
         for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-          const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast, glossary || []), { maxTokens: READ_MAX_TOKENS });
+          // v0.5.0 K: the story's today up to this batch, for 「다음 주」 and dates without a year
+          const todayHere = CAL.storyToday(messages.slice(0, part.end));
+          const reply = await api.askModel(m, X.buildPrompt(world, s.readEntities(worldId).entities, part, cast, glossary || [], todayHere), { maxTokens: READ_MAX_TOKENS });
           job.calls++;
           // Whatever token counts the provider reports (names differ between providers), summed for measuring.
           for (const [k, v] of Object.entries(reply.usage || {})) if (typeof v === 'number') job.tokens[k] = (job.tokens[k] || 0) + v;
@@ -261,7 +264,23 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           if (owner) cells.push({ ...c, ownerId: owner.entityId, ...(where?.type === 'place' ? { placeId: where.entityId } : {}) });
           else tt.dropped.push({ name: c.owner + ' ' + c.day + ' ' + c.slot, why: 'no such group or person' });
         }
-        job.cells = (job.cells || 0) + s.applyTimetable(worldId, cells, meta).filter((c) => c.action === 'cell' || c.action === 'cell-pending').length;
+        // v0.5.0 K: the story's today up to this batch gives the school year (학년도) a 시간표 belongs to
+        const storyNow = CAL.storyToday(part.batch.length ? [...messages.slice(0, part.end)] : []);
+        const yearStart = world.yearStart || 9;
+        const year = storyNow ? CAL.schoolYear(storyNow.date, yearStart) : null;
+        job.cells = (job.cells || 0) + s.applyTimetable(worldId, cells, { ...meta, year }).filter((c) => c.action === 'cell' || c.action === 'cell-pending').length;
+        const cal = X.checkCalendar(parsed, part, cast, storyNow);
+        const calEvents = [];
+        for (const c of cal.events) {
+          const ents = s.readEntities(worldId).entities;
+          const owner = c.owner ? s.findByName(ents, c.owner) : null;
+          if (c.owner && !(owner && (owner.type === 'group' || owner.type === 'place'))) { cal.dropped.push({ name: c.name, why: 'no such group or place' }); continue; }
+          const where = c.place ? s.findByName(ents, c.place) : null;
+          calEvents.push({ ...c, ownerId: owner?.entityId ?? null, ...(where?.type === 'place' ? { placeId: where.entityId } : {}) });
+        }
+        job.events = (job.events || 0) + s.applyCalendar(worldId, calEvents, { ...meta, yearStart }).filter((c) => c.action === 'event' || c.action === 'event-pending').length;
+        if (cal.dropped.length) log(`chat ${roomId}: left out events ${cal.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
+        if (storyNow) s.setRoomStory(roomId, storyNow);
         if (tt.dropped.length) log(`chat ${roomId}: left out timetable cells ${tt.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
         job.relations += relChanges.filter((c) => c.action === 'relation-add').length;
         if (rel.dropped.length) log(`chat ${roomId}: left out relations ${rel.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
@@ -368,7 +387,10 @@ async function updateScene(roomId, extraText = '') {
   const entities = store().readEntities(worldId).entities;
   const ids = sceneIds(entities, texts);
   const recent = sceneIds(entities, texts.slice(extraText ? -3 : -2));
-  scenes.set(roomId, { ids, recent, worldId, at: Date.now() });
+  // v0.5.0 K: the story's today (§RP header), for 「며칠 뒤」 and the school year
+  const today = CAL.storyToday(messages);
+  if (today) store().setRoomStory(roomId, today);
+  scenes.set(roomId, { ids, recent, worldId, at: Date.now(), today });
   return ids;
 }
 
@@ -397,7 +419,8 @@ function preview(roomId) {
   const known = scenes.get(roomId);
   const doc = s.readEntities(worldId);
   const scene = known?.worldId === worldId ? known.ids : null;
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null }) };
+  const today = (known?.worldId === worldId && known.today) || s.getRoom(roomId).story || null;
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null }) };
 }
 
 /** 할 일 12: what one room's {{세계외형}} would be right now. */
@@ -575,6 +598,11 @@ async function routes(r) {
     s().applyCellPending(req.params.worldId, req.params.entityId, String(body(req).key || ''), { discard: body(req).discard === true })));
   r.post('/worlds/:worldId/timetable-gather', handle(async (req) => gatherTimetables(req.params.worldId, { model: body(req).model !== false })));
   // v0.5.0 E: 「장소 위치 채우기」 · 「규칙 적용되는 곳 채우기」 (pressed), a group's 본거지 by hand ({ base: placeId | null })
+  // v0.5.0 K 학사일정: an event by hand, [적용] [무시], 「학사일정으로 모으기」
+  r.put('/worlds/:worldId/calendar/event', handle(async (req) => s().setEvent(req.params.worldId, body(req))));
+  r.post('/worlds/:worldId/entities/:entityId/calendar/pending', handle(async (req) =>
+    s().applyEventPending(req.params.worldId, req.params.entityId, String(body(req).eventId || ''), { discard: body(req).discard === true })));
+  r.post('/worlds/:worldId/calendar-gather', handle(async (req) => gatherCalendar(req.params.worldId)));
   r.post('/worlds/:worldId/location-fill', handle(async (req) => fillPlaces(req.params.worldId, { model: body(req).model !== false })));
   r.post('/worlds/:worldId/applies-fill', handle(async (req) => fillApplies(req.params.worldId)));
   r.put('/worlds/:worldId/entities/:entityId/base', handle(async (req) => {
@@ -871,6 +899,42 @@ async function fillApplies(worldId) {
   return out;
 }
 
+/**
+ * 「학사일정으로 모으기」 (v0.5.0 K, pressed): schedule settings that are one dated event (a date in 언제) become events
+ * of their owner's 학사일정 (owner: a group or place in 누가 · 어디서 — the longest name it names; none: the world's).
+ * By code; a schedule moved whole is deleted like the person's delete (기록, undoable), one the person wrote stays.
+ * Returns { moved: [{ name, event }], left: [names] }.
+ */
+async function gatherCalendar(worldId) {
+  const s = store();
+  const world = s.getWorld(worldId);
+  const doc = s.readEntities(worldId);
+  const owners = doc.entities.filter((e) => e.type === 'group' || e.type === 'place');
+  const ownerOf = (text) => {
+    const w = String(text || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
+    const len = (o) => Math.max(0, ...[o.name, ...(o.aliases || [])].map((n) => String(n).normalize('NFC').toLowerCase().replace(/\s+/g, '')).filter((k) => k.length >= 2 && w.includes(k)).map((k) => k.length));
+    return owners.filter((o) => len(o) > 0).sort((a, b) => len(b) - len(a))[0] || null;
+  };
+  const room = Object.entries(s.readRooms().rooms).find(([, l]) => l.worldId === worldId && l.story);
+  const baseYear = room ? Number(room[1].story.date.slice(0, 4)) : null;
+  const manual = (e) => e.provenance?.source === 'manual' || Object.values(e.sources || {}).includes('manual');
+  const out = { moved: [], left: [] };
+  for (const e of doc.entities.filter((x) => x.type === 'schedule' && !x.timetable && !x.calendar)) {
+    const when = String(e.fields?.when || '');
+    const m = when.match(/(\d{4}\s*년\s*)?\d{1,2}\s*월\s*\d{1,2}\s*일|\d{2,4}[-./]\d{1,2}[-./]\d{1,2}/);
+    const date = m ? CAL.normDate(m[0], baseYear) : null;
+    if (!date) { if (/\d{1,2}\s*월|\d{1,2}\s*일/.test(when)) out.left.push(e.name); continue; }
+    const owner = ownerOf(e.fields?.who) || ownerOf(e.fields?.where);
+    const where = owners.find((o) => o.type === 'place' && [o.name, ...(o.aliases || [])].some((n) => String(e.fields?.where || '').includes(n)));
+    const ev = { ownerId: owner?.entityId ?? null, name: e.name, date, place: e.fields?.where || '', ...(where ? { placeId: where.entityId } : {}), who: e.fields?.who || '', evidence: '「' + e.name + '」에서 모음' };
+    s.applyCalendar(worldId, [ev], { by: 'calendar-gather', yearStart: world.yearStart || 9 });
+    if (!manual(e)) s.deleteEntity(worldId, e.entityId, s.listEntities(worldId).find((x) => x.entityId === e.entityId).revision);
+    out.moved.push({ name: e.name, event: `${owner ? owner.name : '세계'} ${date} ${e.name}`, kept: manual(e) });
+  }
+  log(`world ${worldId}: calendar gather moved ${out.moved.length}, left ${out.left.length}`);
+  return out;
+}
+
 async function fillSpecies(worldId) {
   const s = store();
   const world = s.getWorld(worldId);
@@ -998,4 +1062,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { readFromNow, pastCost, fillSpecies, gatherTimetables, fillPlaces, fillApplies, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
+module.exports = { readFromNow, pastCost, fillSpecies, gatherTimetables, gatherCalendar, fillPlaces, fillApplies, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
