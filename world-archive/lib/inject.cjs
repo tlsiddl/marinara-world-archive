@@ -34,14 +34,17 @@ const oneLine = (t) => String(t).replace(/\s*\n+\s*/g, ' / ').trim();
  *     성별: 여 / 나이·생일: 17 / 소속: 천문부
  *     성격: 규칙에 엄격하다
  */
+/** 할 일 10: the earlier value, only for a field the person switched on (「이전 값도 프롬프트에」). */
+const was = (e, k) => (e.pastInPrompt?.[k] && e.past?.[k]?.[0]?.value ? ` (과거: ${oneLine(e.past[k][0].value)})` : '');
+
 function entityLine(e) {
   const aliases = e.aliases?.length ? ` (다른 이름: ${e.aliases.join(', ')})` : '';
   const lines = [`- ${e.name}${aliases}`];
   const defs = FIELDS[e.type] || [];
   const fields = e.fields || {};
-  const short = defs.filter((d) => d.kind === 'line' && fields[d.key]).map((d) => `${d.label}: ${oneLine(fields[d.key])}`);
+  const short = defs.filter((d) => d.kind === 'line' && fields[d.key]).map((d) => `${d.label}: ${oneLine(fields[d.key])}${was(e, d.key)}`);
   if (short.length) lines.push('  ' + short.join(' / '));
-  for (const d of defs) if (d.kind === 'text' && fields[d.key]) lines.push(`  ${d.label}: ${oneLine(fields[d.key])}`);
+  for (const d of defs) if (d.kind === 'text' && fields[d.key]) lines.push(`  ${d.label}: ${oneLine(fields[d.key])}${was(e, d.key)}`);
   for (const x of e.extra || []) if (x.value) lines.push(`  ${x.label}: ${oneLine(x.value)}`);
   if (e.description) lines.push(`  ${defs.length ? '메모: ' : ''}${oneLine(e.description)}`);
   return sanitize(lines.join('\n'));
@@ -70,7 +73,7 @@ function orderEntities(entities, scene = null) {
  * included / omitted are entity IDs. An item that does not fit is left out whole; smaller ones after it can
  * still fit. The world description is cut at a line break only when it alone is larger than the budget.
  */
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [] } = {}) {
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
@@ -128,7 +131,15 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     }
   }
 
+  // 할 일 11: the room's totals (added up by code) right under the world, if they fit.
+  let scoreLine = '';
+  if (scores?.board?.name && scores.totals?.length) {
+    const unit = scores.board.unit || '';
+    const line = sanitize(`[점수] ${scores.board.name}: ${scores.totals.map((x) => `${x.target} ${x.total}${unit}`).join(' · ')}`);
+    if (used + 2 + line.length <= budget) (scoreLine = line), (used += 2 + line.length);
+  }
   const parts = [head + (desc ? '\n' + desc : '')];
+  if (scoreLine) parts.push(scoreLine);
   // Sections appear in kind order; inside each, the order chosen above (pinned first).
   for (const type of TYPE_ORDER) {
     const lines = byType.get(type);

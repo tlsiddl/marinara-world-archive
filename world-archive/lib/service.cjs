@@ -122,7 +122,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
   const worldId = s.roomWorldId(roomId);
   if (!worldId) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
   const world = s.getWorld(worldId);
-  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, renamed: 0, relations: 0, dropped: 0, fieldsDropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
+  const job = { state: 'running', reason, stage: '대화를 불러오는 중', done: 0, total: 0, added: 0, changed: 0, renamed: 0, relations: 0, scores: 0, dropped: 0, fieldsDropped: 0, calls: 0, tokens: {}, startedAt: new Date().toISOString() };
   jobs.set(roomId, job);
   // 「처음부터 다시 읽기」: only where the room was read is forgotten. Settings stay; what is read again is applied (and
   // recorded) the usual way, so a person's own fields are still never written over.
@@ -137,6 +137,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
     if (glossary) job.renamed += followGlossary(roomId, worldId, glossary).filter((c) => c.action === 'rename').length;
     const m = await api.model(world.auto.connectionId);
     const { messages, cast } = await api.chatMessages(roomId);
+    s.markGoneScores(roomId, messages); // a rerolled or deleted message's points leave the totals
     const { start, pending, settled } = X.unread(messages, s.getRoom(roomId).read);
     if (!pending.length || (!all && pending.length < world.auto.every)) {
       job.state = 'idle';
@@ -207,6 +208,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         const relChanges = [...s.applyRelations(worldId, resolved, meta), ...s.linkAffiliations(worldId, null, meta)];
         job.relations += relChanges.filter((c) => c.action === 'relation-add').length;
         if (rel.dropped.length) log(`chat ${roomId}: left out relations ${rel.dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
+        if (world.scoreboard?.name) job.scores += s.addScores(roomId, X.checkScores(parsed, part)).length;
         s.setRoomRead(roomId, { lastId: part.batch.at(-1).id, count: part.end });
         if (dropped.length) log(`chat ${roomId}: left out ${dropped.map((d) => `${d.name} (${d.why})`).join(', ')}`);
         if (droppedFields.length) log(`chat ${roomId}: left out fields ${droppedFields.map((d) => `${d.name}.${d.key} (${d.why})`).join(', ')}`);
@@ -217,7 +219,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
     job.state = 'done';
     job.stage = '';
     const secs = ((Date.now() - Date.parse(job.startedAt)) / 1000).toFixed(1);
-    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.renamed} renamed by the glossary, ${job.relations} relation(s), ${job.dropped} left out, ${job.fieldsDropped} field(s) left out`);
+    log(`chat ${roomId}: read ${todo.length} batch(es) in ${secs}s, ${job.calls} call(s), tokens ${JSON.stringify(job.tokens)}, ${job.added} new, ${job.changed} updated, ${job.renamed} renamed by the glossary, ${job.relations} relation(s), ${job.scores} score event(s), ${job.dropped} left out, ${job.fieldsDropped} field(s) left out`);
   } catch (error) {
     job.state = 'error';
     job.error = error?.message || String(error);
@@ -309,7 +311,7 @@ function preview(roomId) {
   const known = scenes.get(roomId);
   const doc = s.readEntities(worldId);
   const scene = known?.worldId === worldId ? known.ids : null;
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations }) };
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null }) };
 }
 
 const reported = new Set();
@@ -389,6 +391,10 @@ async function routes(r) {
     return { q, results: Search.search(entities, q, { types, glossary, fields: FIELDS }) };
   }));
   r.get('/worlds/:worldId/relations', handle(async (req) => ({ relations: s().listRelations(req.params.worldId) })));
+  // 할 일 11 — 방별 점수판 (totals by code).
+  r.get('/rooms/:roomId/scores', handle(async (req) => s().getScores(req.params.roomId)));
+  r.post('/rooms/:roomId/scores', handle(async (req) => s().addScoreByHand(req.params.roomId, body(req))));
+  r.post('/rooms/:roomId/scores/:eventId/undo', handle(async (req) => s().undoScore(req.params.roomId, req.params.eventId, body(req).undo !== false)));
   // 할 일 10: 「대화에서는 ○○가 됐어요」 — [적용] or 무시 ({ discard: true }).
   r.post('/worlds/:worldId/entities/:entityId/pending/:key', handle(async (req) =>
     s().applyPending(req.params.worldId, req.params.entityId, req.params.key, body(req).revision, { discard: body(req).discard === true })));

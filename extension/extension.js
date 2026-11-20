@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.3.16';
+  const VERSION = '0.3.17';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -40,6 +40,7 @@
     moon: '<path d="M20 14.2A8 8 0 0 1 9.8 4 8 8 0 1 0 20 14.2z"/>',
     search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
     back: '<path d="M14.5 6 8.5 12l6 6"/>',
+    score: '<path d="M5 20V11M12 20V5M19 20v-6"/><path d="M3.5 20h17" opacity=".5"/>',
     log: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/><path d="M3.5 12h2M18.5 12h2" opacity=".5"/>',
   };
   const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -354,6 +355,11 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   async function loadHistory() {
     st.history = st.worldId ? (await api('GET', `/worlds/${st.worldId}/history`)).changes || [] : [];
   }
+  /** 할 일 11: this room's board (only when the room reads the world on screen and the world has a board). */
+  async function loadScores() {
+    const id = activeChatId();
+    st.scores = id && st.room?.worldId === st.worldId && world()?.scoreboard?.name ? await api('GET', `/rooms/${encodeURIComponent(id)}/scores`) : null;
+  }
   async function loadConnections() {
     try { st.connections = (await api('GET', '/connections')).connections || []; } catch { st.connections = []; }
   }
@@ -370,6 +376,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
           await loadEntities();
           st.preview = await api('GET', `/rooms/${encodeURIComponent(id)}/preview`);
           if (st.view === 'log') await loadHistory();
+          if (st.view === 'scores') await loadScores();
         }
       } catch {}
       if (!st.busy) render();
@@ -395,7 +402,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
   const roomTitle = () => esc(st.roomName || (activeChatId() ? '지금 채팅방' : '열린 채팅방 없음'));
 
   function sideHtml() {
-    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)]), ['log', '기록', 'log', null]];
+    const items = [['overview', '한눈에', 'overview', null], ...KINDS.map((k) => [k.type, k.label, k.icon, count(k.type)]), ...(world()?.scoreboard?.name ? [['scores', '점수판', 'score', null]] : []), ['log', '기록', 'log', null]];
     return `
       <div class="brand">${BRAND}<div><b>세계관 설정집</b><small>WORLD ARCHIVE</small></div></div>
       <div class="nav-label">YOUR WORLD</div>
@@ -555,7 +562,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     const src = e.sources || {};
     const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '');
     // 할 일 10: the earlier value small under the field; a newer value from the story for a field the person wrote.
-    const was = (k) => (e.past?.[k]?.[0] ? `<small class="past">이전: ${esc(e.past[k][0].value)}</small>` : '');
+    const was = (k) => (e.past?.[k]?.[0] ? `<small class="past">이전: ${esc(e.past[k][0].value)} <button class="quiet" type="button" data-act="past-prompt" data-id="${esc(e.entityId)}" data-key="${esc(k)}" title="켜면 {{세계}}에 「(과거: …)」가 붙습니다">${e.pastInPrompt?.[k] ? '프롬프트에 넣는 중 · 끄기' : '프롬프트에도 넣기'}</button></small>` : '');
     const wait = (k) => (e.pending?.[k] ? `<small class="pending">대화에서는 「${esc(e.pending[k].value)}」${copula(e.pending[k].value)} <button class="quiet" type="button" data-act="pending" data-id="${esc(e.entityId)}" data-key="${esc(k)}">적용</button><button class="quiet" type="button" data-act="pending-drop" data-id="${esc(e.entityId)}" data-key="${esc(k)}">무시</button></small>` : '');
     const facts = d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<div class="fact"><small>${esc(x.label)}${tag(x.key)}</small><b>${esc(f[x.key])}</b>${was(x.key)}${wait(x.key)}</div>`).join('');
     const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}${tag(x.key)}</small><p>${esc(f[x.key])}</p>${was(x.key)}${wait(x.key)}</div>`).join('');
@@ -706,6 +713,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
         <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정하지 않은 설정부터 빠집니다</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
         <label class="f" for="w-mode">넣는 방식<em>장면 방식은 최근 메시지 12개에 이름이 나온 설정만 넣습니다</em></label><select id="w-mode" style="max-width:360px"><option value="all" ${w.injectMode === 'scene' ? '' : 'selected'}>전부 넣기</option><option value="scene" ${w.injectMode === 'scene' ? 'selected' : ''}>장면에 나온 것만(고정·규칙·시스템은 늘)</option></select>
+        <div class="grid2">
+          <div><label class="f" for="w-board">점수판 이름<em>비우면 점수를 찾지 않습니다 (예: 기숙사 점수)</em></label><input id="w-board" maxlength="40" value="${esc(w.scoreboard?.name || '')}"></div>
+          <div><label class="f" for="w-unit">단위<em>예: 점</em></label><input id="w-unit" maxlength="10" value="${esc(w.scoreboard?.unit || '')}" style="max-width:140px"></div>
+        </div>
         <div class="actions"><button class="primary" type="button" data-act="save-world">저장</button></div>
       </form>
       <form class="paper" onsubmit="return false">
@@ -768,11 +779,44 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         : '<div class="empty"><h2>아직 기록이 없습니다</h2><p>자동 반영을 켜면 대화에서 찾은 설정이 여기에 남습니다.</p></div>'}`;
   }
 
+  /** 할 일 11: totals added up by code, every record with its evidence, 손으로 더하기 · 빼기, 되돌리기. */
+  function scoresHtml() {
+    const w = world();
+    const b = w.scoreboard || {};
+    const unit = esc(b.unit || '');
+    const sc = st.scores;
+    const head = `
+      <div class="eyebrow">SCOREBOARD · ${roomTitle()}</div>
+      <h1>${esc(b.name || '점수판')}</h1>
+      <p class="intro">이 방의 점수입니다. 자동 반영이 대화에서 「누가 몇 점을, 왜」를 근거 문장과 함께 찾고, 합계는 코드가 더합니다. 리롤·수정·삭제로 사라진 메시지의 점수는 합계에서 빠집니다. 합계는 {{세계}}에 「[점수]」 줄로 들어갑니다.</p>`;
+    if (!sc) return head + '<div class="empty"><h2>이 방이 이 세계관을 읽지 않습니다</h2><p>점수판은 방마다 따로입니다. 이 세계관에 연결한 방에서 열어 주세요.</p></div>';
+    const totals = sc.totals.length ? `<div class="stubs">${sc.totals.map((t) => `<div class="stub"><strong>${t.total.toLocaleString()}${unit}</strong><small>${esc(t.target)}</small></div>`).join('')}</div>` : '<p class="sub">아직 점수가 없습니다.</p>';
+    const add = `
+      <form class="paper" onsubmit="return false">
+        <h2>손으로 더하기 · 빼기</h2>
+        <div class="grid2">
+          <div><label class="f" for="sc-target">대상</label><input id="sc-target" maxlength="60" list="sc-targets"><datalist id="sc-targets">${sc.totals.map((t) => `<option value="${esc(t.target)}">`).join('')}</datalist></div>
+          <div><label class="f" for="sc-delta">점수<em>빼려면 -10처럼</em></label><input id="sc-delta" type="number" step="1" style="max-width:140px"></div>
+        </div>
+        <label class="f" for="sc-reason">이유</label><input id="sc-reason" maxlength="200">
+        <div class="actions"><button class="primary" type="button" data-act="score-add">기록하기</button></div>
+      </form>`;
+    const list = sc.events.length ? `<div class="paper"><h2>기록 ${sc.events.length}</h2><ul class="hist">${sc.events.map((e) => `
+        <li class="${e.undoneAt || e.gone ? 'undone' : ''}">
+          <div class="what"><b>${esc(e.target)}</b> ${e.delta > 0 ? '+' : ''}${e.delta}${unit}${e.reason ? ` · ${esc(e.reason)}` : ''}${e.by === 'person' ? ' · 직접' : ''}</div>
+          ${e.evidence ? `<div class="ev">“${esc(e.evidence)}”</div>` : ''}
+          <div class="when">${fmtTime(e.at)}${e.gone ? ' · 메시지가 사라져 합계에서 뺌' : ''}${e.undoneAt ? ' · 되돌림' : ''}</div>
+          <div class="side-act">${e.undoneAt ? `<button class="quiet" type="button" data-act="score-undo" data-id="${esc(e.eventId)}" data-undo="0">다시 넣기</button>` : `<button class="quiet" type="button" data-act="score-undo" data-id="${esc(e.eventId)}" data-undo="1">되돌리기</button>`}</div>
+        </li>`).join('')}</ul></div>` : '';
+    return head + `<div class="paper">${totals}</div>` + add + list;
+  }
+
   function mainHtml() {
     if (!st.loaded) return st.bad ? '' : '<p class="sub">불러오는 중…</p>';
     if (st.view === 'new-world' || !world()) return newWorldHtml(!st.worlds.length);
     if (st.view === 'world') return worldHtml();
     if (st.view === 'log') return historyHtml();
+    if (st.view === 'scores') return scoresHtml();
     if (KIND[st.view]) {
       if (st.editing === 'new') return formHtml(null, st.view);
       const e = st.entities.find((x) => x.entityId === (st.editing || st.detail));
@@ -863,6 +907,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     go: (b) => {
       go(b.dataset.view);
       if (b.dataset.view === 'log') return run(loadHistory);
+      if (b.dataset.view === 'scores') return run(loadScores);
       if (b.dataset.view === 'world' && st.connections == null) { render(); return run(loadConnections); }
       render();
     },
@@ -968,7 +1013,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
     }, '세계관을 만들었습니다.'),
     'save-world': () => run(async () => {
       const w = world();
-      await api('PATCH', `/worlds/${w.worldId}`, { name: val('w-name'), description: val('w-desc'), injectChars: Number(val('w-budget')), injectMode: val('w-mode') === 'scene' ? 'scene' : 'all', revision: w.revision });
+      await api('PATCH', `/worlds/${w.worldId}`, { name: val('w-name'), description: val('w-desc'), injectChars: Number(val('w-budget')), injectMode: val('w-mode') === 'scene' ? 'scene' : 'all', scoreboard: { name: val('w-board'), unit: val('w-unit') }, revision: w.revision });
       await loadWorlds();
       await loadRoom();
     }, '저장했습니다.'),
@@ -981,6 +1026,26 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       const e = st.entities.find((x) => x.entityId === b.dataset.id);
       await api('POST', `/worlds/${st.worldId}/entities/${e.entityId}/pending/${encodeURIComponent(b.dataset.key)}`, { revision: e.revision, discard: true });
       await loadEntities();
+    }),
+    'past-prompt': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      if (!e) throw Error('설정을 찾지 못했습니다. 새로 불러온 뒤 다시 해 주세요.');
+      const k = b.dataset.key;
+      await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, { pastInPrompt: { ...(e.pastInPrompt || {}), [k]: !e.pastInPrompt?.[k] }, revision: e.revision });
+      await loadEntities();
+      await loadRoom();
+    }),
+    'score-add': () => run(async () => {
+      const delta = Number(val('sc-delta'));
+      if (!val('sc-target').trim() || !Number.isInteger(delta) || !delta) throw Error('대상과 점수(0이 아닌 정수)를 적어 주세요.');
+      await api('POST', `/rooms/${encodeURIComponent(activeChatId())}/scores`, { target: val('sc-target'), delta, reason: val('sc-reason') || '손으로 고침' });
+      await loadScores();
+      await loadRoom();
+    }, '기록했습니다.'),
+    'score-undo': (b) => run(async () => {
+      await api('POST', `/rooms/${encodeURIComponent(activeChatId())}/scores/${encodeURIComponent(b.dataset.id)}/undo`, { undo: b.dataset.undo === '1' });
+      await loadScores();
+      await loadRoom();
     }),
     backup: () => run(async () => {
       const w = world();
@@ -1017,6 +1082,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
       const keep = KIND[st.view] || st.view === 'log' ? st.view : 'overview';
       go(keep);
       run(async () => { await loadEntities(); if (keep === 'log') await loadHistory(); });
+      st.scores = null;
     } else if (ev.target.id === 'fd-type' && st.editing) {
       // Switching kind in the form keeps everything typed; fields the new kind has keep their text.
       const now = readForm();

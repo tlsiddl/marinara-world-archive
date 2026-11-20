@@ -16,6 +16,32 @@ const SCHEMA = 1;
 const BACKUP_FORMAT = 'marinara-world-archive-backup';
 /** 할 일 10: how many earlier values a field keeps (shown as 「이전: ○○」; never put in {{세계}}). */
 const PAST_MAX = 3;
+/** 할 일 11: a room's score events (the board's name and unit are the world's). */
+const SCORE_MAX = 20000;
+function validScoreEvent(e) {
+  return isObject(e) && typeof e.eventId === 'string' && typeof e.target === 'string' && Number.isSafeInteger(e.delta) && SOURCES.includes(e.source);
+}
+function cleanScoreEvent(raw) {
+  if (!isObject(raw)) return null;
+  const target = typeof raw.target === 'string' ? raw.target.trim().replace(/\s+/g, ' ').slice(0, 60) : '';
+  const delta = typeof raw.delta === 'string' && /^[+-]?\d+$/.test(raw.delta.trim()) ? Number(raw.delta.trim()) : raw.delta;
+  if (!target || !Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > 100000) return null;
+  return {
+    target, delta,
+    reason: typeof raw.reason === 'string' ? raw.reason.trim().slice(0, 200) : '',
+    evidence: typeof raw.evidence === 'string' ? raw.evidence.slice(0, 300) : '',
+    messageId: typeof raw.messageId === 'string' ? raw.messageId : null,
+    sentence: Number.isSafeInteger(raw.sentence) ? raw.sentence : null,
+  };
+}
+/** The world's board: { name, unit } or null (no board: the reader does not look for points). */
+function cleanBoard(v) {
+  if (v === null) return null;
+  if (!isObject(v)) throw new ArchiveError(400, '점수판은 {name, unit} 모양으로 보내 주세요.');
+  const name = typeof v.name === 'string' ? v.name.trim().slice(0, 40) : '';
+  if (!name) return null;
+  return { name, unit: typeof v.unit === 'string' ? v.unit.trim().slice(0, 10) : '' };
+}
 const validPast = (v) => isObject(v) && Object.values(v).every((list) => Array.isArray(list) && list.every((x) => isObject(x) && typeof x.value === 'string'));
 const validPending = (v) => isObject(v) && Object.values(v).every((x) => isObject(x) && typeof x.value === 'string');
 const NAME_MAX = 120;
@@ -346,6 +372,7 @@ function validWorld(w) {
     typeof w.description === 'string' &&
     Number.isSafeInteger(w.injectChars) &&
     (w.injectMode === undefined || INJECT_MODES.includes(w.injectMode)) &&
+    (w.scoreboard === undefined || w.scoreboard === null || (isObject(w.scoreboard) && typeof w.scoreboard.name === 'string')) &&
     (w.auto === undefined || isObject(w.auto)) &&
     typeof w.createdAt === 'string' &&
     typeof w.updatedAt === 'string' &&
@@ -370,6 +397,7 @@ function validEntity(e) {
     (e.sources === undefined || (isObject(e.sources) && Object.values(e.sources).every((v) => SOURCES.includes(v)))) &&
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
+    (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
     isObject(e.provenance) &&
@@ -387,6 +415,7 @@ class Archive {
     this.trashDir = path.join(this.dir, 'trash');
     this.historyDir = path.join(this.dir, 'history');
     this.dismissDir = path.join(this.dir, 'dismissed');
+    this.scoreDir = path.join(this.dir, 'scores');
   }
 
   // ---------------------------------------------------------------- files
@@ -511,7 +540,8 @@ class Archive {
     const t = now();
     const auto = body.auto === undefined ? defaultAuto() : cleanAuto(body.auto);
     const injectMode = cleanMode(body.injectMode);
-    const world = { worldId: randomUUID(), name, description, injectChars, injectMode, auto, revision: 1, createdAt: t, updatedAt: t };
+    const scoreboard = body.scoreboard === undefined ? null : cleanBoard(body.scoreboard);
+    const world = { worldId: randomUUID(), name, description, injectChars, injectMode, scoreboard, auto, revision: 1, createdAt: t, updatedAt: t };
     doc.worlds.push(world);
     this.writeJson(this.worldsFile, doc);
     return world;
@@ -531,6 +561,7 @@ class Archive {
     if (body.description !== undefined) (next.description = cleanText(body.description, DESC_MAX, '세계관 설명')), (changed = true);
     if (body.injectChars !== undefined) (next.injectChars = cleanBudget(body.injectChars)), (changed = true);
     if (body.injectMode !== undefined) (next.injectMode = cleanMode(body.injectMode)), (changed = true);
+    if (body.scoreboard !== undefined) (next.scoreboard = cleanBoard(body.scoreboard)), (changed = true);
     if (body.auto !== undefined) (next.auto = cleanAuto(body.auto, { ...defaultAuto(), ...(world.auto || {}) })), (changed = true);
     if (!changed) throw new ArchiveError(400, '고칠 내용이 없습니다.');
     next.revision++;
@@ -603,6 +634,11 @@ class Archive {
       out.fields = keep;
     }
     if (body.extra !== undefined || !base) out.extra = cleanExtra(body.extra);
+    // 할 일 10 (사령탑 추가): per field, put the earlier value into {{세계}} too — 「(과거: ○○)」. Off by default.
+    if (body.pastInPrompt !== undefined) {
+      if (!isObject(body.pastInPrompt) || !Object.values(body.pastInPrompt).every((v) => typeof v === 'boolean')) throw new ArchiveError(400, 'pastInPrompt는 {칸: true/false}입니다.');
+      out.pastInPrompt = Object.fromEntries(Object.entries(body.pastInPrompt).filter(([, v]) => v));
+    }
     if (body.pinned !== undefined || !base) {
       if (body.pinned !== undefined && typeof body.pinned !== 'boolean') throw new ArchiveError(400, 'pinned는 true 또는 false입니다.');
       out.pinned = body.pinned === true;
@@ -1383,6 +1419,116 @@ class Archive {
       if (!ids.has(r.from) || !ids.has(r.to)) throw new ArchiveError(409, '이을 설정이 지워져서 되돌리지 않았습니다.');
       doc.relations.push(structuredClone(r));
     }
+  }
+
+  // ---------------------------------------------------------------- 할 일 11 — 방별 점수판
+
+  scoreFile(roomId) {
+    needRoom(roomId);
+    return path.join(this.scoreDir, `${roomId}.json`);
+  }
+
+  readScores(roomId) {
+    return this.readJson(
+      this.scoreFile(roomId),
+      () => ({ schemaVersion: SCHEMA, roomId, events: [] }),
+      (d) => d.roomId === roomId && Array.isArray(d.events) && d.events.every(validScoreEvent),
+      '점수판',
+    );
+  }
+
+  /**
+   * The room's board: the world's board name and unit, the events, and totals added up by code — events from a message
+   * that is gone (rerolled, edited, deleted) and undone events do not count. Targets are summed under the setting's
+   * name when a name or other name matches, otherwise as written.
+   */
+  getScores(roomId) {
+    const worldId = this.roomWorldId(roomId);
+    const world = worldId ? this.getWorld(worldId) : null;
+    const doc = this.readScores(roomId);
+    const entities = worldId ? this.readEntities(worldId).entities : [];
+    const canon = (t) => this.findByName(entities, t)?.name || String(t).trim();
+    const totals = new Map();
+    for (const ev of doc.events) {
+      if (ev.gone || ev.undoneAt) continue;
+      const k = canon(ev.target);
+      totals.set(k, (totals.get(k) || 0) + ev.delta);
+    }
+    return {
+      roomId,
+      worldId,
+      board: world?.scoreboard || null,
+      totals: [...totals.entries()].map(([target, total]) => ({ target, total })).sort((a, b) => b.total - a.total || a.target.localeCompare(b.target, 'ko')),
+      events: doc.events.slice().reverse(),
+    };
+  }
+
+  /**
+   * Score events the reader found: [{ target, delta, reason, evidence, messageId, sentence }]. The same message,
+   * sentence, target and points count once. Returns the events added.
+   */
+  addScores(roomId, events, by = 'reader') {
+    const doc = this.readScores(roomId);
+    const key = (e) => [e.messageId || '', e.sentence ?? '', squashName(e.target), e.delta].join('|');
+    const have = new Set(doc.events.filter((e) => !e.undoneAt).map(key));
+    const added = [];
+    const t = now();
+    for (const raw of Array.isArray(events) ? events : []) {
+      const ev = cleanScoreEvent(raw);
+      if (!ev || (ev.messageId && have.has(key(ev)))) continue;
+      if (doc.events.length >= SCORE_MAX) break;
+      have.add(key(ev));
+      const e = { eventId: randomUUID(), ...ev, source: by === 'person' ? 'manual' : 'auto', by, at: t };
+      doc.events.push(e);
+      added.push(e);
+    }
+    if (added.length) this.writeJson(this.scoreFile(roomId), doc);
+    return added;
+  }
+
+  /** 손으로 더하기 · 빼기: recorded on the board like the reader's events (source manual), undoable. */
+  addScoreByHand(roomId, body = {}) {
+    if (!isObject(body)) throw new ArchiveError(400, '내용을 보내 주세요.');
+    if (!this.roomWorldId(roomId)) throw new ArchiveError(400, '이 방은 세계관에 연결되어 있지 않습니다.');
+    const ev = cleanScoreEvent({ target: body.target, delta: body.delta, reason: body.reason ?? '손으로 고침', evidence: '' });
+    if (!ev) throw new ArchiveError(400, '대상과 점수(정수)를 보내 주세요.');
+    return this.addScores(roomId, [ev], 'person')[0];
+  }
+
+  /** 되돌리기 (or bring back, undo: false) of one event. Nothing is deleted. */
+  undoScore(roomId, eventId, undo = true) {
+    const doc = this.readScores(roomId);
+    const e = doc.events.find((x) => x.eventId === eventId);
+    if (!e) throw new ArchiveError(404, '점수 기록을 찾지 못했습니다.');
+    if (undo && e.undoneAt) throw new ArchiveError(409, '이미 되돌린 기록입니다.');
+    if (undo) e.undoneAt = now();
+    else delete e.undoneAt;
+    this.writeJson(this.scoreFile(roomId), doc);
+    return e;
+  }
+
+  /**
+   * Each reading checks the reader's events against the room as it is now: an event whose message is gone, or whose
+   * sentence is no longer in it (rerolled or edited), is marked gone and leaves the totals (not deleted); it comes
+   * back if the message does. messages: [{ id, content }].
+   */
+  markGoneScores(roomId, messages) {
+    const doc = this.readScores(roomId);
+    if (!doc.events.length) return 0;
+    const byId = new Map(messages.map((m) => [m.id, squashName(m.content)]));
+    let changed = 0;
+    for (const e of doc.events) {
+      if (e.source !== 'auto' || !e.messageId) continue;
+      const text = byId.get(e.messageId);
+      const gone = text === undefined || (e.evidence && !text.includes(squashName(e.evidence).slice(0, 40)));
+      if (!!e.gone !== gone) {
+        if (gone) e.gone = true;
+        else delete e.gone;
+        changed++;
+      }
+    }
+    if (changed) this.writeJson(this.scoreFile(roomId), doc);
+    return changed;
   }
 
   // ---------------------------------------------------------------- 할 일 10 — 대화에서 바뀐 값 [적용]
