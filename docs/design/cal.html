@@ -1,0 +1,40 @@
+<style>
+.mon{display:flex;align-items:baseline;gap:10px;margin:22px 0 8px}
+.mon b{font:600 20px "Gowun Batang",serif}.mon small{font:9px ui-monospace,monospace;letter-spacing:2px;color:var(--im-muted)}
+.mon:after{content:"";flex:1;border-top:1.5px solid var(--im-ink);transform:translateY(-5px)}
+.ev{display:grid;grid-template-columns:62px minmax(0,1fr) auto;gap:12px;align-items:center;padding:9px 12px;border-radius:12px;margin:6px 0;background:var(--im-paper);border:1px solid var(--im-line)}
+.ev .d{text-align:center;font:600 20px/1 "Gowun Batang",serif}.ev .d small{display:block;font:10px ui-monospace,monospace;color:var(--im-muted);margin-top:4px;letter-spacing:1px}
+.ev .n b{display:block;font:600 15px "Gowun Batang",serif}.ev .n small{color:var(--im-muted);font-size:11px}
+.ev .k{font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--im-ink);white-space:nowrap}
+.past{opacity:.45}
+.c1{background:#e3e8f2;border-color:#c9d2e3}.c2{background:#f3efe2;border-color:#ddd5bf}.c3{background:#ecebe8;border-color:#d6d4cf}
+.night{background:#1b1c22;color:#eeebe3;border-color:#1b1c22}.night .n small,.night .d small{color:#a9adbd}.night .k{border-color:#eeebe3}
+.cancel .n b{text-decoration:line-through}.cancel .k{border-style:dashed;color:var(--im-muted)}
+.span{grid-template-columns:62px minmax(0,1fr) auto}
+.today{display:flex;align-items:center;gap:8px;margin:12px 0;color:#4c5d8f;font-size:11px;font-weight:700}
+.today:before{content:"";width:9px;height:9px;border-radius:50%;background:#4c5d8f}
+.today:after{content:"";flex:1;border-top:1.5px solid #4c5d8f}
+.was{color:#4c5d8f;font-size:10px;margin-left:6px}
+</style>
+<div class="subtabs" role="tablist"><button class="subtab">세계 전체 6</button><button class="subtab selected">은사슴 학교 18</button><button class="subtab">하르트 저택 5</button><button class="subtab">별빛 시장 4</button></div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px;align-items:center"><span style="font-size:11px;color:var(--im-muted);margin-right:4px">학년도</span>
+<span style="padding:5px 14px;border:1px solid var(--im-ink);border-radius:999px;font:600 13px 'Gowun Batang',serif;opacity:.55">1890–91</span>
+<span style="padding:5px 14px;border:1px solid var(--im-ink);border-radius:999px;font:600 13px 'Gowun Batang',serif;background:var(--im-ink);color:var(--im-paper)">1891–92 · 지금</span>
+<span style="padding:5px 14px;border:1px dashed var(--im-ink);border-radius:999px;font:600 13px 'Gowun Batang',serif;opacity:.7">1892–93</span>
+<span style="padding:5px 14px;border:1px dashed var(--im-line);border-radius:999px;font-size:12px;color:var(--im-muted)">연도 모름 1</span></div>
+<h1 style="margin:12px 0 4px">학사일정 <span style="font-size:18px;color:var(--im-muted)">1891–92 학년도</span></h1>
+<p style="margin:0;color:var(--im-muted)">은사슴 학교 · 이야기 속 오늘은 1891년 10월 26일</p>
+<div class="mon"><b>9월</b><small>SEPTEMBER 1891</small></div>
+<div class="ev past c2"><div class="d">1<small>목</small></div><div class="n"><b>입학식 · 기숙사 배정</b><small>대식당 · 1학년 전체</small></div><span class="k">행사</span></div>
+<div class="ev past c3"><div class="d">14<small>수</small></div><div class="n"><b>첫 비행 수업 시험</b><small>운동장 · 1학년</small></div><span class="k">시험</span></div>
+<div class="mon"><b>10월</b><small>OCTOBER 1891</small></div>
+<div class="ev past cancel"><div class="d">20<small>목</small></div><div class="n"><b>별빛 시장 견학</b><small>비 때문에 취소됨</small></div><span class="k">취소</span></div>
+<div class="today">오늘 · 1891년 10월 26일</div>
+<div class="ev night"><div class="d">31<small>월</small></div><div class="n"><b>가을밤 연회</b><small>대식당 · 전교생 <span class="was">이전: 10/24</span></small></div><span class="k">5일 뒤</span></div>
+<div class="mon"><b>11월</b><small>NOVEMBER 1891</small></div>
+<div class="ev c1"><div class="d">12<small>토</small></div><div class="n"><b>첫 비행 경기 · 은사슴 대 청매</b><small>운동장</small></div><span class="k">17일 뒤</span></div>
+<div class="mon"><b>12월</b><small>DECEMBER 1891</small></div>
+<div class="ev c2"><div class="d">20<small>화</small></div><div class="n"><b>겨울 방학</b><small>1891년 12월 20일 ~ 1892년 1월 6일 · 급행 마차 출발</small></div><span class="k">방학</span></div>
+<div style="display:flex;align-items:center;gap:12px;margin:28px 0 4px"><span style="font:600 26px 'Gowun Batang',serif">1892</span><span style="flex:1;border-top:3px double var(--im-ink)"></span></div>
+<div class="mon"><b>1월</b><small>JANUARY 1892</small></div>
+<div class="ev c3"><div class="d">7<small>목</small></div><div class="n"><b>봄 학기 시작</b><small>급행 마차 도착</small></div><span class="k">73일 뒤</span></div>
