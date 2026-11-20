@@ -7,7 +7,7 @@ const { Archive, ArchiveError, mentions, isDescriptiveName, TYPES, FIELDS, BUDGE
 const X = require('./extract.cjs');
 const N = require('./names.cjs');
 const G = require('./vendor/glossary.cjs');
-const { assembleWorld } = require('./inject.cjs');
+const { assembleWorld, assembleLooks } = require('./inject.cjs');
 const Search = require('./search.cjs');
 
 const TAG = '[world-archive]';
@@ -264,6 +264,7 @@ async function roomAuto(roomId) {
 // preview is built, and read (sync) by {{세계}}. Without it, {{세계}} still works: everything is a candidate.
 const SCENE_MESSAGES = 12;
 const SCENE_TIMEOUT_MS = 1500;
+const SCENE_ROUTES = new Set(['/api/generate', '/api/generate/dryRun', '/api/generate/retry-agents']);
 const scenes = new Map(); // roomId -> { ids: Set, at }
 
 function sceneIds(entities, texts) {
@@ -281,8 +282,10 @@ async function updateScene(roomId, extraText = '') {
   const { messages } = await engineApi().chatMessages(roomId);
   const texts = messages.slice(-SCENE_MESSAGES).map((m) => m.content);
   if (extraText) texts.push(extraText);
-  const ids = sceneIds(store().readEntities(worldId).entities, texts);
-  scenes.set(roomId, { ids, worldId, at: Date.now() });
+  const entities = store().readEntities(worldId).entities;
+  const ids = sceneIds(entities, texts);
+  const recent = sceneIds(entities, texts.slice(extraText ? -3 : -2));
+  scenes.set(roomId, { ids, recent, worldId, at: Date.now() });
   return ids;
 }
 
@@ -290,7 +293,7 @@ async function updateScene(roomId, extraText = '') {
 async function sceneBeforeReply(req) {
   try {
     const url = String(req.raw?.url || '').split('?')[0];
-    if (req.method !== 'POST' || (url !== '/api/generate' && url !== '/api/generate/dryRun')) return;
+    if (req.method !== 'POST' || !SCENE_ROUTES.has(url)) return;
     const chatId = req.body?.chatId;
     if (typeof chatId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(chatId) || !store().roomWorldId(chatId)) return;
     const extra = typeof req.body?.userMessage === 'string' ? req.body.userMessage : '';
@@ -312,6 +315,26 @@ function preview(roomId) {
   const doc = s.readEntities(worldId);
   const scene = known?.worldId === worldId ? known.ids : null;
   return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, scores: world.scoreboard?.name ? s.getScores(roomId) : null }) };
+}
+
+/** 할 일 12: what one room's {{세계외형}} would be right now. */
+function looks(roomId) {
+  const s = store();
+  const worldId = s.roomWorldId(roomId);
+  const known = scenes.get(roomId);
+  if (!worldId || known?.worldId !== worldId) return { roomId, worldId: worldId || null, sceneKnown: false, text: '', included: [], omitted: [] };
+  return { roomId, worldId, sceneKnown: true, ...assembleLooks(s.readEntities(worldId).entities, known.ids, { recent: known.recent }) };
+}
+
+/** {{세계외형}}: never throws. */
+function renderLooks(ctx) {
+  const roomId = typeof ctx?.chatId === 'string' ? ctx.chatId : '';
+  try {
+    return looks(roomId).text;
+  } catch (error) {
+    log(`{{세계외형}} for chat ${roomId}: ${error?.message || error}`);
+    return '';
+  }
 }
 
 const reported = new Set();
@@ -445,7 +468,7 @@ async function routes(r) {
   r.get('/rooms/:roomId/preview', handle(async (req) => {
     s().getRoom(req.params.roomId); // validates the id
     try { await Promise.race([updateScene(req.params.roomId), new Promise((r) => setTimeout(r, SCENE_TIMEOUT_MS))]); } catch {}
-    return preview(req.params.roomId);
+    return { ...preview(req.params.roomId), looks: looks(req.params.roomId) }; // 할 일 12: {{세계외형}} too, for the screen
   }));
 }
 
@@ -537,10 +560,13 @@ function attach(app) {
       const url = String(req.raw?.url || '').split('?')[0];
       if (req.method !== 'POST' || url !== '/api/generate' || reply.statusCode >= 400) return;
       const chatId = req.body?.chatId;
-      if (typeof chatId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(chatId)) scheduleRoom(chatId);
+      if (typeof chatId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(chatId)) {
+        scheduleRoom(chatId);
+        if (store().roomWorldId(chatId)) updateScene(chatId).catch(() => {});
+      }
     } catch {}
   });
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { render, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
+module.exports = { render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };

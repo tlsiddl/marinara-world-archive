@@ -150,4 +150,43 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   return { text, chars: text.length, budget, included, omitted, skipped };
 }
 
-module.exports = { assembleWorld, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS };
+/** 할 일 12: what {{세계외형}} may hold at most (whole lines only). */
+const LOOKS_CHARS = 1500;
+
+/**
+ * {{세계외형}} / {{world_looks}} — for the illustrator: confirmed people in the scene who have an appearance, one line
+ * each (name, gender · age, appearance as written now).
+ * People named in the latest messages first (recent: a Set of ids), then pinned, then by name.
+ * No scene known yet: empty. A line that does not fit is left out whole.
+ */
+function assembleLooks(entities, scene, { recent = null, budget = LOOKS_CHARS } = {}) {
+  if (!scene) return { text: '', included: [], omitted: [] };
+  const people = (entities || [])
+    .filter((e) => e.type === 'person' && e.status === 'confirmed' && scene.has(e.entityId) && String(e.fields?.appearance || '').trim())
+    .sort(
+      (a, b) =>
+        Number(!!recent?.has(b.entityId)) - Number(!!recent?.has(a.entityId)) ||
+        Number(b.pinned) - Number(a.pinned) ||
+        a.name.localeCompare(b.name, 'ko'),
+    );
+  const head = '[외형]';
+  let used = head.length;
+  const lines = [];
+  const included = [];
+  const omitted = [];
+  for (const e of people) {
+    const f = e.fields || {};
+    const who = [f.gender, f.age].map((v) => String(v || '').trim()).filter(Boolean).map(oneLine).join(', ');
+    const line = sanitize(`- ${e.name}${who ? ` (${who})` : ''}: ${oneLine(f.appearance)}`);
+    if (used + 1 + line.length > budget) {
+      omitted.push(e.entityId);
+      continue;
+    }
+    used += 1 + line.length;
+    lines.push(line);
+    included.push(e.entityId);
+  }
+  return { text: lines.length ? `${head}\n${lines.join('\n')}` : '', included, omitted };
+}
+
+module.exports = { assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };

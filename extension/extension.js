@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   if (document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.3.17';
+  const VERSION = '0.3.18';
   const BASE = '/api/world-archive';
   // Paper grain from 기억 서재 (tlsiddl/marinara-memory-module 165d488, extension/theme.css --grain)
   const GRAIN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -513,6 +513,11 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);marg
         <div class="row" style="justify-content:space-between"><h2 style="margin:0">이번 답변에 들어갈 내용</h2><span class="pill">${p.chars.toLocaleString()} / ${p.budget.toLocaleString()}자</span></div>
         <p class="sub" style="margin:8px 0 0">설정 ${p.included.length}개${p.omitted.length ? ` · 글자 수 한도 때문에 ${p.omitted.length}개 빠짐` : ''}${p.skipped > 0 ? ` · 장면 밖이라 뺀 것 ${p.skipped}개` : ''}. 프리셋의 {{세계}} 자리에 이대로 들어갑니다.</p>
         <pre>${esc(p.text) || '(비어 있음)'}</pre>
+      </div>
+      <div class="paper">
+        <h2 style="margin:0">삽화용 외형 · {{세계외형}}</h2>
+        <p class="sub" style="margin:8px 0 0">삽화 에이전트 프롬프트에 <b>{{세계외형}}</b>(또는 {{world_looks}})을 넣으면, 장면에 나온 인물 가운데 외형 칸이 있는 사람만 들어갑니다. 최근 메시지에 나온 사람이 먼저입니다.${p.looks?.omitted?.length ? ` 길이 때문에 ${p.looks.omitted.length}명 빠짐.` : ''}</p>
+        <pre>${esc(p.looks?.text || '') || (p.looks?.sceneKnown ? '(장면에 외형이 적힌 인물이 없음)' : '(다음 답변부터 장면을 압니다)')}</pre>
       </div>` : ''}
       <div class="paper mobile-only"><p class="sub" style="margin:0">프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어갑니다.</p></div>`;
   }

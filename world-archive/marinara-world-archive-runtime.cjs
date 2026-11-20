@@ -2,7 +2,7 @@
 // Marinara World Archive — server preload for Marinara Engine 2.5.1 / 2.5.2.
 // Loaded with  node --require <this file>  (NODE_OPTIONS). Engine files on disk are never changed:
 // two engine files are patched in memory while they load, and only when the anchor appears exactly once.
-//   - shared/dist/utils/macro-engine.js : {{세계}} / {{world}}
+//   - shared/dist/utils/macro-engine.js : {{세계}} / {{world}}, {{세계외형}} / {{world_looks}}
 //   - server/dist/app.js                : /api/world-archive routes
 // The anchors are the same ones the Memory Module (기억 서재) uses. Both insert *after* the anchor, so the anchor
 // stays exactly once and the two preloads can run together in either order (checked in tests/coexist.test.cjs).
@@ -11,7 +11,7 @@ const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { registerHooks } = require('node:module');
 
-const VERSION = '0.3.17';
+const VERSION = '0.3.18';
 const TESTED_MARINARA = ['2.5.1', '2.5.2'];
 const TAG = '[world-archive]';
 
@@ -21,8 +21,9 @@ const PATCHES = [
     target: /[\\/]packages[\\/]shared[\\/]dist[\\/]utils[\\/]macro-engine\.js$/,
     anchor: 'result = result.replace(/\\{\\{chatId\\}\\}/gi, ctx.chatId ?? "");',
     insert:
-      '\n    result = result.replace(/\\{\\{(?:세계|world)\\}\\}/gi, () => { try { return globalThis.__marinaraWorldArchive?.render?.(ctx) ?? ""; } catch { return ""; } });',
-    ok: '{{세계}} macro',
+      '\n    result = result.replace(/\\{\\{(?:세계|world)\\}\\}/gi, () => { try { return globalThis.__marinaraWorldArchive?.render?.(ctx) ?? ""; } catch { return ""; } });' +
+      '\n    result = result.replace(/\\{\\{(?:세계외형|world_looks)\\}\\}/gi, () => { try { return globalThis.__marinaraWorldArchive?.renderLooks?.(ctx) ?? ""; } catch { return ""; } });',
+    ok: '{{세계}} · {{세계외형}} macro',
   },
   {
     name: 'app',
@@ -66,6 +67,10 @@ function render(ctx) {
   return loadService()?.render(ctx) ?? '';
 }
 
+function renderLooks(ctx) {
+  return loadService()?.renderLooks?.(ctx) ?? '';
+}
+
 function attach(app) {
   loadService()?.attach(app);
 }
@@ -76,7 +81,7 @@ function install() {
     return;
   }
   const patches = {};
-  globalThis.__marinaraWorldArchive = { version: VERSION, testedMarinara: TESTED_MARINARA, patches, render, attach };
+  globalThis.__marinaraWorldArchive = { version: VERSION, testedMarinara: TESTED_MARINARA, patches, render, renderLooks, attach };
   registerHooks({
     load(url, context, nextLoad) {
       if (!url.startsWith('file:')) return nextLoad(url, context);

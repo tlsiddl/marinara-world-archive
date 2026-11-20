@@ -69,3 +69,15 @@ test('coexists with the Memory Module in either order', { skip: false }, () => {
     assert.ok(memFirst.includes(ours.insert) && oursFirst.includes(ours.insert));
   }
 });
+
+test('the macro patch also evaluates {{세계외형}} and {{world_looks}}, and leaves {{세계}} to its own hook', () => {
+  const fn = new Function(`${patchSource(MACRO_SRC, macro)}; return x;`)();
+  globalThis.__marinaraWorldArchive = { render: () => 'W', renderLooks: (ctx) => `L:${ctx.chatId}` };
+  try {
+    assert.equal(fn('{{세계}}|{{세계외형}}|{{WORLD_LOOKS}}', { chatId: 'c1' }), 'W|L:c1|L:c1');
+    globalThis.__marinaraWorldArchive = { render: () => 'W' };
+    assert.equal(fn('[{{세계외형}}]', { chatId: 'c1' }), '[]', 'an older service without looks: empty');
+  } finally {
+    delete globalThis.__marinaraWorldArchive;
+  }
+});

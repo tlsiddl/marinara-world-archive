@@ -365,3 +365,32 @@ test('same person over HTTP: suggestions, merge, history, undo, 「다른 사람
   assert.equal((await call('GET', `${A}/worlds/${w.worldId}/duplicates`)).data.pairs.length, 1);
   assert.equal((await call('POST', `${A}/worlds/${w.worldId}/duplicates/dismiss`, { a: gemma.entityId })).status, 400);
 });
+
+test('{{세계외형}}: people in the scene with an appearance only, the latest messages first, whole lines in the budget', async (t) => {
+  const { s, w, ids, chat } = sceneSetup(t);
+  s.updateEntity(w.worldId, ids.summer, { fields: { gender: '여', age: '17', appearance: '짧은 단발\n검은 눈' }, revision: 1 });
+  const kai = s.createEntity(w.worldId, { type: 'person', name: '카이', fields: { appearance: '그을린 소매' } }).entityId;
+  s.createEntity(w.worldId, { type: 'person', name: '미오', fields: { appearance: '긴 머리' } });
+  assert.equal(service.renderLooks({ chatId: 'room' }), '', 'no scene known yet: empty');
+  chat.messages = [say(0, '미오가 손을 들었다.'), say(1, '카이가 웃었다.'), say(2, '반장이 고개를 끄덕였다.'), say(3, '교장이 들어왔다.')];
+  await service._test.updateScene('room');
+  assert.equal(
+    service.renderLooks({ chatId: 'room' }),
+    '[외형]\n- 한여름 (여, 17): 짧은 단발 / 검은 눈\n- 미오: 긴 머리\n- 카이: 그을린 소매',
+    'the latest two messages first (교장 has no appearance, 옥상 정원 is no person); then by name',
+  );
+  chat.messages.push(say(4, '카이가 불을 껐다.'));
+  await service._test.updateScene('room');
+  assert.match(service.renderLooks({ chatId: 'room' }), /^\[외형\]\n- 카이: /, 'whoever the newest message names comes first');
+  const p = service.looks('room');
+  assert.equal(p.included.length, 3);
+  assert.ok(p.included.includes(kai));
+  const { assembleLooks } = require('../world-archive/lib/inject.cjs');
+  const all = s.readEntities(w.worldId).entities;
+  const small = assembleLooks(all, service._test.scenes.get('room').ids, { budget: 30 });
+  assert.equal(small.included.length + small.omitted.length, 3);
+  assert.ok(small.text.length <= 30 && !small.text.includes(' / 검'), 'a line that does not fit is left out whole');
+  s.linkRoom('room', null);
+  assert.equal(service.renderLooks({ chatId: 'room' }), '', 'unlinked: empty');
+  assert.equal(service.renderLooks(null), '');
+});
