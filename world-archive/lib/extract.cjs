@@ -6,6 +6,7 @@
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
 const { TYPES, FIELDS, REL_TYPES, relationFits } = require('./store.cjs');
 const TT = require('./timetable.cjs');
+const R = require('./roster.cjs');
 const CAL = require('./calendar.cjs');
 const { speciesName } = require('./same.cjs');
 const S = require('./vendor/sentences.cjs');
@@ -193,7 +194,7 @@ ${fieldGuide()}
 - 등장인물이 한 말 · 소문 · 추측(「○○ 말로는」, 「~라던데」, 「아마」)은 확정된 사실이 아니다. 그런 칸은 {"v":"값","n":["번호"],"rumor":"누구의 말(모르면 소문)"}로 적는다. 확정된 사실을 덮지 않는다.
 - 칸 값이 시간이 지나 바뀐 것(이사 · 승진 · 전학)이 아니라 전에 틀리게 적힌 것을 바로잡는 것이면(「사실은 처음부터 ○○였다」) 그 칸에 "fix":true를 적는다.
 - [프로필] 표시가 붙은 문장은 답변에 붙은 프로필 블록(<npc_profile> · <world_profile>)이다. 이야기에 아직 나오지 않았어도 확정된 설정으로 받는다. 칸은 이렇게 맞춘다: 이름/나이/성별 → name · age · gender, 외형과 옷차림 → appearance, 태도와 주요 성격 → personality, 그 밖에 눈에 띄는 것 → background나 memo(며칠 뒤에도 사실일 것만). 같은 사실이 본문과 프로필에 둘 다 있으면 항목 · 칸을 하나로 적고 n에 둘 다 적는다. 이미 있는 항목이면 match로 잇는다.
-- 집단의 members(구성원)에는 규모·구성(예: 1학년 다섯 명, 여학생 둘)만 쓰고 사람 이름을 늘어놓지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
+- 집단의 members(구성원)에는 구성(예: 남학생 다섯 명, 여학생 네 명)만 쓰고 사람 이름을 늘어놓지 않는다. size(전체 인원)에는 근거가 있으면 그 집단의 전체 인원 수를 「N명」으로 적는다(나뉘어 적혀 있으면 합친 수, 예: 9명). 이름을 아는 사람 수가 아니라 전체 수다. 수가 안 나오면(「많다」, 「수십 명」) 적지 않는다. 명단은 인물마다 affiliation(소속)에 적힌 집단으로 프로그램이 모은다. 그래서 인물의 affiliation에는 근거가 있는 가장 작은 집단까지 적는다(예: 「슬리데린 1학년」). affiliation에 적은 집단이 [이미 있는 항목]에 없으면 그 집단도 집단 항목으로 같이 만든다(규칙의 다른 이름으로만 있어도). 학년·반 같은 작은 집단이 항목으로 있으면 큰 집단과 소속 관계(from이 작은 쪽)로 잇는다.
 
 같은 사람 잇기: [이미 있는 항목]의 인물을 성만, 이름만, 직함(반장, 사감, 교수)으로 부르면 새로 만들지 말고 match에 그 인물 이름을 적고, 그 호칭은 aliases에 넣는다. 같은 사람인지 애매하면 이번에는 만들지 않는다(다음 대화에서 다시 본다).
 
@@ -338,7 +339,13 @@ function checkFields(type, raw, index, itemFound = []) {
     }
     const said = found.map((p) => p.text).join(' ');
     const kind = FIELDS[type]?.find((f) => f.key === key)?.kind || 'text';
-    if (!CLASS_FIELDS.has(`${type}.${key}`) && isKorean(given.v) && isKorean(said) && overlap(given.v, said) < FIELD_OVERLAP[kind]) {
+    // v0.5.1 J: 전체 인원 — the number has to be in the sentence (one of its counts, or all of them added up)
+    if (type === 'group' && key === 'size') {
+      const n = R.headcount(given.v);
+      const c = R.counts(said);
+      if (!n || !(c.some((x) => x.n === n) || c.reduce((a, x) => a + x.n, 0) === n)) { droppedFields.push({ key, why: 'not in its evidence' }); continue; }
+      given = { ...given, v: `${n}명` };
+    } else if (!CLASS_FIELDS.has(`${type}.${key}`) && isKorean(given.v) && isKorean(said) && overlap(given.v, said) < FIELD_OVERLAP[kind]) {
       droppedFields.push({ key, why: 'not in its evidence' });
       continue;
     }

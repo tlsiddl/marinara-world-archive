@@ -114,7 +114,7 @@ test('adding to / taking off a list is changing the 소속 칸 (recorded as the 
 
 test('the reader is told not to list names in 구성원 and to write the smallest group in 소속', () => {
   const text = fs.readFileSync(path.join(__dirname, '../world-archive/lib/extract.cjs'), 'utf8');
-  assert.match(text, /members\(구성원\)에는 규모·구성/);
+  assert.match(text, /members\(구성원\)에는 구성\([^)]*\)만 쓰고 사람 이름을 늘어놓지 않는다/);
   assert.match(text, /가장 작은 집단까지/);
 });
 

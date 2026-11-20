@@ -610,7 +610,9 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     const others = st.entities.filter((x) => x.type === 'person' && !inList.has(x.entityId)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     const add = others.length ? `<span class="roster-add"><select id="rosterPick" aria-label="명단에 더할 인물">${others.map((x) => `<option value="${esc(x.entityId)}">${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="member-add" data-group="${esc(g.entityId)}">명단에 더하기</button></span>` : '';
     const body = list.length ? part('member', '구성원') + part('staff', '맡은 사람') + part('past', '지난 구성원') : '<p class="sub">아직 이 집단에 소속된 인물이 없습니다.</p>';
-    return `<div class="sec"><small>구성원 명단 · ${list.length}명${named !== list.length ? ` (이름 아는 사람 ${named}명)` : ''} · 인물마다 적힌 소속으로 모음</small>${body}${add}</div>`;
+    // v0.5.1 J: with a 전체 인원 — 「이름 아는 사람 M명 / 전체 N명」
+    const head = r.counts?.total ? `이름 아는 사람 ${r.counts.known}명 / 전체 ${r.counts.total}명` : `${list.length}명${named !== list.length ? ` (이름 아는 사람 ${named}명)` : ''}`;
+    return `<div class="sec"><small>구성원 명단 · ${head} · 인물마다 적힌 소속으로 모음</small>${body}${add}</div>`;
   }
 
   /**

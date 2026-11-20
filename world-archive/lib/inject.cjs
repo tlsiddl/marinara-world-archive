@@ -1,6 +1,7 @@
 'use strict';
 const { FIELDS } = require('./store.cjs');
 const TT = require('./timetable.cjs');
+const R = require('./roster.cjs');
 const CAL = require('./calendar.cjs');
 // What {{세계}} becomes. Pure functions: no files, no engine.
 // Budget handling follows the idea of the Memory Module's renderMemorySource (tlsiddl/marinara-memory-module
@@ -47,7 +48,7 @@ const was = (e, k) => (e.pastInPrompt?.[k] && e.past?.[k]?.[0]?.value ? ` (과�
  */
 const originalOf = (e) => (e.aliases || []).find((a) => /^[A-Za-z][A-Za-z .'’-]*$/.test(String(a).trim()));
 const shownName = (e, names) => { const o = names === 'original' ? originalOf(e) : null; return o ? `${o}(${e.name})` : e.name; };
-function entityLine(e, nameOf = () => '', today = null, names = 'ko') {
+function entityLine(e, nameOf = () => '', today = null, names = 'ko', knownOf = () => null) {
   // v0.5.0 K: a 학사일정 is the next three events on one line (nothing ahead: nothing)
   if (e.calendar) { const l = CAL.calendarLine(e, today); return l ? sanitize(`- ${shownName(e, names)}\n  ${l}`) : ''; }
   // v0.5.0 B: a 시간표 is its cells on one line
@@ -62,7 +63,10 @@ function entityLine(e, nameOf = () => '', today = null, names = 'ko') {
   const fields = e.fields || {};
   // v0.5.0 S: a field only a profile block has said so far
   const veiled = (k) => (e.hidden?.[k] ? ' (아직 드러나지 않음)' : '');
-  const short = defs.filter((d) => d.kind === 'line' && fields[d.key]).map((d) => `${d.label}: ${oneLine(fields[d.key])}${veiled(d.key)}${was(e, d.key)}`);
+  const total = e.type === 'group' ? R.headcount(fields.size) : null;
+  const short = defs.filter((d) => d.kind === 'line' && fields[d.key] && !(total && d.key === 'size')).map((d) => `${d.label}: ${oneLine(fields[d.key])}${veiled(d.key)}${was(e, d.key)}`);
+  // v0.5.1 J: how many in all, and how many of them have a name here
+  if (total) { const k = knownOf(e.entityId); short.push(`인원: ${k != null ? `이름 아는 사람 ${k}명 / ` : ''}전체 ${total}명`); }
   // v0.5.1 I: where a person stays now (방 배정)
   if (e.type === 'person' && e.room && nameOf(e.room)) short.push(`지내는 곳: ${nameOf(e.room)}`);
   if (short.length) lines.push('  ' + short.join(' / '));
@@ -122,6 +126,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   let skipped = 0;
   const byIdAll = new Map((entities || []).map((x) => [x.entityId, x]));
   const nameOf = (id) => byIdAll.get(id)?.name || '';
+  const knownOf = (id) => R.rosterOf(entities, relations, id)?.counts.known ?? null;
   let ordered;
   let part = null; // scene mode: which part of the budget a setting fills from (see below)
   if (world.injectMode === 'scene' && scene) {
@@ -179,7 +184,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   const fill = (list, limit) => {
     for (const e of list) {
       if (tried.has(e.entityId) && included.includes(e.entityId)) continue;
-      const line = entityLine(e, nameOf, today, names);
+      const line = entityLine(e, nameOf, today, names, knownOf);
       if (!line) continue;
       const header = byType.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length;
       const cost = header + 1 + line.length;

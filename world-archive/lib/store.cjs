@@ -89,6 +89,8 @@ const FIELDS = {
   group: [
     { key: 'kind', label: '종류', kind: 'line', hint: '가문, 학교, 기숙사, 조직 같은 것' },
     { key: 'members', label: '구성원', kind: 'text' },
+    // v0.5.1 J: how many there are in all (「아홉 명」) — the 명단 shows 「이름 아는 사람 M명 / 전체 N명」
+    { key: 'size', label: '전체 인원', kind: 'line' },
     { key: 'hierarchy', label: '위계·역할', kind: 'text' },
   ],
   // rule: what must be obeyed. system: how the world works (magic, abilities, economy, points).
