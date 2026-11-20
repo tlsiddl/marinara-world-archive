@@ -683,7 +683,7 @@ const compact = (e) => ({ entityId: e.entityId, type: e.type, name: e.name, alia
  * server has, and a screen panel copied into another module (world-panel.js) compares its own number with it.
  */
 const CONTRACT = 2;
-const CONTRACT_FEATURES = ['relations', 'species', 'entity'];
+const CONTRACT_FEATURES = ['relations', 'species', 'entity', 'roster', 'timetable', 'calendar', 'appliesTo', 'base'];
 /** Relations that make two people know each other from the start (연동 v2). 소속 · 위치 · 기타 do not. */
 const KNOW_TYPES = ['가족', '친구', '연인', '스승·제자', '적대'];
 const PAST_RE = /과거에는\s*(가족|친구|연인|스승·제자|적대)/g;

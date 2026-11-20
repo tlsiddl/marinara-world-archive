@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.4.2';
+  const VERSION = '0.5.0';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
