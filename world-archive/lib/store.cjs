@@ -82,7 +82,7 @@ const FIELDS = {
   place: [
     { key: 'location', label: '위치·소속', kind: 'line' },
     { key: 'use', label: '시설·용도', kind: 'line' },
-    { key: 'layout', label: '내부 구조', kind: 'text' },
+    { key: 'layout', label: '배치·내부 구조', kind: 'text' },
     { key: 'access', label: '출입구·연결', kind: 'text' },
     { key: 'limits', label: '제약', kind: 'text' },
   ],
@@ -462,6 +462,7 @@ function validEntity(e) {
     (e.hidden === undefined || (isObject(e.hidden) && Object.values(e.hidden).every((v) => v === true))) &&
     (e.rumors === undefined || (isObject(e.rumors) && Object.values(e.rumors).every((r) => isObject(r) && typeof r.value === 'string'))) &&
     (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
+    (e.room === undefined || e.room === null || (typeof e.room === 'string' && ID_RE.test(e.room))) &&
     (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
@@ -1077,6 +1078,11 @@ class Archive {
         else { delete e.rumors[c.key]; if (!Object.keys(e.rumors).length) delete e.rumors; }
       } else if (c.action === 'reveal') {
         e.hidden = { ...(e.hidden || {}), [c.key]: true };
+      } else if (c.action === 'room') {
+        if ((e.room || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.room = c.before; else delete e.room;
+        if (c.roomPast) e.roomPast = structuredClone(c.roomPast); else delete e.roomPast;
+        if (c.by === 'person') delete e.sources?.room;
       } else if (c.action === 'base') {
         if ((e.base || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.base = c.before; else delete e.base;
@@ -1166,6 +1172,37 @@ class Archive {
     this.writeJson(this.entityFile(worldId), doc);
     const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
     const c = { id: randomUUID(), at: g.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: groupId, entityIds: [groupId, after || before].filter(Boolean), name: g.name, type: 'group', action: 'base', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
+    this.pushHistory(worldId, [c]);
+    return c;
+  }
+
+  /**
+   * v0.5.1 I: a person's 지내는 곳 (방 배정 · 숙소) — the place they stay now. Only the current one counts: a new one
+   * takes its place and the one before is kept as 「이전」 (roomPast, up to 3). Like 본거지: the reader's value never goes
+   * over the person's; recorded ('room', undoable). placeId null: none.
+   */
+  setRoom(worldId, personId, placeId, meta = {}, { force = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const p = doc.entities.find((x) => x.entityId === personId && x.type === 'person');
+    if (!p) throw new ArchiveError(404, '인물을 찾지 못했습니다.');
+    if (placeId != null && !doc.entities.some((x) => x.entityId === placeId && x.type === 'place')) throw new ArchiveError(400, '지내는 곳은 장소여야 합니다.');
+    if (!force && p.sources?.room === 'manual') return null;
+    const before = p.room || null;
+    const after = placeId || null;
+    if (before === after && !(force && p.sources?.room !== 'manual')) return null;
+    const roomPast = p.roomPast ? structuredClone(p.roomPast) : null;
+    if (before && before !== after) p.roomPast = [{ placeId: before, until: now() }, ...(p.roomPast || []).filter((x) => x.placeId !== before && x.placeId !== after)].slice(0, 3);
+    if (after) p.room = after; else delete p.room;
+    p.sources = { ...(p.sources || {}) };
+    if (force) p.sources.room = 'manual';
+    else if (after) p.sources.room = 'auto';
+    else delete p.sources.room;
+    p.revision++;
+    p.updatedAt = now();
+    this.writeJson(this.entityFile(worldId), doc);
+    const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
+    const c = { id: randomUUID(), at: p.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: personId, entityIds: [personId, after || before].filter(Boolean), name: p.name, type: 'person', action: 'room', before, after, beforeName: nameOf(before), afterName: nameOf(after), roomPast, evidence: meta.evidence || '' };
     this.pushHistory(worldId, [c]);
     return c;
   }
@@ -1789,6 +1826,7 @@ class Archive {
     if (keep.type !== drop.type) throw new ArchiveError(400, '같은 종류의 설정끼리만 합칠 수 있습니다.');
     const t = now();
     const merged = { ...mergeInto(keep, drop), revision: keep.revision + 1, updatedAt: t };
+    if (merged.type === 'person' && !merged.room && drop.room) { merged.room = drop.room; merged.sources = { ...(merged.sources || {}), room: drop.sources?.room || 'auto' }; } // v0.5.1 I
     if (body.preview === true) return merged;
     const history = this.readHistory(worldId);
     const before = structuredClone(keep);
@@ -1802,6 +1840,7 @@ class Archive {
     for (const e of doc.entities) {
       if (e.appliesTo === dropId) e.appliesTo = keepId; // v0.5.0 C
       if (e.base === dropId) e.base = keepId; // v0.5.0 E
+      if (e.room === dropId) e.room = keepId; // v0.5.1 I
       if (e.timetable?.ownerId === dropId) e.timetable.ownerId = keepId; // v0.5.0 B
     }
     for (const r of doc.relations) {

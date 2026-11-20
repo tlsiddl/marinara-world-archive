@@ -232,6 +232,13 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           if (g) s.setBase(worldId, g.entityId, pl.entityId, { roomId, by: 'reader', evidence: it.evidence });
         }
         for (const it of items) {
+          // v0.5.1 I: a person's 지내는 곳 — a place the world has (now); only the current one counts
+          if (it.type !== 'person' || !it.room) continue;
+          const pl = s.findByName(afterSave, it.room);
+          const p = pl?.type === 'place' && afterSave.find((x) => x.type === 'person' && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.match || it.name)));
+          if (p) s.setRoom(worldId, p.entityId, pl.entityId, { roomId, by: 'reader', evidence: it.evidence });
+        }
+        for (const it of items) {
           if (!it.where || it.appliesTo) continue;
           const t = whereOf(afterSave, it);
           const e = t && afterSave.find((x) => (x.type === it.type) && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.match || it.name)));
@@ -638,6 +645,12 @@ async function routes(r) {
   r.post('/worlds/:worldId/tidy/keep', handle(async (req) => s().keepTidy(req.params.worldId, String(body(req).entityId || ''), body(req).key || null)));
   r.post('/worlds/:worldId/location-fill', handle(async (req) => fillPlaces(req.params.worldId, { model: body(req).model !== false })));
   r.post('/worlds/:worldId/applies-fill', handle(async (req) => fillApplies(req.params.worldId)));
+  r.put('/worlds/:worldId/entities/:entityId/room', handle(async (req) => {
+    const b = body(req).room;
+    if (b !== null && typeof b !== 'string') throw new ArchiveError(400, 'room(장소 id, 없애려면 null)를 보내 주세요.');
+    s().setRoom(req.params.worldId, req.params.entityId, b, {}, { force: true });
+    return s().listEntities(req.params.worldId).find((e) => e.entityId === req.params.entityId);
+  }));
   r.put('/worlds/:worldId/entities/:entityId/base', handle(async (req) => {
     const b = body(req).base;
     if (b !== null && typeof b !== 'string') throw new ArchiveError(400, 'base(장소 id, 없애려면 null)를 보내 주세요.');
@@ -695,7 +708,7 @@ const compact = (e) => ({ entityId: e.entityId, type: e.type, name: e.name, alia
  * server has, and a screen panel copied into another module (world-panel.js) compares its own number with it.
  */
 const CONTRACT = 2;
-const CONTRACT_FEATURES = ['relations', 'species', 'entity', 'roster', 'timetable', 'calendar', 'appliesTo', 'base'];
+const CONTRACT_FEATURES = ['relations', 'species', 'entity', 'roster', 'timetable', 'calendar', 'appliesTo', 'base', 'room'];
 /** Relations that make two people know each other from the start (연동 v2). 소속 · 위치 · 기타 do not. */
 const KNOW_TYPES = ['가족', '친구', '연인', '스승·제자', '적대'];
 const PAST_RE = /과거에는\s*(가족|친구|연인|스승·제자|적대)/g;

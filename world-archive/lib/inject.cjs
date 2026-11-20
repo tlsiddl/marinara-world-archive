@@ -63,6 +63,8 @@ function entityLine(e, nameOf = () => '', today = null, names = 'ko') {
   // v0.5.0 S: a field only a profile block has said so far
   const veiled = (k) => (e.hidden?.[k] ? ' (아직 드러나지 않음)' : '');
   const short = defs.filter((d) => d.kind === 'line' && fields[d.key]).map((d) => `${d.label}: ${oneLine(fields[d.key])}${veiled(d.key)}${was(e, d.key)}`);
+  // v0.5.1 I: where a person stays now (방 배정)
+  if (e.type === 'person' && e.room && nameOf(e.room)) short.push(`지내는 곳: ${nameOf(e.room)}`);
   if (short.length) lines.push('  ' + short.join(' / '));
   for (const d of defs) if (d.kind === 'text' && fields[d.key]) lines.push(`  ${d.label}: ${oneLine(fields[d.key])}${veiled(d.key)}${was(e, d.key)}`);
   for (const x of e.extra || []) if (x.value) lines.push(`  ${x.label}: ${oneLine(x.value)}`);
