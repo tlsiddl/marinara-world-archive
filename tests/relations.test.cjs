@@ -170,3 +170,17 @@ test('scene mode puts one line per relation whose both ends are in the scene, wi
   assert.doesNotMatch(out.text, /세드릭/);
   assert.doesNotMatch(assembleWorld({ ...world, injectMode: 'all' }, ents, 3000, { scene: new Set(['a', 'b']), relations }).text, /\[관계\]/, 'only in scene mode');
 });
+
+test('relationFits: 위치 joins places, 소속 a person and a group, family kinds people; a person at a place is no relation', () => {
+  const f = X.relationFits;
+  assert.equal(f('위치', 'place', 'place'), true);
+  assert.equal(f('위치', 'person', 'place'), false);
+  assert.equal(f('소속', 'person', 'group'), true);
+  assert.equal(f('소속', 'group', 'person'), true);
+  assert.equal(f('소속', 'person', 'place'), false);
+  assert.equal(f('가족', 'person', 'person'), true);
+  assert.equal(f('연인', 'person', 'group'), false);
+  assert.equal(f('적대', 'group', 'group'), true);
+  assert.equal(f('기타', 'person', 'place'), false);
+  assert.equal(f('기타', 'group', 'place'), true);
+});

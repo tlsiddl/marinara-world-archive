@@ -196,8 +196,9 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         for (const r of rel.relations) {
           const from = s.findByName(ents, r.from);
           const to = s.findByName(ents, r.to);
-          if (from && to && from.entityId !== to.entityId) resolved.push({ ...r, from: from.entityId, to: to.entityId });
-          else rel.dropped.push({ name: r.from + ' — ' + r.to, why: 'no such setting' });
+          if (!from || !to || from.entityId === to.entityId) rel.dropped.push({ name: r.from + ' — ' + r.to, why: 'no such setting' });
+          else if (!X.relationFits(r.type, from.type, to.type)) rel.dropped.push({ name: r.from + ' — ' + r.to, why: `${r.type} between ${from.type} and ${to.type}` });
+          else resolved.push({ ...r, from: from.entityId, to: to.entityId });
         }
         const relChanges = [...s.applyRelations(worldId, resolved, meta), ...s.linkAffiliations(worldId, null, meta)];
         job.relations += relChanges.filter((c) => c.action === 'relation-add').length;
