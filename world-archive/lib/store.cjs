@@ -149,6 +149,9 @@ const sameGroupName = (name, g) => { const k = squashName(name); return groupKey
 /** A 소속 piece that reads as a group: a year, a house, a family, a club… (not 「교수」 · 「부교장」 · 「주인」). */
 const GROUPISH = /(학년|기숙사|가문|집안|반|동아리|클럽|길드|기사단|협회|조합|교단|무리|일행|여학생|남학생|학생회|연구회|부대|분대|소대)$/;
 const KEEP_AS_IS = new Set(['rule', 'system', 'schedule', 'history', 'custom']);
+/** 적용되는 곳 (v0.5.0 C): rules and systems can hold in one place or group; empty is the whole world. */
+const APPLIES_TYPES = new Set(['rule', 'system']);
+const APPLIES_TO = new Set(['place', 'group']);
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -420,6 +423,7 @@ function validEntity(e) {
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
     (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
+    (e.appliesTo === undefined || e.appliesTo === null || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
     typeof e.pinned === 'boolean' &&
@@ -793,7 +797,9 @@ class Archive {
     const findEntity = (item) => {
       const keys = new Set([item.match, item.name, ...(item.aliases || [])].filter(Boolean).map(norm));
       const hit = (e) => [e.name, ...e.aliases].some((n) => keys.has(norm(n)));
-      return doc.entities.find((e) => e.type === item.type && hit(e)) || doc.entities.find(hit) || null;
+      // v0.5.0 C: the same name for a rule · system that holds in another place or group is another one
+      const sameWhere = (e) => !APPLIES_TYPES.has(item.type) || !item.appliesTo || !e.appliesTo || e.appliesTo === item.appliesTo;
+      return doc.entities.find((e) => e.type === item.type && hit(e) && sameWhere(e)) || (APPLIES_TYPES.has(item.type) && item.appliesTo ? null : doc.entities.find(hit)) || null;
     };
     for (const raw of items) {
       if (!isObject(raw) || !TYPES.includes(raw.type)) continue;
@@ -838,6 +844,10 @@ class Archive {
           createdAt: t,
           updatedAt: t,
         };
+        if (APPLIES_TYPES.has(item.type) && item.appliesTo && doc.entities.some((x) => x.entityId === item.appliesTo && APPLIES_TO.has(x.type))) {
+          entity.appliesTo = item.appliesTo;
+          entity.sources.appliesTo = 'auto';
+        }
         doc.entities.push(entity);
         log({ entityId: entity.entityId, name, type: item.type, action: 'create', evidence });
         continue;
@@ -972,6 +982,10 @@ class Archive {
         }
         if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
+      } else if (c.action === 'applies') {
+        if ((e.appliesTo || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.appliesTo = c.before; else delete e.appliesTo;
+        if (c.by === 'person') delete e.sources?.appliesTo;
       } else if (c.action === 'cell') {
         // a 시간표 cell back as it was, only while it still holds what this change wrote
         const cells = e.timetable?.cells;
@@ -1011,6 +1025,37 @@ class Archive {
     c.undoneAt = now();
     this.writeJson(this.historyFile(worldId), history);
     return { undone: true, changeId };
+  }
+
+  // ---------------------------------------------------------------- 적용되는 곳 (v0.5.0 C)
+
+  /**
+   * Where a rule or system holds: one place or group (its entityId), or the whole world (none). The reader's and the
+   * buttons' value never goes over the person's (sources.appliesTo 'manual'). Recorded ('applies', undoable).
+   * meta.by: who; force: the person (manual). targetId null: the whole world.
+   */
+  setAppliesTo(worldId, entityId, targetId, meta = {}, { force = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === entityId);
+    if (!e || !APPLIES_TYPES.has(e.type)) throw new ArchiveError(404, '규칙이나 시스템을 찾지 못했습니다.');
+    if (targetId != null && !doc.entities.some((x) => x.entityId === targetId && APPLIES_TO.has(x.type))) throw new ArchiveError(400, '적용되는 곳은 장소나 집단이어야 합니다.');
+    if (!force && e.sources?.appliesTo === 'manual') return null;
+    const before = e.appliesTo || null;
+    const after = targetId || null;
+    if (before === after && !(force && e.sources?.appliesTo !== 'manual')) return null;
+    if (after) e.appliesTo = after; else delete e.appliesTo;
+    e.sources = { ...(e.sources || {}) };
+    if (force) e.sources.appliesTo = 'manual';
+    else if (after) e.sources.appliesTo = 'auto';
+    else delete e.sources.appliesTo;
+    e.revision++;
+    e.updatedAt = now();
+    this.writeJson(this.entityFile(worldId), doc);
+    const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
+    const c = { id: randomUUID(), at: e.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId, name: e.name, type: e.type, action: 'applies', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
+    this.pushHistory(worldId, [c]);
+    return c;
   }
 
   // ---------------------------------------------------------------- 시간표 (v0.5.0 B)
@@ -1313,6 +1358,10 @@ class Archive {
     const relationsBefore = structuredClone(doc.relations.filter((r) => [r.from, r.to].some((x) => x === keepId || x === dropId)));
     const seen = new Set();
     const moved = [];
+    for (const e of doc.entities) {
+      if (e.appliesTo === dropId) e.appliesTo = keepId; // v0.5.0 C
+      if (e.timetable?.ownerId === dropId) e.timetable.ownerId = keepId; // v0.5.0 B
+    }
     for (const r of doc.relations) {
       const n = { ...r, from: r.from === dropId ? keepId : r.from, to: r.to === dropId ? keepId : r.to };
       if (n.from === n.to || seen.has(relKey(n))) continue;

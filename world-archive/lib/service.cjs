@@ -205,7 +205,18 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           dropped.push({ name: it.name, why: 'species name only' });
           return false;
         });
+        // v0.5.0 C: 적용되는 곳 — a place or group the world has (made in this batch: set after it is saved)
+        const whereOf = (ents, it) => { const t = it.where ? s.findByName(ents, it.where) : null; return t && (t.type === 'place' || t.type === 'group') ? t : null; };
+        const before = s.readEntities(worldId).entities;
+        for (const it of items) { const t = whereOf(before, it); if (t) it.appliesTo = t.entityId; }
         const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
+        const afterSave = s.readEntities(worldId).entities;
+        for (const it of items) {
+          if (!it.where || it.appliesTo) continue;
+          const t = whereOf(afterSave, it);
+          const e = t && afterSave.find((x) => (x.type === it.type) && [x.name, ...x.aliases].some((n) => X.squash(n) === X.squash(it.match || it.name)));
+          if (e) s.setAppliesTo(worldId, e.entityId, t.entityId, { roomId, by: 'reader', evidence: it.evidence });
+        }
         job.added += changes.filter((c) => c.action === 'create').length;
         job.changed += changes.filter((c) => c.action !== 'create').length;
         // Saved, then checked by the program: names the glossary has become the glossary's (model or not).
@@ -481,6 +492,13 @@ async function routes(r) {
     const b = body(req);
     if (typeof b.personId !== 'string') throw new ArchiveError(400, 'personId를 보내 주세요.');
     return s().setMember(req.params.worldId, req.params.entityId, b.personId, b.on !== false);
+  }));
+  // v0.5.0 C: 적용되는 곳 by hand ({ appliesTo: placeOrGroupId | null } — null is the whole world); theirs from then on.
+  r.put('/worlds/:worldId/entities/:entityId/applies-to', handle(async (req) => {
+    const t = body(req).appliesTo;
+    if (t !== null && typeof t !== 'string') throw new ArchiveError(400, 'appliesTo(장소·집단 id, 세계 전체는 null)를 보내 주세요.');
+    s().setAppliesTo(req.params.worldId, req.params.entityId, t, {}, { force: true });
+    return s().listEntities(req.params.worldId).find((e) => e.entityId === req.params.entityId);
   }));
   r.patch('/worlds/:worldId/entities/:entityId', handle(async (req) => {
     const was = s().listEntities(req.params.worldId).find((x) => x.entityId === req.params.entityId)?.fields?.affiliation || '';

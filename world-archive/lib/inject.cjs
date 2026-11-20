@@ -38,11 +38,13 @@ const oneLine = (t) => String(t).replace(/\s*\n+\s*/g, ' / ').trim();
 /** 할 일 10: the earlier value, only for a field the person switched on (「이전 값도 프롬프트에」). */
 const was = (e, k) => (e.pastInPrompt?.[k] && e.past?.[k]?.[0]?.value ? ` (과거: ${oneLine(e.past[k][0].value)})` : '');
 
-function entityLine(e) {
+function entityLine(e, nameOf = () => '') {
   // v0.5.0 B: a 시간표 is its cells on one line
   if (e.timetable) return sanitize(`- ${e.name}\n  시간표: ${TT.timetableLine(e) || '(비어 있음)'}`);
   const aliases = e.aliases?.length ? ` (다른 이름: ${e.aliases.join(', ')})` : '';
-  const lines = [`- ${e.name}${aliases}`];
+  // v0.5.0 C: where a rule or system holds
+  const where = e.appliesTo && nameOf(e.appliesTo) ? ` [${nameOf(e.appliesTo)}에서]` : '';
+  const lines = [`- ${e.name}${aliases}${where}`];
   const defs = FIELDS[e.type] || [];
   const fields = e.fields || {};
   const short = defs.filter((d) => d.kind === 'line' && fields[d.key]).map((d) => `${d.label}: ${oneLine(fields[d.key])}${was(e, d.key)}`);
@@ -103,12 +105,14 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
     pool = keep;
   }
+  const byIdAll = new Map((entities || []).map((x) => [x.entityId, x]));
+  const nameOf = (id) => byIdAll.get(id)?.name || '';
   const ordered = orderEntities(pool, scene);
   const byType = new Map();
   const included = [];
   const omitted = [];
   for (const e of ordered) {
-    const line = entityLine(e);
+    const line = entityLine(e, nameOf);
     const header = byType.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length;
     const cost = header + 1 + line.length;
     if (used + cost > budget) {

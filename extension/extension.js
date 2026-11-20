@@ -654,6 +654,15 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     return `<div class="sec"><small>시간표${owner ? ` · ${esc(owner.name)}` : ''} · 칸 ${cells.length}</small>${clashHtml}${table}${form}</div>`;
   }
 
+  /** 적용되는 곳 (v0.5.0 C): a rule or system holds in one place or group, or in the whole world. */
+  function appliesHtml(e) {
+    const where = st.entities.find((x) => x.entityId === e.appliesTo);
+    const tag = e.sources?.appliesTo === 'auto' ? '<span class="auto-tag">· 자동</span>' : '';
+    const opts = st.entities.filter((x) => x.type === 'place' || x.type === 'group').sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, 'ko') : a.type === 'group' ? -1 : 1));
+    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="appliesPick" aria-label="적용되는 곳"><option value="">세계 전체</option>${opts.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === e.appliesTo ? 'selected' : ''}>${esc(x.name)} · ${x.type === 'group' ? '집단' : '장소'}</option>`).join('')}</select><button class="quiet" type="button" data-act="applies-set" data-id="${esc(e.entityId)}">바꾸기</button></span>`;
+    return `<div class="sec"><small>적용되는 곳${tag}</small><p>${where ? `<button class="quiet" type="button" data-act="open" data-id="${esc(where.entityId)}">${esc(where.name)}</button>` : '세계 전체'}</p>${pick}</div>`;
+  }
+
   function detailHtml(e) {
     const k = KIND[e.type];
     const d = defs(e.type);
@@ -689,7 +698,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}
         </div>
         ${facts ? `<div class="facts">${facts}</div>` : ''}
-        ${e.timetable ? timetableHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
+        ${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
         ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
         <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
@@ -865,6 +874,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
     'relation-remove': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 끝남`,
     cell: (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: ${c.before ? `${esc(c.before)} → ` : ''}${c.after ? esc(c.after) : '지움'}`,
     'cell-pending': (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: 대화에서는 「${esc(c.after)}」`,
+    applies: (c) => `<b>${esc(c.name)}</b> · 적용되는 곳: ${esc(c.beforeName || '세계 전체')} → ${esc(c.afterName || '세계 전체')}`,
     'alias-move': (c) => `<b>${esc(c.name)}</b> · 다른 이름 「${esc(c.alias)}」을(를) 새 집단 「${esc(c.to)}」(으)로 옮김`,
     delete: (c) => `<b>${esc(c.name)}</b> 지움${c.relations?.length ? ` · 관계 ${c.relations.length}개도 함께` : ''}`,
   };
@@ -1180,6 +1190,12 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
       await api('PUT', `/worlds/${st.worldId}/timetable/cell`, { entityId: e.entityId, revision: e.revision, day: root.getElementById('ttDay')?.value, slot: root.getElementById('ttSlot')?.value, value: root.getElementById('ttValue')?.value || '' });
       await loadEntities();
     }, '칸을 저장했습니다. 직접 쓴 칸은 대화가 덮어쓰지 않습니다.'),
+    // v0.5.0 C
+    'applies-set': (b) => run(async () => {
+      const v = root.getElementById('appliesPick')?.value || null;
+      await api('PUT', `/worlds/${st.worldId}/entities/${b.dataset.id}/applies-to`, { appliesTo: v });
+      await loadEntities();
+    }, '적용되는 곳을 바꿨습니다. 직접 정한 값은 대화가 덮어쓰지 않습니다.'),
     'cell-clear': (b) => run(async () => {
       const e = st.entities.find((x) => x.entityId === b.dataset.id);
       const [day, slot] = String(b.dataset.key).split('|');

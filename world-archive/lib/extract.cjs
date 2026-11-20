@@ -131,6 +131,7 @@ function buildPrompt(world, entities, part, cast, glossary = []) {
 종류 (맞는 것을 고른다):
 ${KIND_GUIDE}
 - rule·system·history 구별: 지켜야 하는 것(어기면 벌·꾸중을 받는 법·제도·학교 규칙)은 rule, 세계가 그렇게 돌아가는 원리(마법·능력이 작동하는 방식, 화폐·경제, 점수가 매겨지는 방식)는 system, 이야기 전에 이미 끝난 과거의 일은 history다. 예: 「밤 10시 이후 기숙사 밖 금지」는 rule, 「마법은 지팡이 없이 쓰면 힘이 흩어진다」는 system, 「100년 전 두 왕국의 전쟁」은 history.
+- rule·system에는 where(적용되는 곳)를 적는다: 그 규칙·원리가 특정 장소나 집단에서만 통하면 그 장소·집단 이름([이미 있는 항목]이나 items의 이름 그대로 — 예: 기숙사 암호는 그 기숙사, 교실 규칙은 그 학교), 세계 어디서나 통하면 빈 문자열. 근거 문장에 그곳이 드러나지 않으면 비운다. 이름이 같아도 적용되는 곳이 다르면 다른 항목이다.
 - custom(기타)은 위 어디에도 안 맞을 때만 쓴다. 무리·행렬·조직은 group, 지켜야 하는 관례·금기·법은 rule, 작동 원리는 system, 정해진 때에 돌아오는 날·행사는 schedule, 이야기 전의 과거 일은 history다.
 
 각 항목:
@@ -342,6 +343,8 @@ function checkItems(parsed, part, cast) {
       fields: f.fields,
       fieldEvidence: f.fieldEvidence,
       memo: typeof it.memo === 'string' ? it.memo : '',
+      // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
+      where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
       evidence: clip(found.map((p) => p.text).join(' / '), 300),
       evidenceAt: found.map((p) => ({ messageId: p.messageId, sentence: p.sentence })),
     });
