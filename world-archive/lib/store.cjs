@@ -2546,6 +2546,14 @@ class Archive {
       log({ entityId: e.entityId, name, type, action: 'create', evidence: String(evidence).slice(0, 300), why: '프로필 블록' });
       return e;
     };
+    // v0.6.5 2: the evidence each field was written with (the history), to tell a field that came from a profile
+    const strip = (x) => String(x || '').replace(/<\/?[a-z][a-z0-9_-]*(\s[^<>]*)?\/?>/gi, '').replace(/\s+/g, ' ').trim();
+    const evOf = new Map();
+    for (const c of this.readHistory(worldId).changes) {
+      if (c.undoneAt) continue;
+      if (c.action === 'create' && isObject(c.fieldEvidence)) for (const [k, v] of Object.entries(c.fieldEvidence)) evOf.set(`${c.entityId}.${k}`, v);
+      if (c.action === 'field' && c.after && c.why !== '단어장 표기로' && c.why !== '근거 번호 지움') evOf.set(`${c.entityId}.${c.key}`, c.evidence);
+    }
     for (const p of profiles || []) {
       if (p.kind === 'npc') {
         const kor = P.korean(p.name, opts.pairs);
@@ -2579,6 +2587,12 @@ class Archive {
           const before = e.fields?.[key] || '';
           const evidence = (p.lines[key] || '').slice(0, 300);
           if (before) {
+            // v0.6.5 2: a field that came from this profile (the same value, or written with this profile's line as
+            // its evidence) gets the profile's own words — for 숨김 (recheckFields). Not the person's own field.
+            const line = strip(p.lines[key] || '');
+            const had = String(evOf.get(`${e.entityId}.${key}`) || '');
+            const fromHere = before === value || (line && (strip(had) === line || had.split(' / ').map(strip).some((x) => x && (x === line || (x.length >= 20 && line.startsWith(x))))));
+            if (fromHere && e.sources?.[key] !== 'manual' && !e.origText?.[key]) { e.origText = { ...(e.origText || {}), [key]: String(raw).slice(0, 2000) }; touched.add(e); }
             // a 나이 · 성별 · 종 that says something else: 「서로 다른 말을 해요」, never over it
             if (['age', 'gender', 'species'].includes(key) && !P.sameValue(key, before, value) && e.differs?.[key]?.value !== value) {
               e.differs = { ...(e.differs || {}), [key]: { value, evidence, at: t } };
@@ -2818,14 +2832,20 @@ class Archive {
           let hide = null;
           let ev = '';
           const orig = e.origText?.[key];
-          if (orig) {
+          // a profile line may hold ' / ' itself (「- Name: … / Age: 11 / Gender: Female」): the whole evidence first
+          const evRaw = profile.size && lastEvidence.has(`${e.entityId}.${key}`) ? lastEvidence.get(`${e.entityId}.${key}`) : '';
+          const evs = !evRaw ? [] : inProfile(strip(evRaw)) ? [strip(evRaw)] : pieces(evRaw);
+          const story = evs.find((x) => !inProfile(x));
+          if (story) {
+            // the field's own evidence has a story sentence (the reader wrote it from both): not hidden
+            hide = false;
+            ev = story;
+          } else if (orig) {
             const hit = about.find((x) => origSaid(orig, x.s));
             hide = !hit;
             ev = hit ? hit.s : orig;
-          } else if (profile.size && lastEvidence.has(`${e.entityId}.${key}`)) {
-            const evs = pieces(lastEvidence.get(`${e.entityId}.${key}`));
-            if (!evs.length) continue;
-            hide = evs.every(inProfile);
+          } else if (evs.length) {
+            hide = true;
             ev = evs.join(' / ');
           }
           if (hide === null || Boolean(e.hidden?.[key]) === hide) continue;
