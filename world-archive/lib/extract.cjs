@@ -5,6 +5,7 @@
 // works the way it does there: the new messages are shown as numbered sentences, the model answers with sentence
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
 const { TYPES, FIELDS, REL_TYPES, relationFits } = require('./store.cjs');
+const { speciesName } = require('./same.cjs');
 const S = require('./vendor/sentences.cjs');
 const N = require('./names.cjs');
 
@@ -140,6 +141,7 @@ ${fieldGuide()}
 칸 쓰는 법:
 - 칸마다 그 값이 나온 문장 번호를 n에 1~3개 적는다. 그 칸의 내용이 실제로 쓰인 문장이어야 한다(다른 사실이 쓰인 문장을 대지 마).
 - species(종)에는 사람이 아닌 존재(고양이 · 부엉이 · 용 · 집요정 같은)의 종만 쓴다. 사람이면 비워 둔다("사람"이라고 쓰지 마).
+- 이름 없이 종으로만 불리는 존재(「크니즐」, 「부엉이」처럼 종 이름뿐인 것)는 인물 항목으로 만들지 마. 이름 있는 동물은 이름으로 만들고 종은 species 칸에 적는다.
 - age(나이·생일)에는 나이를 나타내는 말만 쓴다(예: 열두 살, 노인, 50대). 몇 해째 일했다거나 외모 같은 것은 다른 칸에 쓴다.
 - state(지금 상태)에는 며칠 뒤에도 사실일 상태만 쓴다: 다침, 병, 이사, 직위·소속 변화, 관계 단절, 잃어버린 물건 같은 것. 지금 하는 동작, 잠깐 간 곳, 그날의 기분은 쓰지 않는다. 버릇·걸음걸이·말투는 상태가 아니라 appearance(외형)나 personality(성격)에 쓴다.
   나쁜 예: "부엌으로 가서 차를 끓이는 중", "오늘 아침 기분이 좋지 않음"
@@ -307,6 +309,10 @@ function checkItems(parsed, part, cast) {
   const items = [];
   const dropped = [];
   const droppedFields = [];
+  // 종 of the individuals in this batch: a person item that is only one of them (「크니즐」 next to 「베아트릭스」, 종 하프
+  // 크니즐) is no one. An item whose own name is its 종 (「거대 오징어」) is the creature itself, not another individual.
+  const spOf = (it) => { const v = it?.fields?.species; return String((v && typeof v === 'object' ? v.v : v) || '').trim(); };
+  const individuals = list.filter((x) => x && typeof x === 'object' && x.type === 'person' && spOf(x) && !speciesName(String(x.name || ''), spOf(x)));
   for (const it of list) {
     if (!it || typeof it !== 'object' || typeof it.name !== 'string') continue;
     const name = it.name.trim();
@@ -317,6 +323,7 @@ function checkItems(parsed, part, cast) {
     if (!NAMED_KINDS.has(it.type) && castParts.some((p) => squash(name).includes(p))) { dropped.push({ name, why: 'about a card' }); continue; }
     if (/\p{Script=Hangul}/u.test(name) && /[A-Za-z]/.test(name)) { dropped.push({ name, why: 'mixed script name' }); continue; }
     if (NAMED_KINDS.has(it.type) && !names.some((n) => n.length >= 1 && text.includes(n))) { dropped.push({ name, why: 'name not in text' }); continue; }
+    if (it.type === 'person' && individuals.some((x) => x !== it && speciesName(name, spOf(x)))) { dropped.push({ name, why: 'species name only' }); continue; }
     const raw = Array.isArray(it.evidence) ? it.evidence : it.evidence ? [it.evidence] : [];
     const found = S.resolveEvidence(raw.map((e) => (typeof e === 'string' ? { q: e } : e)), index).slice(0, 3);
     if (!found.length) { dropped.push({ name, why: 'no evidence sentence' }); continue; }

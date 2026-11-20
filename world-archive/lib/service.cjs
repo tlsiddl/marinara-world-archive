@@ -6,6 +6,7 @@ const path = require('node:path');
 const { Archive, ArchiveError, mentions, isDescriptiveName, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY } = require('./store.cjs');
 const X = require('./extract.cjs');
 const N = require('./names.cjs');
+const { speciesName } = require('./same.cjs');
 const G = require('./vendor/glossary.cjs');
 const { assembleWorld, assembleLooks } = require('./inject.cjs');
 const Search = require('./search.cjs');
@@ -182,7 +183,17 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         }
         if (split) continue;
         if (!parsed) throw Error('모델 답을 읽지 못했습니다. 잠시 뒤 다시 해 보거나, 다른 연결을 골라 주세요.');
-        const { items, dropped, droppedFields } = X.checkItems(parsed, part, cast);
+        const checked = X.checkItems(parsed, part, cast);
+        const { dropped, droppedFields } = checked;
+        // A new person that is only the 종 of an individual the world already has (「크니즐」 when 베아트릭스's 종 is 하프
+        // 크니즐) is not made. With no individual of that kind (「거대 오징어」, 「그린디로」) it is the creature itself: kept.
+        const known = s.readEntities(worldId).entities;
+        const worldSpecies = known.filter((e) => e.type === 'person' && String(e.fields?.species || '').trim() && !speciesName(e.name, e.fields.species)).map((e) => e.fields.species);
+        const items = checked.items.filter((it) => {
+          if (it.type !== 'person' || s.findByName(known, it.match || it.name) || !worldSpecies.some((sp) => speciesName(it.name, sp))) return true;
+          dropped.push({ name: it.name, why: 'species name only' });
+          return false;
+        });
         const changes = s.applyAuto(worldId, items, { roomId, messageIds: part.batch.map((x) => x.id) });
         job.added += changes.filter((c) => c.action === 'create').length;
         job.changed += changes.filter((c) => c.action !== 'create').length;

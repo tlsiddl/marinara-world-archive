@@ -9,7 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { findPairs, describedPairs } = require('./same.cjs');
+const { findPairs, describedPairs, speciesPairs } = require('./same.cjs');
 const N = require('./names.cjs');
 
 const SCHEMA = 1;
@@ -1080,7 +1080,8 @@ class Archive {
     const gone = new Set(this.readDismissed(worldId).pairs.map((p) => pairKey(p.a, p.b)));
     const doc = this.readEntities(worldId);
     const skip = (a, b) => gone.has(pairKey(a, b));
-    return [...findPairs(doc.entities, skip), ...describedPairs(doc.entities, doc.relations, skip)];
+    const seen = new Set();
+    return [...findPairs(doc.entities, skip), ...describedPairs(doc.entities, doc.relations, skip), ...speciesPairs(doc.entities, skip)].filter((p) => { const k = pairKey(p.a, p.b); if (seen.has(k)) return false; seen.add(k); return true; });
   }
 
   /** 「다른 사람이에요」: the pair is not suggested again (by id, so renaming either does not bring it back). */
