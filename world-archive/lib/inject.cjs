@@ -164,7 +164,9 @@ function orderEntities(entities, scene = null) {
 const LAW_NAME = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)/;
 const WORLD_SYSTEM = /([^\s마]법(\s|$)|령(\s|$)|제도|화폐|통화)/;
 const ONCE_TYPES = new Set(['rule', 'system', 'custom', 'history']);
-const onceOnly = (e) => ONCE_TYPES.has(e?.type) && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(String(e.name || '')) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
+// v0.6.5 1: only the whole world's (or nobody said where) — a rule or system of a place or group stays, and goes into
+// the scenes there (「여기」) even when one batch spoke of it (배정식 · 금지된 숲)
+const onceOnly = (e) => ONCE_TYPES.has(e?.type) && !(e.appliesTo && e.appliesTo !== WORLD) && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(String(e.name || '')) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
 
 function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };

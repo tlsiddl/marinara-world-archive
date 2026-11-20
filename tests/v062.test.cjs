@@ -305,7 +305,7 @@ test('⑨ ④ v0.6.4 c: a profile field the code filled keeps its own words (ori
   let e = s.listEntities(w.worldId)[0];
   assert.equal(e.origText.appearance, 'Silver braided hair, star-pinned grey robe.');
   assert.deepEqual(e.hidden, { age: true, gender: true, appearance: true });
-  const out = s.recheckFields(w.worldId, { isStatus: () => false, story: ['Rowan Hart tugged at her silver braided hair and smoothed the grey robe.', 'Someone else had silver braided hair.'], profile: ['- Appearance and clothing: Silver braided hair, star-pinned grey robe.'] });
+  const out = s.recheckFields(w.worldId, { isStatus: () => false, story: ['Rowan Hart tugged at her silver braided hair and smoothed the grey robe.', 'Someone else had silver braided hair.'], profile: ['- Name: Rowan Hart / Age: 11 / Gender: Female', '- Appearance and clothing: Silver braided hair, star-pinned grey robe.'] });
   e = s.listEntities(w.worldId)[0];
   assert.deepEqual(e.hidden, { age: true, gender: true });
   assert.ok(out.some((c) => c.action === 'reveal' && c.key === 'appearance' && c.why === '본문에 나옴'));
@@ -388,4 +388,48 @@ test('f: a vehicle is not pulled into the group its 위치 칸 names', () => {
   assert.equal(groupOfPlace(train, E), null);
   assert.equal(groupOfPlace(boat, E), null);
   assert.equal(groupOfPlace(hall, E)?.name, '별시계 마법학교');
+});
+
+test('v0.6.5 1: a place\'s rule one batch spoke of goes into the scene there; the whole world\'s does not', () => {
+  const school = ent('group', '별시계 마법학교');
+  const hall = ent('place', '대강당', { fields: { location: '별시계 마법학교' } });
+  const E = [school, hall,
+    ent('rule', '배정식은 이름 순서로', { appliesTo: school.entityId, seen: { n: 1, last: 'm1' } }),
+    ent('rule', '복도에서 뛰지 않는다', { appliesTo: 'world', seen: { n: 1, last: 'm1' } }),
+    ent('custom', '자기소개 한 번', { seen: { n: 1, last: 'm1' } })];
+  assert.deepEqual(E.map(I.onceOnly), [false, false, false, true, true]);
+  const text = I.assembleWorld({ name: '별시계', description: '', injectMode: 'scene' }, E, 5000, { scene: new Set([hall.entityId]), relations: [] }).text;
+  assert.match(text, /배정식은 이름 순서로/);
+  assert.doesNotMatch(text, /복도에서 뛰지 않는다|자기소개 한 번/);
+});
+
+test('v0.6.5 2: recheck gives an old profile field its profile\'s words (origText), then 숨김 by them; the person\'s field untouched', (t) => {
+  const P = require('../world-archive/lib/profile.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-065-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const s = new Archive(dir);
+  const w = s.createWorld({ name: '별시계 학원' });
+  const line = '- Appearance and clothing: Silver braided hair, star-pinned grey robe.';
+  // the reader wrote these from the profile (translated), before origText existed
+  s.applyAuto(w.worldId, [{ type: 'person', name: 'Rowan Hart', fields: { appearance: '은빛 땋은 머리, 별 핀을 꽂은 회색 로브', personality: '조용함' }, fieldEvidence: { appearance: line, personality: '- Demeanor and key personality traits: Quiet.' }, hidden: { appearance: true, personality: true } }]);
+  const e0 = s.listEntities(w.worldId)[0];
+  s.updateEntity(w.worldId, e0.entityId, { revision: e0.revision, fields: { ...e0.fields, personality: '수줍음' } });
+  const profiles = P.parseProfiles('<npc_profile>\n- Name: Rowan Hart\n' + line + '\n- Demeanor and key personality traits: Quiet.\n</npc_profile>');
+  const story = ['Rowan Hart tugged at her silver braided hair and smoothed the grey robe.'];
+  s.applyProfiles(w.worldId, profiles, { story });
+  let e = s.listEntities(w.worldId)[0];
+  assert.equal(e.origText.appearance, 'Silver braided hair, star-pinned grey robe.');
+  assert.equal(e.origText.personality, undefined, 'the person wrote 성격');
+  s.recheckFields(w.worldId, { isStatus: () => false, story, profile: [line, '- Demeanor and key personality traits: Quiet.'] });
+  e = s.listEntities(w.worldId)[0];
+  assert.equal(e.hidden?.appearance, undefined, 'the story says most of its words');
+});
+
+test('v0.6.5 3: the tidy prompt asks 「lasting in this world」, not 「can be used again」', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../world-archive/lib/service.cjs'), 'utf8');
+  const prompt = src.slice(src.indexOf('const TIDY_PROMPT'), src.indexOf('JSON만 출력', src.indexOf('const TIDY_PROMPT')));
+  assert.match(prompt, /이 세계에서 오래 지켜지는 사실인가/);
+  assert.match(prompt, /남길 이유가 아니다/);
+  assert.match(prompt, /한 가게의 물건 목록/);
+  assert.match(prompt, /학교 규칙\(금지된 숲/);
 });
