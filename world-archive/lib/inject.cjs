@@ -126,6 +126,10 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
         const up = byIdAll.get(r.to);
         if (up && (up.type === 'place' || up.type === 'group')) add(r.to, here.get(id) + 1);
       }
+      // v0.5.0 E: a group's 본거지, and the groups whose 본거지 is this place
+      const e = byIdAll.get(id);
+      if (e?.type === 'group' && e.base && byIdAll.has(e.base)) add(e.base, here.get(id));
+      if (e?.type === 'place') for (const g of entities || []) if (g.type === 'group' && g.base === id) add(g.entityId, here.get(id) + 1);
     }
     const ruleLike = (e) => ALWAYS.has(e.type);
     const whereKnown = (e) => ruleLike(e) && e.appliesTo && e.appliesTo !== WORLD && byIdAll.has(e.appliesTo);

@@ -154,6 +154,10 @@ const APPLIES_TYPES = new Set(['rule', 'system']);
 const APPLIES_TO = new Set(['place', 'group']);
 /** 적용되는 곳 「세계 전체」 (v0.5.0 D); none at all is 「모름」. */
 const WORLD = 'world';
+/** An other name of a group that names a place: what its 본거지 can be made from (v0.5.0 E). */
+const PLACE_ALIAS = /(성|궁|궁전|저택|본관|건물|캠퍼스|교정|castle|manor|palace|hall|campus|tower)$/i;
+/** Words after a place's name that say near it, not in it (「검은 호수 아래」 · 「리키 콜드런 뒷문 너머」). */
+const NOT_INSIDE = /(아래|밑|옆|근처|부근|너머|건너편|맞은편|바깥|밖|떨어진|가는 길|위쪽|아랫|기슭)/;
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -425,6 +429,7 @@ function validEntity(e) {
     (e.past === undefined || validPast(e.past)) &&
     (e.pending === undefined || validPending(e.pending)) &&
     (e.timetable === undefined || TT.validTimetable(e.timetable)) &&
+    (e.base === undefined || e.base === null || (typeof e.base === 'string' && ID_RE.test(e.base))) &&
     (e.appliesTo === undefined || e.appliesTo === null || e.appliesTo === WORLD || (typeof e.appliesTo === 'string' && ID_RE.test(e.appliesTo))) &&
     (e.pastInPrompt === undefined || (isObject(e.pastInPrompt) && Object.values(e.pastInPrompt).every((v) => typeof v === 'boolean'))) &&
     typeof e.status === 'string' &&
@@ -984,6 +989,10 @@ class Archive {
         }
         if (c.before) e.sources[key] = c.by === 'person' && key !== 'description' ? 'manual' : 'auto'; // undoing [적용]: the person's value again
         else delete e.sources[key];
+      } else if (c.action === 'base') {
+        if ((e.base || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.base = c.before; else delete e.base;
+        if (c.by === 'person') delete e.sources?.base;
       } else if (c.action === 'applies') {
         if ((e.appliesTo || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.appliesTo = c.before; else delete e.appliesTo;
@@ -1027,6 +1036,114 @@ class Archive {
     c.undoneAt = now();
     this.writeJson(this.historyFile(worldId), history);
     return { undone: true, changeId };
+  }
+
+  // ---------------------------------------------------------------- 장소 위치 · 본거지 (v0.5.0 E)
+
+  /**
+   * A group's 본거지 (base): the place it is at (은사슴 기숙사 → 별시계탑 아래 기숙사 건물). Like 적용되는 곳: the
+   * reader's and the buttons' value never goes over the person's; recorded ('base', undoable). placeId null: none.
+   */
+  setBase(worldId, groupId, placeId, meta = {}, { force = false } = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const g = doc.entities.find((x) => x.entityId === groupId && x.type === 'group');
+    if (!g) throw new ArchiveError(404, '집단을 찾지 못했습니다.');
+    if (placeId != null && !doc.entities.some((x) => x.entityId === placeId && x.type === 'place')) throw new ArchiveError(400, '본거지는 장소여야 합니다.');
+    if (!force && g.sources?.base === 'manual') return null;
+    const before = g.base || null;
+    const after = placeId || null;
+    if (before === after && !(force && g.sources?.base !== 'manual')) return null;
+    if (after) g.base = after; else delete g.base;
+    g.sources = { ...(g.sources || {}) };
+    if (force) g.sources.base = 'manual';
+    else if (after) g.sources.base = 'auto';
+    else delete g.sources.base;
+    g.revision++;
+    g.updatedAt = now();
+    this.writeJson(this.entityFile(worldId), doc);
+    const nameOf = (id) => doc.entities.find((x) => x.entityId === id)?.name || '';
+    const c = { id: randomUUID(), at: g.updatedAt, by: force ? 'person' : meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId: groupId, entityIds: [groupId, after || before].filter(Boolean), name: g.name, type: 'group', action: 'base', before, after, beforeName: nameOf(before), afterName: nameOf(after), evidence: meta.evidence || '' };
+    this.pushHistory(worldId, [c]);
+    return c;
+  }
+
+  /**
+   * The place a group stands for, to put places in: its 본거지, or — when it has none — a place made from one of its
+   * other names that names a place (「호그와트 성」 · 「Hogwarts Castle」 of 「호그와트 마법학교」): that place is made
+   * (auto, recorded), those names move to it ('alias-move') and it becomes the 본거지. null when there is none.
+   */
+  basePlace(worldId, groupId, meta = {}) {
+    const doc = this.readEntities(worldId);
+    const g = doc.entities.find((x) => x.entityId === groupId && x.type === 'group');
+    if (!g) return null;
+    if (g.base && doc.entities.some((x) => x.entityId === g.base && x.type === 'place')) return g.base;
+    const placeish = (g.aliases || []).filter((a) => PLACE_ALIAS.test(String(a).trim()));
+    const ko = placeish.find((a) => /\p{Script=Hangul}/u.test(a)) || placeish[0];
+    if (!ko || doc.entities.length >= ENTITY_MAX) return null;
+    const t = now();
+    const by = meta.by || 'location-fill';
+    const place = {
+      entityId: randomUUID(), type: 'place', name: ko, aliases: placeish.filter((a) => a !== ko), description: '', fields: {}, extra: [], pinned: false,
+      sources: {}, status: 'confirmed', provenance: { source: 'auto', by, roomId: null, evidence: '「' + g.name + '」의 다른 이름' }, revision: 1, createdAt: t, updatedAt: t,
+    };
+    doc.entities.push(place);
+    g.aliases = g.aliases.filter((a) => !placeish.includes(a));
+    g.revision++;
+    g.updatedAt = t;
+    this.writeJson(this.entityFile(worldId), doc);
+    this.pushHistory(worldId, [
+      { id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: place.entityId, name: place.name, type: 'place', action: 'create', evidence: place.provenance.evidence },
+      ...placeish.map((a) => ({ id: randomUUID(), at: t, by, roomId: null, messageIds: [], entityId: g.entityId, entityIds: [g.entityId, place.entityId], name: g.name, type: 'group', action: 'alias-move', alias: a, to: place.name })),
+    ]);
+    this.setBase(worldId, g.entityId, place.entityId, { by, evidence: place.provenance.evidence });
+    return place.entityId;
+  }
+
+  /**
+   * 장소 위치, by code (no model): a place with no place around it yet whose 「위치·소속」 칸 begins with another
+   * place's name (or a group's — then the group's 본거지) is in that place (「호그와트 지하, 옛 회랑 너머」 → 호그와트
+   * 지하). Not when the words after the name say beside, under, beyond … (「검은 호수 아래」 is not in the lake).
+   * Returns { relations: changes, left: [place ids still alone] }.
+   */
+  linkPlaces(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const by = meta.by || 'location-fill';
+    const insideOf = (doc) => new Set(doc.relations.filter((r) => r.type === '위치').map((r) => r.from));
+    let doc = this.readEntities(worldId);
+    const found = [];
+    for (const p of doc.entities.filter((e) => e.type === 'place' && !insideOf(doc).has(e.entityId))) {
+      const seg = String(p.fields?.location || '').split(/[,，;]/)[0].trim();
+      if (!seg) continue;
+      const k = squashName(seg);
+      let best = null;
+      for (const o of doc.entities) {
+        if (o.entityId === p.entityId || (o.type !== 'place' && o.type !== 'group')) continue;
+        for (const n of [o.name, ...(o.aliases || [])]) {
+          const nk = squashName(n);
+          if (nk.length < 2 || !k.startsWith(nk)) continue;
+          if (!best || nk.length > best.len) best = { o, len: nk.length, name: n };
+        }
+      }
+      if (!best) continue;
+      // what comes after the name: 「아래 · 옆 · 너머 …」 is near it, not in it
+      const after = seg.slice(seg.indexOf(best.name) >= 0 ? seg.indexOf(best.name) + best.name.length : 0);
+      if (NOT_INSIDE.test(after)) continue;
+      // 「호그와트 급행열차 3호차」 is not in 호그와트: the name with the next word names something else the world has
+      const next = after.trim().split(/\s+/)[0];
+      if (next && doc.entities.some((x) => x !== p && x !== best.o && squashName(x.name).startsWith(squashName(best.name + next)))) continue;
+      found.push({ p, o: best.o });
+    }
+    const rels = [];
+    for (const { p, o } of found) {
+      const to = o.type === 'place' ? o.entityId : this.basePlace(worldId, o.entityId, { by });
+      if (!to || to === p.entityId) continue;
+      rels.push({ from: p.entityId, to, type: '위치', note: '', evidence: '위치·소속: ' + p.fields.location });
+    }
+    const changes = this.applyRelations(worldId, rels, { ...meta, by });
+    doc = this.readEntities(worldId);
+    const inside = insideOf(doc);
+    return { relations: changes, left: doc.entities.filter((e) => e.type === 'place' && !inside.has(e.entityId)).map((e) => e.entityId) };
   }
 
   // ---------------------------------------------------------------- 적용되는 곳 (v0.5.0 C)
@@ -1362,6 +1479,7 @@ class Archive {
     const moved = [];
     for (const e of doc.entities) {
       if (e.appliesTo === dropId) e.appliesTo = keepId; // v0.5.0 C
+      if (e.base === dropId) e.base = keepId; // v0.5.0 E
       if (e.timetable?.ownerId === dropId) e.timetable.ownerId = keepId; // v0.5.0 B
     }
     for (const r of doc.relations) {

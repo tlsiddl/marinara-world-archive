@@ -132,6 +132,7 @@ function buildPrompt(world, entities, part, cast, glossary = []) {
 ${KIND_GUIDE}
 - rule·system·history 구별: 지켜야 하는 것(어기면 벌·꾸중을 받는 법·제도·학교 규칙)은 rule, 세계가 그렇게 돌아가는 원리(마법·능력이 작동하는 방식, 화폐·경제, 점수가 매겨지는 방식)는 system, 이야기 전에 이미 끝난 과거의 일은 history다. 예: 「밤 10시 이후 기숙사 밖 금지」는 rule, 「마법은 지팡이 없이 쓰면 힘이 흩어진다」는 system, 「100년 전 두 왕국의 전쟁」은 history.
 - rule·system에는 where(적용되는 곳)를 적는다: 그 규칙·원리가 특정 장소나 집단에서만 통하면 그 장소·집단 이름([이미 있는 항목]이나 items의 이름 그대로 — 예: 기숙사 암호는 그 기숙사, 교실 규칙은 그 학교), 세계 어디서나 통한다는 게 분명하면(법·화폐·마법의 원리처럼) "세계 전체", 어디 것인지 근거로 알 수 없으면 빈 문자열. 이름이 같아도 적용되는 곳이 다르면 다른 항목이다.
+- group에는 근거가 있으면 base(본거지)를 적는다: 그 집단이 머무는 장소 이름(예: 기숙사 → 그 기숙사 건물, 가문 → 그 저택). 없으면 빈 문자열.
 - custom(기타)은 위 어디에도 안 맞을 때만 쓴다. 무리·행렬·조직은 group, 지켜야 하는 관례·금기·법은 rule, 작동 원리는 system, 정해진 때에 돌아오는 날·행사는 schedule, 이야기 전의 과거 일은 history다.
 
 각 항목:
@@ -160,6 +161,7 @@ ${fieldGuide()}
 관계: 이름이 있는 두 항목(인물·장소·집단 — 이미 있는 항목이거나 이번 items에 적은 항목) 사이의 오래가는 관계를 relations에 적는다.
 {"from":"항목 이름","to":"항목 이름","type":"${REL_TYPES.join('|')}","note":"짧은 설명(예: 남매, 기숙사 사감)","was":"전에 있던 관계가 끝났으면 그 종류(예: 연인), 아니면 null","evidence":[{"n":"12.3","q":"핵심 구절"}]}
 - 두 항목 이름은 [이미 있는 항목]이나 items에 있는 이름 그대로 쓴다. 근거 문장에는 두 항목 중 하나 이상의 이름이 나와야 한다. 「○○의 누나」처럼 이름 없이 설명으로만 불린 사람과의 관계는 적지 않는다. 카드가 있는 인물과의 관계는 적지 않는다.
+- 새 장소(place)를 적을 때 그 장소가 다른 장소 안에 있다는 근거가 있으면 위치 관계(from이 안쪽)를 꼭 함께 적는다. 바깥이 학교·가문 같은 집단뿐이면 그 집단의 본거지 장소를 바깥으로 쓴다.
 - 위치는 A(from)가 B(to) 안에 있을 때만(이어져 있거나 가깝거나 통로로 통하는 것은 위치가 아니다), 소속은 인물이 집단에 속하거나 작은 무리가 큰 집단에 속할 때(from이 작은 쪽) 쓴다. 인물이 어떤 장소에서 일하거나 사는 것은 관계가 아니라 그 인물의 소속·배경 칸에 쓴다. 가족·연인·스승·제자는 인물끼리만. 한 번 같이 있었던 것은 관계가 아니다.
 - 관계가 바뀌었으면(헤어짐, 등 돌림) 지금 관계를 적고 was에 끝난 관계를 적는다.
 
@@ -345,6 +347,8 @@ function checkItems(parsed, part, cast) {
       memo: typeof it.memo === 'string' ? it.memo : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
+      // v0.5.0 E: group — the place it is at (본거지), a name
+      base: it.type === 'group' && typeof it.base === 'string' ? clip(it.base.trim(), 80) : '',
       evidence: clip(found.map((p) => p.text).join(' / '), 300),
       evidenceAt: found.map((p) => ({ messageId: p.messageId, sentence: p.sentence })),
     });
