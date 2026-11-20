@@ -220,4 +220,31 @@ function describedPairs(entities, relations = [], skip = () => false) {
   return out;
 }
 
-module.exports = { words, forms, whySame, findPairs, describedPairs, TITLE_WORDS };
+/** A name that is only a 종: another person's 종 is it, or ends in it (「크니즐」 and 「하프 크니즐」). */
+function speciesName(name, species) {
+  const plain = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
+  const n = plain(name);
+  const sp = String(species || '').trim();
+  if (n.length < 2 || !sp) return false;
+  return plain(sp) === n || plain(sp.split(/\s+/).at(-1)) === n;
+}
+
+/**
+ * 「크니즐」: a person setting that is only a 종 name (made before the reader was told not to) — suggested as possibly
+ * the person whose 종 it is (「베아트릭스」, 종 하프 크니즐). Never merged by itself; the named one comes first.
+ */
+function speciesPairs(entities, skip = () => false) {
+  const people = entities.filter((e) => e.type === 'person');
+  const out = [];
+  for (const p of people) {
+    const sp = String(p.fields?.species || '').trim();
+    if (!sp) continue;
+    for (const s of people) {
+      if (s === p || !speciesName(s.name, sp) || skip(p.entityId, s.entityId)) continue;
+      out.push({ a: p.entityId, b: s.entityId, why: `「${s.name}」은(는) 종 이름일 수 있음 (${p.name}의 종: ${sp})` });
+    }
+  }
+  return out;
+}
+
+module.exports = { words, forms, whySame, findPairs, describedPairs, speciesPairs, speciesName, TITLE_WORDS };

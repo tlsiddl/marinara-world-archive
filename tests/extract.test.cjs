@@ -461,3 +461,31 @@ test('round trip: glossary → archive names → glossary changes nothing the se
   assert.equal(s.listHistory(w.worldId).length, historyBefore);
   assert.deepEqual(service.names('room').names, names);
 });
+
+test('a person item that is only a 종 name is not made — next to the 종 in the same batch, or one the world has; old ones are only suggested', async (t) => {
+  const { checkItems } = require('../world-archive/lib/extract.cjs');
+  const part = { batch: [{ id: 'm1', number: 1, speaker: '나', content: '베아트릭스는 하프 크니즐이다. 크니즐이 하품했다.', sentences: ['베아트릭스는 하프 크니즐이다.', '크니즐이 하품했다.'] }], context: [] };
+  const got = checkItems({ items: [
+    { type: 'person', name: '베아트릭스', fields: { species: { v: '하프 크니즐', n: ['1.1'] } }, evidence: [{ n: '1.1', q: '베아트릭스는' }] },
+    { type: 'person', name: '크니즐', evidence: [{ n: '1.2', q: '크니즐이' }] },
+  ] }, part, []);
+  assert.deepEqual(got.items.map((i) => i.name), ['베아트릭스']);
+  assert.deepEqual(got.dropped, [{ name: '크니즐', why: 'species name only' }]);
+  // Read later: the world already has 베아트릭스 (종 하프 크니즐); a new 「크니즐」 is not made, she is still updated.
+  const messages = [msg(0, '안녕'), msg(1, '크니즐이 또 하품했다. 베아트릭스가 귀를 세웠다.'), msg(2, '그래?'), msg(3, '응.'), msg(4, '내일 봐.'), msg(5, '잘 자.')];
+  const reply = JSON.stringify({ items: [
+    { type: 'person', name: '크니즐', evidence: [{ n: '2.1', q: '크니즐이' }] },
+    { type: 'person', name: '베아트릭스', fields: { personality: { v: '귀를 세움', n: ['2.2'] } }, evidence: [{ n: '2.2', q: '베아트릭스가' }] },
+  ] });
+  const { s, w } = setup(t, messages, [reply]);
+  const cat = s.createEntity(w.worldId, { type: 'person', name: '베아트릭스', fields: { species: '하프 크니즐' } });
+  const job = await service.runRoom('room', { all: true });
+  assert.equal(job.dropped, 1);
+  assert.deepEqual(s.listEntities(w.worldId).map((e) => e.name), ['베아트릭스']);
+  // One made before this rule: only suggested as possibly the one with that 종 (never merged by itself).
+  const old = s.createEntity(w.worldId, { type: 'person', name: '크니즐' });
+  const pair = s.listDuplicates(w.worldId).find((p) => p.b === old.entityId);
+  assert.equal(pair.a, cat.entityId);
+  assert.match(pair.why, /종 이름일 수 있음/);
+  assert.equal(s.listEntities(w.worldId).length, 2, 'nothing merged');
+});
