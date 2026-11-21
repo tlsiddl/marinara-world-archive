@@ -25,6 +25,18 @@ const TOPICS = ['금지·예절', '돈·거래', '시간·영업', '방법·기�
 /** v0.7.0 3: 정리 언어 — auto (the room's 기억 서재 기억 언어, else ko) · ko · en. */
 const SUMMARY_LANGS = ['auto', 'ko', 'en'];
 const TRANSLATION_MAX = 6000;
+/**
+ * v0.7.8 C: a 머리색 · 눈색 (an animal's 털 · 깃털) value names a colour — not a state like 「hair that needs cutting」 —
+ * and is short (a longer one is cut at its first clause by the filler, never in the middle of a word).
+ */
+const COLOUR_EN = /\b(?:black|brown|blond|blonde|brunette|red|ginger|auburn|grey|gray|silver|white|gold|golden|dark|light|fair|mousy|mousey|chestnut|copper|sandy|raven|platinum|ash|honey|strawberry|pale|hazel|blue|green|amber|violet|purple|pink|orange|tawny|tabby|tortoiseshell|patchwork|ebony|jet|steel|iron|bald|flaxen|russet|crimson|scarlet|yellow|cream|tan|inky?|coal|snowy|pewter|bronze|rust|mahogany|caramel|cinnamon|toffee|sable|pearl|obsidian|colou?rless)\b|-(?:brown|blond|blonde|red|grey|gray|gold|black|white|green|blue)\b/i;
+const COLOUR_KO = /색|검|갈|금발|금빛|붉|빨|흰|하얀|백발|은빛|은발|회|파랗|파란|푸른|초록|녹|호박|밤|흑|적|황|대머리|민머리/;
+const LOOK_MAX = 60;
+function looksColour(v) {
+  const t = String(v || '').trim();
+  if (!t || t.length > LOOK_MAX) return false;
+  return /[가-힣]/.test(t) ? COLOUR_KO.test(t) : COLOUR_EN.test(t);
+}
 /** v0.7.6: person fields a world turns on. */
 const PERSON_OPTIONAL = ['house', 'year'];
 /** v0.7.6: a year said in a name (「Slytherin first-years」 · 「1학년」 · 「Year 2」 · 「3rd-year」) → its number. */
@@ -38,7 +50,33 @@ function yearIn(text) {
 }
 /** v0.7.6: a house group's own name (「Slytherin House」 → Slytherin, 「슬리데린 기숙사」 → 슬리데린). */
 const houseName = (n) => String(n || '').replace(/^\s*house of\s+/i, '').replace(/\s+house\s*$/i, '').replace(/\s*기숙사\s*$/, '').trim();
-const HOUSE_GROUP = /\bhouse\s*$|^\s*house of\b|기숙사\s*$/i;
+const HOUSE_GROUP = /\bhouse\s*$|기숙사\s*$/i;
+/** v0.7.8 A: 「House of X」 · 「X 가문」 · 「X family」 are a family, never a school house (even right under a school). */
+const FAMILY_GROUP = /^\s*house of\b|\bfamil(?:y|ies)\b|\bclan\b|\bdynasty\b|가문|집안|일가/i;
+/**
+ * v0.7.6 → v0.7.8: what code would write for 기숙사 · 학년, person by person — from the person's 소속 groups and the
+ * groups above them (a group named 「… House」 · 「… 기숙사」, or a group right under a school, never a family), and a
+ * year said in those names or in the 소속 칸. Map entityId → { house?, year? } ({ value, evidence }).
+ */
+function houseYearPlan(doc) {
+  const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+  const up = new Map();
+  for (const r of doc.relations) if (r.type === '소속' && byId.get(r.from)?.type === 'group' && byId.get(r.to)?.type === 'group') up.set(r.from, [...(up.get(r.from) || []), r.to]);
+  const chain = (id) => { const out = []; const seen = new Set([id]); const q = [id]; while (q.length) { const x = q.shift(); out.push(x); for (const u of up.get(x) || []) if (!seen.has(u)) { seen.add(u); q.push(u); } } return out; };
+  const isHouse = (g) => !FAMILY_GROUP.test(g.name) && (HOUSE_GROUP.test(g.name) || (up.get(g.entityId) || []).some((p) => SCHOOL_GROUP.test([byId.get(p)?.name, ...(byId.get(p)?.aliases || [])].join(' '))));
+  const plan = new Map();
+  for (const p of doc.entities.filter((e) => e.type === 'person')) {
+    const groups = doc.relations.filter((r) => r.type === '소속' && r.from === p.entityId && byId.get(r.to)?.type === 'group').flatMap((r) => chain(r.to)).map((id) => byId.get(id));
+    const out = {};
+    const house = groups.find(isHouse);
+    if (house && houseName(house.name)) out.house = { value: houseName(house.name), evidence: `소속: ${house.name}` };
+    const yearFrom = groups.map((g) => [g, yearIn(g.name)]).find(([, y]) => y);
+    const y = yearFrom ? yearFrom[1] : yearIn(p.fields?.affiliation);
+    if (y) out.year = { value: y, evidence: yearFrom ? `소속: ${yearFrom[0].name}` : `소속 칸: ${p.fields.affiliation}` };
+    plan.set(p.entityId, out);
+  }
+  return plan;
+}
 const SCHOOL_GROUP = /school|academy|college|hogwarts|학교|학원|아카데미/i;
 /** v0.7.4 1: money (화폐 · currency …) is never 「한 번만 나왔어요」 either. */
 const ONCE_MONEY = /(화폐|통화|환율|갈레온)|\b(?:currency|currencies|money|coinage|exchange rates?|galleons?|sickles?|knuts?)\b/i;
@@ -1314,7 +1352,7 @@ class Archive {
       const have = new Set(doc.relations.map(relKey));
       const ids = new Set(doc.entities.map((x) => x.entityId));
       for (const r of c.relations || []) if (validRelation(r) && ids.has(r.from) && ids.has(r.to) && !have.has(relKey(r))) doc.relations.push(structuredClone(r));
-    } else if (c.action === 'relation-add' || c.action === 'relation-note' || c.action === 'relation-remove' || c.action === 'relation-flip') {
+    } else if (c.action === 'relation-add' || c.action === 'relation-note' || c.action === 'relation-remove' || c.action === 'relation-flip' || c.action === 'relation-differs') {
       this.undoRelation(doc, c, later);
     } else if (c.action === 'delete') {
       if (!validEntity(c.entity)) throw broken('변경 기록');
@@ -1983,28 +2021,86 @@ class Archive {
     const on = new Set(world.personFields || []);
     if (!on.size) return [];
     const doc = this.readEntities(worldId);
-    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
-    const up = new Map();
-    for (const r of doc.relations) if (r.type === '소속' && byId.get(r.from)?.type === 'group' && byId.get(r.to)?.type === 'group') up.set(r.from, [...(up.get(r.from) || []), r.to]);
-    const chain = (id) => { const out = []; const seen = new Set([id]); const q = [id]; while (q.length) { const x = q.shift(); out.push(x); for (const u of up.get(x) || []) if (!seen.has(u)) { seen.add(u); q.push(u); } } return out; };
-    const isHouse = (g) => HOUSE_GROUP.test(g.name) || (up.get(g.entityId) || []).some((p) => SCHOOL_GROUP.test([byId.get(p)?.name, ...(byId.get(p)?.aliases || [])].join(' ')));
+    const plan = houseYearPlan(doc);
     const t = now();
     const changes = [];
     for (const p of doc.entities.filter((e) => e.type === 'person')) {
-      const groups = doc.relations.filter((r) => r.type === '소속' && r.from === p.entityId && byId.get(r.to)?.type === 'group').flatMap((r) => chain(r.to)).map((id) => byId.get(id));
-      const put = (key, value, evidence) => {
-        if (!on.has(key) || !value || p.sources?.[key] === 'manual' || String(p.fields?.[key] || '').trim()) return;
-        p.fields = { ...(p.fields || {}), [key]: value };
+      const put = (key, x) => {
+        if (!x || !on.has(key) || p.sources?.[key] === 'manual' || String(p.fields?.[key] || '').trim()) return;
+        p.fields = { ...(p.fields || {}), [key]: x.value };
         p.sources = { ...(p.sources || {}), [key]: 'auto' };
         p.revision++;
         p.updatedAt = t;
-        changes.push({ id: randomUUID(), at: t, by: meta.by || 'roster', roomId: null, messageIds: [], entityId: p.entityId, name: p.name, type: 'person', action: 'field', key, before: '', after: value, evidence, why: '소속 · 명단에서' });
+        changes.push({ id: randomUUID(), at: t, by: meta.by || 'roster', roomId: null, messageIds: [], entityId: p.entityId, name: p.name, type: 'person', action: 'field', key, before: '', after: x.value, evidence: x.evidence, why: '소속 · 명단에서' });
       };
-      const house = groups.find(isHouse);
-      if (house) put('house', houseName(house.name), `소속: ${house.name}`);
-      const yearFrom = groups.map((g) => [g, yearIn(g.name)]).find(([, y]) => y);
-      const y = yearFrom ? yearFrom[1] : yearIn(p.fields?.affiliation);
-      if (y) put('year', y, yearFrom ? `소속: ${yearFrom[0].name}` : `소속 칸: ${p.fields.affiliation}`);
+      put('house', plan.get(p.entityId)?.house);
+      put('year', plan.get(p.entityId)?.year);
+    }
+    if (changes.length) {
+      this.writeJson(this.entityFile(worldId), doc);
+      this.pushHistory(worldId, changes);
+    }
+    return changes;
+  }
+
+  /**
+   * v0.7.8 A: 기숙사 values code wrote that today's rule would not write (a family taken for a house) go back through
+   * the history, one undo each. Only code's (not the person's), and only while the value is still the one code wrote.
+   */
+  undoWrongHouses(worldId) {
+    const doc = this.readEntities(worldId);
+    const plan = houseYearPlan(doc);
+    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+    const undone = [];
+    for (const c of this.readHistory(worldId).changes) {
+      if (c.action !== 'field' || c.key !== 'house' || c.by === 'person' || c.undoneAt) continue;
+      const e = byId.get(c.entityId);
+      if (!e || e.fields?.house !== c.after || e.sources?.house === 'manual') continue;
+      if (plan.get(c.entityId)?.house?.value === c.after) continue;
+      try { this.undoChange(worldId, c.id); undone.push({ name: c.name, value: c.after }); } catch { /* changed since: left for the person */ }
+    }
+    return undone;
+  }
+
+  /**
+   * v0.7.8 C: 머리색 · 눈색 code wrote that are not a colour (「hair that needs cutting」) or were cut at 60 letters by
+   * v0.7.6 · v0.7.7 go back through the history, one undo each. Only code's, only while the value is still that one.
+   */
+  undoBadLooks(worldId) {
+    const doc = this.readEntities(worldId);
+    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+    const undone = [];
+    for (const c of this.readHistory(worldId).changes) {
+      if (c.action !== 'field' || (c.key !== 'hair' && c.key !== 'eyes') || c.by === 'person' || c.undoneAt) continue;
+      const e = byId.get(c.entityId);
+      if (!e || e.fields?.[c.key] !== c.after || e.sources?.[c.key] === 'manual') continue;
+      if (looksColour(c.after) && String(c.after).length < LOOK_MAX) continue;
+      try { this.undoChange(worldId, c.id); undone.push({ name: c.name, key: c.key, value: c.after }); } catch { /* changed since: left for the person */ }
+    }
+    return undone;
+  }
+
+  /**
+   * v0.7.8 B: 위치 relations code turned round before (v0.7.7 and earlier) — kept as they are now, marked
+   * 「서로 다른 말을 해요」 with the other reading and its evidence, for the person to choose. Recorded, undoable.
+   */
+  flipsToDiffers(worldId, meta = {}) {
+    const doc = this.readEntities(worldId);
+    const history = this.readHistory(worldId).changes;
+    const by = meta.by || 'recheck';
+    const t = now();
+    const changes = [];
+    for (const r of doc.relations) {
+      if (r.type !== '위치' || r.source === 'manual' || r.differs) continue;
+      const flips = history.filter((c) => c.action === 'relation-flip' && c.by !== 'person' && !c.undoneAt && c.relation?.relationId === r.relationId).reverse();
+      const said = flips.find((c) => c.after?.from === r.to && c.after?.to === r.from);
+      const was = flips.find((c) => c.before?.from === r.to && c.before?.to === r.from);
+      if (!said && !was) continue;
+      const evidence = String(said ? said.evidence || '' : was.relation?.evidence || '').slice(0, 300);
+      const differs = { from: r.to, to: r.from, evidence, by, at: t };
+      changes.push({ ...this.relationLog(doc, r, 'relation-differs', by, meta), before: null, after: differs, evidence });
+      r.differs = differs;
+      r.updatedAt = t;
     }
     if (changes.length) {
       this.writeJson(this.entityFile(worldId), doc);
@@ -2439,6 +2535,8 @@ class Archive {
     if (!r) throw new ArchiveError(404, '관계를 찾지 못했습니다.');
     const before = structuredClone(r);
     Object.assign(r, this.relationInput(doc, body, r), { source: 'manual', updatedAt: now() });
+    // v0.7.8 B: 「서로 다른 말을 해요」 settled by the person — { differs: null } (keep as it is), or by turning it round
+    if (body.differs === null || before.from !== r.from || before.to !== r.to) delete r.differs;
     if (doc.relations.some((x) => x !== r && relKey(x) === relKey(r))) throw new ArchiveError(409, '같은 관계가 이미 있습니다.');
     this.writeJson(this.entityFile(worldId), doc);
     if (before.note !== r.note && before.type === r.type) {
@@ -2500,7 +2598,17 @@ class Archive {
       const same = doc.relations.find((x) => relKey(x) === relKey(raw));
       if (same) {
         if (same.source === 'manual') continue;
-        // A kind with a direction (소속 · 위치 · 스승·제자) read the other way round: the newer reading wins.
+        // v0.7.8 B: 위치 read the other way round is never turned by code — the relation stays, marked
+        // 「서로 다른 말을 해요」 (differs: the other reading) for the person to choose. Turning it is the person's.
+        if (same.type === '위치' && same.from === raw.to && same.to === raw.from) {
+          if (same.differs?.from === raw.from && same.differs?.to === raw.to) continue;
+          const differs = { from: raw.from, to: raw.to, evidence, by, at: t };
+          changes.push({ ...this.relationLog(doc, same, 'relation-differs', by, meta), before: same.differs ? structuredClone(same.differs) : null, after: differs, evidence });
+          same.differs = differs;
+          same.updatedAt = t;
+          continue;
+        }
+        // A kind with a direction (소속 · 스승·제자) read the other way round: the newer reading wins.
         if (DIRECTED.has(same.type) && same.from === raw.to && same.to === raw.from) {
           changes.push({ ...this.relationLog(doc, same, 'relation-flip', by, meta), before: { from: same.from, to: same.to }, after: { from: raw.from, to: raw.to }, evidence });
           same.from = raw.from;
@@ -3368,6 +3476,10 @@ class Archive {
       if (!cur) throw new ArchiveError(409, '이미 지워진 관계입니다.');
       if (cur.type !== r.type || (c.by !== 'person' && (cur.source === 'manual' || cur.note !== r.note))) throw new ArchiveError(409, later);
       doc.relations.splice(doc.relations.indexOf(cur), 1);
+    } else if (c.action === 'relation-differs') {
+      if (!cur || JSON.stringify(cur.differs || null) !== JSON.stringify(c.after || null)) throw new ArchiveError(409, later);
+      if (c.before) cur.differs = structuredClone(c.before); else delete cur.differs;
+      cur.updatedAt = now();
     } else if (c.action === 'relation-flip') {
       if (!cur || cur.from !== c.after?.from || cur.to !== c.after?.to) throw new ArchiveError(409, later);
       cur.from = c.before.from;
@@ -3684,6 +3796,8 @@ class Archive {
 module.exports = {
   TOPICS,
   PERSON_OPTIONAL,
+  looksColour,
+  LOOK_MAX,
   SUMMARY_LANGS,
   STATUS_OFF,
   nameLike,

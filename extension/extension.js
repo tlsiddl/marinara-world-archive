@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.7.7';
+  const VERSION = '0.7.8';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -537,7 +537,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 
   // ------------------------------------------------------------------ pieces
   // v0.7.6: an optional field (기숙사 · 학년) only in a world that turns it on
-  const defs = (type) => (st.fields[type] || []).filter((x) => !x.optional || (world()?.personFields || []).includes(x.key));
+  // v0.7.8 C: an animal (its 종 names one) has 털 · 깃털 where a person has 머리색 — the same key, another label
+  const ANIMAL_RE = /\b(?:cats?|kittens?|dogs?|pupp(?:y|ies)|hounds?|wol(?:f|ves)|fox(?:es)?|owls?|ravens?|crows?|snakes?|serpents?|rats?|mice|mouse|toads?|phoenix(?:es)?|dragons?|stags?|deer|bears?|rabbits?|hares?|horses?|ponies|pony|kneazles?|half-kneazle|leopards?|panthers?|birds?|ferrets?)\b|고양이|강아지|늑대|여우|부엉이|올빼미|까마귀|뱀|쥐|두꺼비|불사조|드래곤|사슴|곰|토끼|니즐|표범|새$|개$|말$|용$/i;
+  const isAnimal = (e) => ANIMAL_RE.test(String(e?.fields?.species || '').trim());
+  const defs = (type, e) => (st.fields[type] || []).filter((x) => !x.optional || (world()?.personFields || []).includes(x.key)).map((x) => (x.key === 'hair' && isAnimal(e) ? { ...x, label: '털 · 깃털' } : x));
   const count = (type) => st.entities.filter((e) => e.type === type).length;
   const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`; };
   const shortId = (id) => String(id || '').slice(0, 4).toUpperCase();
@@ -928,7 +931,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 
   function detailHtml(e) {
     const k = KIND[e.type];
-    const d = defs(e.type);
+    const d = defs(e.type, e);
     const f = e.fields || {};
     const src = e.sources || {};
     // v0.7.0 6: no 「자동」 stamp by each field (the bottom says where it came from); 숨은 설정 as a dashed capsule
@@ -955,6 +958,9 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     // v0.6.2 ②: a rule or system one batch spoke of — kept, not in {{세계}}
     const once = isOnce(e)
       ? '<div class="sec"><small>한 번 나옴</small><p>대화의 한 묶음에서만 나왔어요. 설정집에는 두고 {{세계}}에는 넣지 않아요. 다시 나오거나 고정하면 들어가요.</p></div>' : '';
+    // v0.7.8 B: a 위치 relation read both ways — it stays as it is until the person chooses
+    const nameOfRel = (id) => st.entities.find((x) => x.entityId === id)?.name || '?';
+    const relDiffers = (st.relations || []).filter((r) => r.differs && (r.from === e.entityId || r.to === e.entityId)).map((r) => `<div class="sec"><small>${esc(r.type)} · 서로 다른 말을 해요</small><p>지금: <b>${esc(nameOfRel(r.from))}</b> → <b>${esc(nameOfRel(r.to))}</b> 안 ↔ 다른 말: <b>${esc(nameOfRel(r.differs.from))}</b> → <b>${esc(nameOfRel(r.differs.to))}</b> 안</p>${r.differs.evidence ? `<p class="ev">${quoted(r.differs.evidence)}</p>` : ''}${st.readOnly ? '' : `<div class="row"><button class="quiet" type="button" data-act="rel-keep" data-id="${esc(r.relationId)}">지금대로 두기</button><button class="quiet" type="button" data-act="rel-flip" data-id="${esc(r.relationId)}">방향 바꾸기</button></div>`}</div>`).join('');
     const differs = Object.entries(e.differs || {}).map(([k, x]) => `<div class="sec"><small>${esc(d.find((y) => y.key === k)?.label || k)} · 서로 다른 말을 해요</small><p>${esc(e.fields?.[k] || '')} ↔ ${esc(x.value)}</p>${x.evidence ? `<p class="ev">${quoted(x.evidence)}</p>` : ''}</div>`).join('');
     const rumors = Object.entries(e.rumors || {}).map(([k, r]) => `<div class="sec"><small>${esc(d.find((x) => x.key === k)?.label || k)} · 확인 안 됨 · ${esc(r.by || '소문')}의 말</small><p>${esc(r.value)}</p></div>`).join('');
     // 관계: both directions; a chip opens the other setting.
@@ -982,7 +988,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}${e.nameCheck ? `<span class="pill" title="근거 문장에는 「${esc(e.nameCheck.said)}」이(가) 나옵니다. 이름을 확인해 주세요(고치면 사라집니다).">이름 확인 필요</span>` : ''}
         </div>
         ${facts ? `<div class="fact-caps">${facts}</div>` : ''}
-        ${once}${differs}${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}
+        ${once}${differs}${relDiffers}${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}
         ${f.state ? `<div class="state"><small>지금${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
         ${relSec}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
@@ -1099,7 +1105,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const isNew = st.editing === 'new';
     const v = st.draft || e || {};
     const k = KIND[type];
-    const d = defs(type);
+    const d = defs(type, v);
     const f = v.fields || {};
     const lines = d.filter((x) => x.kind === 'line');
     const texts = d.filter((x) => x.kind === 'text' && x.key !== 'state');
@@ -1229,6 +1235,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     rename: (c) => `<b>${esc(c.before)}</b> → <b>${esc(c.after)}</b> · 번역 단어장의 이름으로`,
     'relation-add': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')}${c.relation?.note ? ` (${esc(c.relation.note)})` : ''}`,
     'relation-note': (c) => `관계 <b>${esc(c.name)}</b> · ${c.before ? `${esc(c.before)} → ` : ''}${esc(c.after)}`,
+    'relation-differs': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 서로 다른 말 — 그대로 둠`,
     'relation-flip': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 방향 바뀜`,
     'relation-remove': (c) => `관계 <b>${esc(c.name)}</b> · ${esc(c.relation?.type || '')} 끝남`,
     cell: (c) => `<b>${esc(c.name)}</b> · ${esc(String(c.key || '').replace('|', ' '))}: ${c.before ? `${esc(c.before)} → ` : ''}${c.after ? esc(c.after) : '지움'}${c.moved ? ` · 시간표로 옮김(${esc((st.fields[c.moved.type] || []).find((f) => f.key === c.moved.key)?.label || c.moved.key)} 칸에서)` : ''}`,
@@ -2120,6 +2127,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       await api('DELETE', `/worlds/${st.worldId}/relations/${b.dataset.id}`);
       await loadEntities();
     }, '관계를 뺐습니다. 기록에서 되돌릴 수 있습니다.'),
+    'rel-keep': (b) => run(async () => {
+      await api('PATCH', `/worlds/${st.worldId}/relations/${b.dataset.id}`, { differs: null });
+      await loadEntities();
+    }, '지금 방향 그대로 둡니다.'),
     'rel-flip': (b) => run(async () => {
       const x = (st.relations || []).find((y) => y.relationId === b.dataset.id);
       if (!x) return;
