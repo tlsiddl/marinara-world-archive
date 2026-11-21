@@ -25,6 +25,21 @@ const TOPICS = ['금지·예절', '돈·거래', '시간·영업', '방법·기�
 /** v0.7.0 3: 정리 언어 — auto (the room's 기억 서재 기억 언어, else ko) · ko · en. */
 const SUMMARY_LANGS = ['auto', 'ko', 'en'];
 const TRANSLATION_MAX = 6000;
+/** v0.7.6: person fields a world turns on. */
+const PERSON_OPTIONAL = ['house', 'year'];
+/** v0.7.6: a year said in a name (「Slytherin first-years」 · 「1학년」 · 「Year 2」 · 「3rd-year」) → its number. */
+const YEAR_WORD = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7 };
+function yearIn(text) {
+  const t = String(text || '');
+  let m = t.match(/\b(first|second|third|fourth|fifth|sixth|seventh)[- ]years?\b/i);
+  if (m) return String(YEAR_WORD[m[1].toLowerCase()]);
+  m = t.match(/\b([1-7])(?:st|nd|rd|th)[- ]years?\b/i) || t.match(/\byear\s*([1-7])\b/i) || t.match(/([1-7])\s*학년/);
+  return m ? m[1] : null;
+}
+/** v0.7.6: a house group's own name (「Slytherin House」 → Slytherin, 「슬리데린 기숙사」 → 슬리데린). */
+const houseName = (n) => String(n || '').replace(/^\s*house of\s+/i, '').replace(/\s+house\s*$/i, '').replace(/\s*기숙사\s*$/, '').trim();
+const HOUSE_GROUP = /\bhouse\s*$|^\s*house of\b|기숙사\s*$/i;
+const SCHOOL_GROUP = /school|academy|college|hogwarts|학교|학원|아카데미/i;
 /** v0.7.4 1: money (화폐 · currency …) is never 「한 번만 나왔어요」 either. */
 const ONCE_MONEY = /(화폐|통화|환율|갈레온)|\b(?:currency|currencies|money|coinage|exchange rates?|galleons?|sickles?|knuts?)\b/i;
 /** v0.7.2 E: a name that says a law (the same words as inject.cjs LAW_NAME). */
@@ -94,6 +109,12 @@ const FIELDS = {
     // 종: only a being that is not a person (고양이 · 부엉이 · 용). Empty means unknown, not "a person" (연동 v2).
     { key: 'species', label: '종', kind: 'line' },
     { key: 'age', label: '나이·생일', kind: 'line' },
+    // v0.7.6: short values taken from the 외형 (which stays as it is) — fixed keys the shell reads
+    { key: 'hair', label: '머리색', kind: 'line' },
+    { key: 'eyes', label: '눈색', kind: 'line' },
+    // v0.7.6: only in a world that turns them on (world.personFields) — a school world
+    { key: 'house', label: '기숙사', kind: 'line', optional: true },
+    { key: 'year', label: '학년', kind: 'line', optional: true },
     { key: 'affiliation', label: '소속', kind: 'line' },
     { key: 'appearance', label: '외형', kind: 'text' },
     { key: 'personality', label: '성격', kind: 'text' },
@@ -567,6 +588,7 @@ function validWorld(w) {
     (w.yearStart === undefined || (Number.isInteger(w.yearStart) && w.yearStart >= 1 && w.yearStart <= 12)) &&
     (w.nameStyle === undefined || ['auto', 'ko', 'original'].includes(w.nameStyle)) &&
     (w.summaryLang === undefined || SUMMARY_LANGS.includes(w.summaryLang)) &&
+    (w.personFields === undefined || (Array.isArray(w.personFields) && w.personFields.every((k) => PERSON_OPTIONAL.includes(k)))) &&
     (w.tail === undefined || isObject(w.tail)) &&
     (w.balance === undefined || (Array.isArray(w.balance) && w.balance.every((x) => typeof x === 'string'))) &&
     typeof w.createdAt === 'string' &&
@@ -808,6 +830,12 @@ class Archive {
       changed = true;
     }
     // v0.7.0 3: 정리 언어
+    // v0.7.6: 인물 추가 칸 (기숙사 · 학년) this world turns on
+    if (body.personFields !== undefined) {
+      if (!Array.isArray(body.personFields) || body.personFields.some((k) => !PERSON_OPTIONAL.includes(k))) throw new ArchiveError(400, `인물 추가 칸은 ${PERSON_OPTIONAL.join(' · ')} 중에서 고릅니다.`);
+      if (body.personFields.length) next.personFields = [...new Set(body.personFields)]; else delete next.personFields;
+      changed = true;
+    }
     if (body.summaryLang !== undefined) {
       if (!SUMMARY_LANGS.includes(body.summaryLang)) throw new ArchiveError(400, `정리 언어는 ${SUMMARY_LANGS.join(' · ')} 중 하나입니다.`);
       if (body.summaryLang === 'auto') delete next.summaryLang; else next.summaryLang = body.summaryLang;
@@ -834,6 +862,7 @@ class Archive {
     next.updatedAt = now();
     Object.assign(world, next);
     if (next.summaryLang === undefined) delete world.summaryLang; // 「자동」 is no value
+    if (next.personFields === undefined) delete world.personFields;
     this.writeJson(this.worldsFile, doc);
     return this.getWorld(worldId);
   }
@@ -1927,6 +1956,46 @@ class Archive {
     }
     if (dirty) this.writeJson(this.entityFile(worldId), doc);
     return n;
+  }
+
+  /**
+   * v0.7.6: 기숙사 · 학년 by code, in a world that turns them on: from the person's 소속 groups and the groups above them
+   * (a group named 「… House」 · 「… 기숙사」, or a group right under a school), and a year said in those names or in
+   * the 소속 칸. Only empty fields, never the person's. Recorded ('field', undoable). Returns the changes.
+   */
+  fillHouseYear(worldId, meta = {}) {
+    const world = this.getWorld(worldId);
+    const on = new Set(world.personFields || []);
+    if (!on.size) return [];
+    const doc = this.readEntities(worldId);
+    const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+    const up = new Map();
+    for (const r of doc.relations) if (r.type === '소속' && byId.get(r.from)?.type === 'group' && byId.get(r.to)?.type === 'group') up.set(r.from, [...(up.get(r.from) || []), r.to]);
+    const chain = (id) => { const out = []; const seen = new Set([id]); const q = [id]; while (q.length) { const x = q.shift(); out.push(x); for (const u of up.get(x) || []) if (!seen.has(u)) { seen.add(u); q.push(u); } } return out; };
+    const isHouse = (g) => HOUSE_GROUP.test(g.name) || (up.get(g.entityId) || []).some((p) => SCHOOL_GROUP.test([byId.get(p)?.name, ...(byId.get(p)?.aliases || [])].join(' ')));
+    const t = now();
+    const changes = [];
+    for (const p of doc.entities.filter((e) => e.type === 'person')) {
+      const groups = doc.relations.filter((r) => r.type === '소속' && r.from === p.entityId && byId.get(r.to)?.type === 'group').flatMap((r) => chain(r.to)).map((id) => byId.get(id));
+      const put = (key, value, evidence) => {
+        if (!on.has(key) || !value || p.sources?.[key] === 'manual' || String(p.fields?.[key] || '').trim()) return;
+        p.fields = { ...(p.fields || {}), [key]: value };
+        p.sources = { ...(p.sources || {}), [key]: 'auto' };
+        p.revision++;
+        p.updatedAt = t;
+        changes.push({ id: randomUUID(), at: t, by: meta.by || 'roster', roomId: null, messageIds: [], entityId: p.entityId, name: p.name, type: 'person', action: 'field', key, before: '', after: value, evidence, why: '소속 · 명단에서' });
+      };
+      const house = groups.find(isHouse);
+      if (house) put('house', houseName(house.name), `소속: ${house.name}`);
+      const yearFrom = groups.map((g) => [g, yearIn(g.name)]).find(([, y]) => y);
+      const y = yearFrom ? yearFrom[1] : yearIn(p.fields?.affiliation);
+      if (y) put('year', y, yearFrom ? `소속: ${yearFrom[0].name}` : `소속 칸: ${p.fields.affiliation}`);
+    }
+    if (changes.length) {
+      this.writeJson(this.entityFile(worldId), doc);
+      this.pushHistory(worldId, changes);
+    }
+    return changes;
   }
 
   applyTimetable(worldId, cells, meta = {}) {
@@ -3599,6 +3668,7 @@ class Archive {
 
 module.exports = {
   TOPICS,
+  PERSON_OPTIONAL,
   SUMMARY_LANGS,
   STATUS_OFF,
   nameLike,
