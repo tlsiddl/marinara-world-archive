@@ -1480,13 +1480,14 @@ class Archive {
     if (!g) return null;
     if (g.base && doc.entities.some((x) => x.entityId === g.base && x.type === 'place')) return g.base;
     const placeish = (g.aliases || []).filter((a) => PLACE_ALIAS.test(String(a).trim()));
-    const ko = placeish.find((a) => /\p{Script=Hangul}/u.test(a)) || placeish[0];
+    // v0.7.3: none of its other names is a place, but a 위치 칸 named it with a building word (meta.name)
+    const ko = placeish.find((a) => /\p{Script=Hangul}/u.test(a)) || placeish[0] || (typeof meta.name === 'string' && meta.name.trim() ? meta.name.trim().slice(0, 120) : null);
     if (!ko || doc.entities.length >= ENTITY_MAX) return null;
     const t = now();
     const by = meta.by || 'location-fill';
     const place = {
       entityId: randomUUID(), type: 'place', name: ko, aliases: placeish.filter((a) => a !== ko), description: '', fields: {}, extra: [], pinned: false,
-      sources: {}, status: 'confirmed', provenance: { source: 'auto', by, roomId: null, evidence: '「' + g.name + '」의 다른 이름' }, revision: 1, createdAt: t, updatedAt: t,
+      sources: {}, status: 'confirmed', provenance: { source: 'auto', by, roomId: null, evidence: placeish.length ? '「' + g.name + '」의 다른 이름' : '「' + g.name + '」 + 건물(위치 칸)' }, revision: 1, createdAt: t, updatedAt: t,
     };
     doc.entities.push(place);
     g.aliases = g.aliases.filter((a) => !placeish.includes(a));
@@ -1543,11 +1544,15 @@ class Archive {
       // 「호그와트 급행열차 3호차」 is not in 호그와트: the name with the next word names something else the world has
       const next = after.trim().split(/\s+/)[0];
       if (next && doc.entities.some((x) => x !== p && x !== best.o && squashName(x.name).startsWith(squashName(best.name + next)))) continue;
-      found.push({ p, o: best.o });
+      // the group's name with a building word after it (「Hogwarts Castle」 · 「호그와트 성」): the 본거지 it can be made as
+      const building = best.o.type === 'group' && next && GROUP_BUILDING.includes(next.toLowerCase().replace(/[^\p{L}]/gu, '')) ? `${best.name} ${next.replace(/[^\p{L}]/gu, '')}` : null;
+      found.push({ p, o: best.o, building });
     }
+    // groups named with a building word first, so the 「At Hogwarts」 places find the 본거지 made from 「Hogwarts Castle」
+    found.sort((a, b) => Number(!a.building) - Number(!b.building));
     const rels = [];
-    for (const { p, o } of found) {
-      const to = o.type === 'place' ? o.entityId : this.basePlace(worldId, o.entityId, { by });
+    for (const { p, o, building } of found) {
+      const to = o.type === 'place' ? o.entityId : this.basePlace(worldId, o.entityId, { by, name: building });
       if (!to || to === p.entityId) continue;
       rels.push({ from: p.entityId, to, type: '위치', note: '', evidence: '위치·소속: ' + p.fields.location });
     }
