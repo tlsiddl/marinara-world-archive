@@ -3219,7 +3219,8 @@ class Archive {
     const whyOff = (r) => {
       const a = byId.get(r.from);
       const b = byId.get(r.to);
-      const model = r.source === 'auto' && !String(r.evidence || '').startsWith('소속:');
+      // v0.7.5: a 위치 the 「장소 위치 채우기」 button made (its evidence is the button's, not a sentence) is not the reader's
+      const model = r.source === 'auto' && !String(r.evidence || '').startsWith('소속:') && !String(r.evidence || '').startsWith('장소 위치 채우기') && !String(r.evidence || '').startsWith('위치·소속:');
       return !model || !a || !b ? null
         : !relationFits(r.type, a.type, b.type) ? 'kind'
         : (a.type === 'person' && isDescriptiveName(a.name)) || (b.type === 'person' && isDescriptiveName(b.name)) ? 'described name'

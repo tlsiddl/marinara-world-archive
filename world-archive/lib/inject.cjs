@@ -253,8 +253,9 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     // v0.7.2 A: within a part — named in the latest messages, the nearer place, spoken of more often, the latest
     // evidence; the name only breaks a tie (it used to decide what the budget cut)
     ordered = keep.filter((e) => e.status === 'confirmed').map((e) => [rank(e), e]).sort(([ra, a], [rb, b]) => ra - rb
-      || (ra >= 2 ? named(a) - named(b) : 0)
+      // v0.7.5: here, the rules of the scene's own place first (Great Hall), then the place it is in (Hogwarts) …
       || (ra === 3 ? near(a) - near(b) : 0)
+      || (ra >= 2 ? named(a) - named(b) : 0)
       || often(a, b)
       || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
       || a.name.localeCompare(b.name, 'ko')).map(([, e]) => e);

@@ -101,3 +101,46 @@ test('5) a 위치 칸 that is only a group\'s name: into its 본거지, made as 
     assert.deepEqual(s.listRelations(w.worldId).filter((r) => r.type === '위치' && r.from === id).map((r) => r.to), [base.entityId], n);
   }
 });
+
+test('v0.7.5: recheck keeps a 위치 the 「장소 위치 채우기」 button made (its evidence is the button\'s)', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'Hogwarts' });
+  s.applyAuto(w.worldId, [{ type: 'place', name: 'Hogwarts Castle' }, { type: 'place', name: 'Owlery' }, { type: 'place', name: 'Kitchen' }, { type: 'place', name: 'Cellar' }]);
+  const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n).entityId;
+  s.applyRelations(w.worldId, [{ from: id('Owlery'), to: id('Hogwarts Castle'), type: '위치', note: '', evidence: '장소 위치 채우기: 이름 · 위치 · 용도 · 설명 · 근거에서' }], { by: 'location-fill' });
+  s.applyRelations(w.worldId, [{ from: id('Kitchen'), to: id('Cellar'), type: '위치', note: '', evidence: 'They went to the garden.' }]);
+  s.recheckRelations(w.worldId);
+  const has = (a) => s.listRelations(w.worldId).some((r) => r.type === '위치' && r.from === id(a));
+  assert.ok(has('Owlery'), 'the button\'s stays');
+  assert.ok(!has('Kitchen'), 'the reader\'s with evidence naming neither still goes');
+});
+
+test('v0.7.5: ① 칸 후보 — lasting looks and temper are never offered; a passing moment is', async (t) => {
+  const service = require('../world-archive/lib/service.cjs');
+  const real = require('../world-archive/lib/vendor/engine.cjs');
+  const s = temp(t);
+  service._test.useStore(s);
+  const w = s.createWorld({ name: 'Hogwarts', auto: { connectionId: 'c1' } });
+  s.applyAuto(w.worldId, [
+    { type: 'person', name: 'Daphne', fields: { appearance: 'Sleek blonde braids, tall and thin', personality: 'Proud and quick to threaten points' } },
+    { type: 'person', name: 'Pansy', fields: { appearance: 'Wearing her pyjamas and a dressing gown' } },
+  ]);
+  service._test.useEngine({ model: async (c) => ({ id: c }), askModel: async () => ({ content: JSON.stringify({ items: [], fields: [
+    { name: 'Daphne', key: 'appearance', why: '장면의 옷차림' }, { name: 'Daphne', key: 'personality', why: '장면의 행동' }, { name: 'Pansy', key: 'appearance', why: '그 장면의 차림' },
+  ] }) }), parseJsonObject: real.parseJsonObject });
+  const r = await service.tidyCandidates(w.worldId);
+  assert.deepEqual(r.fields.map((x) => `${x.name}.${x.key}`), ['Pansy.appearance']);
+});
+
+test('v0.7.5: a scene — the rules of the scene\'s own place before those of the place it is in, even one named lately', () => {
+  const w = { name: 'H', injectMode: 'scene' };
+  const ents = [
+    { entityId: 'hw', type: 'place', name: 'Hogwarts Castle', aliases: [], fields: {}, status: 'confirmed' },
+    { entityId: 'gh', type: 'place', name: 'Great Hall', aliases: [], fields: {}, status: 'confirmed' },
+    { entityId: 'a', type: 'rule', name: 'Castle curfew at nine', aliases: [], fields: {}, appliesTo: 'hw', status: 'confirmed', seen: { n: 9 } },
+    { entityId: 'b', type: 'rule', name: 'Sorting at the high table', aliases: [], fields: {}, appliesTo: 'gh', status: 'confirmed', seen: { n: 1 } },
+  ];
+  const rel = [{ from: 'gh', to: 'hw', type: '위치' }];
+  const text = I.assembleWorld(w, ents, 3000, { scene: new Set(['gh', 'a']), relations: rel }).text;
+  assert.ok(text.indexOf('Sorting at the high table') < text.indexOf('Castle curfew at nine'));
+});
