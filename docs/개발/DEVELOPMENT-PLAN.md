@@ -227,7 +227,7 @@ v1.1은 `vectors`·`aliases`·`names`·`places`·`features`·`backup`만 재사�
 
 ## 6. 브랜치·승인·중단 조건
 
-`main`은 안정 코드와 문서, `feature/*`는 단계별 작업 브랜치다. 승인 시점·중단 조건·기록 방식은 [AGENTS.md](AGENTS.md)를 따른다.
+`main`은 안정 코드와 문서, `feature/*`는 단계별 작업 브랜치다. 승인 시점·중단 조건·기록 방식은 [AGENTS.md](../../AGENTS.md)를 따른다.
 
 ## 7. 최종 성공 기준
 

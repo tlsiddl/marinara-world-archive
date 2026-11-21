@@ -7,7 +7,7 @@
 
 ## 1. 확인한 근거
 
-- [World Archive 개발 계획](DEVELOPMENT-PLAN.md) 및 [AGENTS.md](AGENTS.md).
+- [World Archive 개발 계획](DEVELOPMENT-PLAN.md) 및 [AGENTS.md](../../AGENTS.md).
 - [기억 서재 main](https://github.com/tlsiddl/marinara-memory-module/tree/main)과 [refactor/modular](https://github.com/tlsiddl/marinara-memory-module/tree/refactor/modular): [MODULES.md](https://github.com/tlsiddl/marinara-memory-module/blob/refactor/modular/MODULES.md), [REFACTOR-STATUS.md](https://github.com/tlsiddl/marinara-memory-module/blob/refactor/modular/REFACTOR-STATUS.md), [REFACTOR-PLAN.md](https://github.com/tlsiddl/marinara-memory-module/blob/refactor/modular/REFACTOR-PLAN.md), `vectors.cjs`, `aliases.cjs`, `names.cjs`, `places.cjs`, `backup.cjs`, `features.cjs` 소스. 리팩터링과 main의 파일 수준 차이도 앞서 확인했음.
 - [세계 중계판(World Board)](https://github.com/tlsiddl/marinara-world-board): `README.txt`, `manifest.json`, `extension.js` 시작부.
 - 연결된 GitHub 설치 저장소 이름 및 `npc_profile`, `world_profile` 문자열의 일부 코드 검색 결과. 검색 결과는 NPC/World 생성 에이전트의 실제 구현 소스를 특정하지 못함.
