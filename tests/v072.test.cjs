@@ -92,6 +92,9 @@ test('H) the 소속 칸 says Gryffindor, a relation says Slytherin first-years: 
 test('E) 정리 후보 ②: spoken of once, not a law · 유래·역사; 「남기기」 takes it off', (t) => {
   const s = temp(t);
   const w = s.createWorld({ name: 'Hogwarts' });
+  // v0.8.0: 「한 번 나옴」 only in a world read long enough (100 messages)
+  s.linkRoom('roomOnce0000000000001', w.worldId);
+  s.setRoomRead('roomOnce0000000000001', { lastId: 'm120', count: 120 });
   s.applyAuto(w.worldId, [{ type: 'rule', name: 'Snape quizzes on Friday' }, { type: 'rule', name: 'Statute of Secrecy' }, { type: 'rule', name: 'Old founders' }], { messageIds: ['m1'] });
   const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n).entityId;
   s.setTopic(w.worldId, id('Old founders'), '유래·역사', { by: 'reader' });

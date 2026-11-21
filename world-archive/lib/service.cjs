@@ -559,7 +559,7 @@ function preview(roomId) {
   // 이름 표기: the world's choice; 「자동」 — the original name first in a room in English
   const latin = known?.latin ?? s.getRoom(roomId).latin ?? false;
   const names = world.nameStyle === 'original' ? 'original' : world.nameStyle === 'ko' ? 'ko' : latin ? 'original' : 'ko';
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names }) };
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names, onceOn: s.onceReady(worldId) }) };
 }
 
 /** 할 일 12: what one room's {{세계외형}} would be right now. */
@@ -630,7 +630,8 @@ async function routes(r) {
     autoEvery: AUTO_EVERY,
   })));
 
-  r.get('/worlds', handle(async () => ({ worlds: s().listWorlds() })));
+  // v0.8.0: onceReady — the screen shows 「한 번 나옴」 only then (a computed value, never saved)
+  r.get('/worlds', handle(async () => ({ worlds: s().listWorlds().map((w) => ({ ...w, onceReady: s().onceReady(w.worldId) })) })));
   r.post('/worlds', handle(async (req) => s().createWorld(body(req))));
   // 할 일 7 — 백업 · 복원: one world as one file; restoring makes a new world 「… (복원)」 and links no room.
   r.get('/worlds/:worldId/export', handle(async (req) => s().exportWorld(req.params.worldId)));
@@ -742,7 +743,7 @@ async function routes(r) {
     const looksUndone = s().undoBadLooks(req.params.worldId);
     const houseYear = s().fillHouseYear(req.params.worldId, { by: 'roster' }).length;
     const english = lang === 'en' ? s().englishValues(req.params.worldId, { by: 'recheck', pairs: sentences?.glossary || [] }).length : 0;
-    return { lang, english, nameSuggest, houseYear, housesUndone, placeDiffers, looksUndone, retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, personal, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
+    return { lang, english, nameSuggest, houseYear, housesUndone, placeDiffers, looksUndone, retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, personal, once: s().onceReady(req.params.worldId) ? s().listEntities(req.params.worldId).filter(onceOnly).length : 0, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
   }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));
@@ -1068,7 +1069,9 @@ async function askList(world, system, texts, pairs, out) {
     out.calls++;
     addUsage(out, reply);
     const got = api.parseJsonObject(reply.content)?.t;
-    part.forEach((t, k) => res.push(Array.isArray(got) && typeof got[k] === 'string' && got[k].trim() ? got[k].trim() : null));
+    // v0.8.0: the model sometimes keeps the list number it was given (「1. A coastal city」) — taken off unless the text had one
+    const NUM = /^\s*\d{1,3}[.)]\s+/;
+    part.forEach((t, k) => res.push(Array.isArray(got) && typeof got[k] === 'string' && got[k].trim() ? (NUM.test(t) ? got[k].trim() : got[k].replace(NUM, '').trim()) || null : null));
   }
   return res;
 }
