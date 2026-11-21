@@ -22,6 +22,9 @@ const BACKUP_FORMAT = 'marinara-world-archive-backup';
 const PAST_MAX = 3;
 /** v0.7.0 5: the 주제 of a rule or system (the person or the reader picks one). */
 const TOPICS = ['금지·예절', '돈·거래', '시간·영업', '방법·기술', '유래·역사', '그 밖'];
+/** v0.7.0 3: 정리 언어 — auto (the room's 기억 서재 기억 언어, else ko) · ko · en. */
+const SUMMARY_LANGS = ['auto', 'ko', 'en'];
+const TRANSLATION_MAX = 6000;
 /** v0.6.2 ③: the lasting fields a scene's status line (옷차림 · 자세 · 기분) never backs — with 메모. */
 const STATUS_OFF = new Set(['appearance', 'personality', 'background', 'family']);
 /** 할 일 11: a room's score events (the board's name and unit are the world's). */
@@ -527,6 +530,7 @@ function validWorld(w) {
     (w.auto === undefined || isObject(w.auto)) &&
     (w.yearStart === undefined || (Number.isInteger(w.yearStart) && w.yearStart >= 1 && w.yearStart <= 12)) &&
     (w.nameStyle === undefined || ['auto', 'ko', 'original'].includes(w.nameStyle)) &&
+    (w.summaryLang === undefined || SUMMARY_LANGS.includes(w.summaryLang)) &&
     (w.tail === undefined || isObject(w.tail)) &&
     (w.balance === undefined || (Array.isArray(w.balance) && w.balance.every((x) => typeof x === 'string'))) &&
     typeof w.createdAt === 'string' &&
@@ -656,6 +660,30 @@ class Archive {
     return path.join(this.entityDir, `${needId(worldId)}.json`);
   }
 
+  // ---------------------------------------------------------------- v0.7.0 3: 「보기: 한국어」 translations
+
+  /** The world's Korean view cache: { hash: { ko, at } } by the original text's hash. Never in {{세계}}. */
+  translationFile(worldId) {
+    return path.join(this.dir, 'translations', `${needId(worldId)}.json`);
+  }
+  readTranslations(worldId) {
+    try {
+      return this.readJson(this.translationFile(worldId), () => ({ schemaVersion: SCHEMA, worldId, items: {} }), (d) => d.worldId === worldId && isObject(d.items), '번역 보기');
+    } catch {
+      return { schemaVersion: SCHEMA, worldId, items: {} }; // only a view: a broken cache is made again
+    }
+  }
+  /** add: { hash: ko }. Keeps the newest TRANSLATION_MAX. */
+  saveTranslations(worldId, add) {
+    this.getWorld(worldId);
+    const doc = this.readTranslations(worldId);
+    const t = now();
+    for (const [h, ko] of Object.entries(add || {})) if (/^[0-9a-f]{20}$/.test(h) && typeof ko === 'string' && ko.trim()) doc.items[h] = { ko: ko.slice(0, 4000), at: t };
+    const keys = Object.keys(doc.items);
+    if (keys.length > TRANSLATION_MAX) for (const k of keys.sort((a, b) => String(doc.items[a].at).localeCompare(String(doc.items[b].at))).slice(0, keys.length - TRANSLATION_MAX)) delete doc.items[k];
+    this.writeJson(this.translationFile(worldId), doc);
+  }
+
   readEntitiesRaw(worldId) {
     return this.readJson(
       this.entityFile(worldId),
@@ -737,6 +765,12 @@ class Archive {
       next.yearStart = body.yearStart;
       changed = true;
     }
+    // v0.7.0 3: 정리 언어
+    if (body.summaryLang !== undefined) {
+      if (!SUMMARY_LANGS.includes(body.summaryLang)) throw new ArchiveError(400, `정리 언어는 ${SUMMARY_LANGS.join(' · ')} 중 하나입니다.`);
+      if (body.summaryLang === 'auto') delete next.summaryLang; else next.summaryLang = body.summaryLang;
+      changed = true;
+    }
     if (body.nameStyle !== undefined) {
       if (!['auto', 'ko', 'original'].includes(body.nameStyle)) throw new ArchiveError(400, '이름 표기는 auto · ko · original 중 하나입니다.');
       next.nameStyle = body.nameStyle;
@@ -757,6 +791,7 @@ class Archive {
     next.revision++;
     next.updatedAt = now();
     Object.assign(world, next);
+    if (next.summaryLang === undefined) delete world.summaryLang; // 「자동」 is no value
     this.writeJson(this.worldsFile, doc);
     return this.getWorld(worldId);
   }
@@ -784,6 +819,9 @@ class Archive {
     if (linked.length) this.writeJson(this.roomsFile, rooms);
     doc.worlds.splice(index, 1);
     this.writeJson(this.worldsFile, doc);
+    try {
+      fs.unlinkSync(this.translationFile(worldId)); // only a view (v0.7.0 3), made again when needed
+    } catch {}
     try {
       fs.unlinkSync(this.entityFile(worldId));
     } catch (e) {
@@ -893,6 +931,7 @@ class Archive {
     }
     Object.assign(entity, next, { revision: entity.revision + 1, updatedAt: now() });
     if (next.topic === undefined && body.topic !== undefined) delete entity.topic;
+    if (body.topic !== undefined && (before.topic || '') !== (entity.topic || '')) entity.sources = { ...(entity.sources || {}), topic: 'manual' };
     if (entity.hidden) {
       for (const k of Object.keys(entity.hidden)) if ((before.fields || {})[k] !== (entity.fields || {})[k]) delete entity.hidden[k];
       if (!Object.keys(entity.hidden).length) delete entity.hidden;
@@ -902,13 +941,13 @@ class Archive {
       if (!isObject(body.hidden) || !Object.values(body.hidden).every((v) => typeof v === 'boolean')) throw new ArchiveError(400, 'hidden은 {칸: true/false}입니다.');
       const h = Object.fromEntries(Object.entries(body.hidden).filter(([k, v]) => v && (entity.fields || {})[k]).map(([k]) => [k, true]));
       if (Object.keys(h).length) entity.hidden = h; else delete entity.hidden;
-      entity.sources = { ...(entity.sources || {}), hidden: 'manual' };
+      if (JSON.stringify(before.hidden || {}) !== JSON.stringify(entity.hidden || {})) entity.sources = { ...(entity.sources || {}), hidden: 'manual' };
     }
     // v0.7.0 7: 일하는 곳 by hand (a place, or null) — the person's from then on
     if (body.work !== undefined) {
       if (body.work !== null && body.work !== '' && !doc.entities.some((x) => x.entityId === body.work && x.type === 'place')) throw new ArchiveError(400, '일하는 곳은 장소여야 합니다.');
       if (body.work) entity.work = body.work; else delete entity.work;
-      entity.sources = { ...(entity.sources || {}), work: 'manual' };
+      if ((before.work || null) !== (entity.work || null)) entity.sources = { ...(entity.sources || {}), work: 'manual' };
     }
     this.writeJson(this.entityFile(worldId), doc);
     const keys = [...new Set([...Object.keys(before.fields || {}), ...Object.keys(entity.fields || {})])].filter((k) => (before.fields || {})[k] !== (entity.fields || {})[k]);
@@ -1246,6 +1285,10 @@ class Archive {
         if ((e.base || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.base = c.before; else delete e.base;
         if (c.by === 'person') delete e.sources?.base;
+      } else if (c.action === 'topic') {
+        if ((e.topic || null) !== (c.after || null)) throw new ArchiveError(409, later);
+        if (c.before) e.topic = c.before; else delete e.topic;
+        if (e.sources?.topic === 'auto' && !c.before) delete e.sources.topic;
       } else if (c.action === 'applies') {
         if ((e.appliesTo || null) !== (c.after || null)) throw new ArchiveError(409, later);
         if (c.before) e.appliesTo = c.before; else delete e.appliesTo;
@@ -1473,6 +1516,28 @@ class Archive {
    * buttons' value never goes over the person's (sources.appliesTo 'manual'). Recorded ('applies', undoable).
    * meta.by: who; force: the person (manual). targetId null: the whole world.
    */
+  /**
+   * v0.7.0 5: a rule's or system's 주제 (one of TOPICS) set by the reader or 「주제 채우기」 — never over the person's
+   * (sources.topic 'manual'). Recorded ('topic', undoable). Returns the change or null.
+   */
+  setTopic(worldId, entityId, topic, meta = {}) {
+    this.getWorld(worldId);
+    if (!TOPICS.includes(topic)) return null;
+    const doc = this.readEntities(worldId);
+    const e = doc.entities.find((x) => x.entityId === entityId);
+    if (!e || !APPLIES_TYPES.has(e.type)) return null;
+    if (e.sources?.topic === 'manual' || e.topic === topic) return null;
+    const before = e.topic || null;
+    e.topic = topic;
+    e.sources = { ...(e.sources || {}), topic: 'auto' };
+    e.revision++;
+    e.updatedAt = now();
+    this.writeJson(this.entityFile(worldId), doc);
+    const c = { id: randomUUID(), at: e.updatedAt, by: meta.by || 'reader', roomId: meta.roomId ?? null, messageIds: meta.messageIds || [], entityId, name: e.name, type: e.type, action: 'topic', before, after: topic, evidence: meta.evidence || '' };
+    this.pushHistory(worldId, [c]);
+    return c;
+  }
+
   setAppliesTo(worldId, entityId, targetId, meta = {}, { force = false } = {}) {
     this.getWorld(worldId);
     const doc = this.readEntities(worldId);
@@ -1878,6 +1943,18 @@ class Archive {
         continue;
       }
       const taken = new Set(doc.entities.filter((o) => o !== e).map((o) => N.key(o.name)));
+      if (meta.keepName) {
+        // v0.7.0 3: organizing in English — the name stays as written, the glossary's Korean joins the other names
+        if (e.glossaryName) (delete e.glossaryName), (dirty = true);
+        if (N.key(e.name) !== N.key(p.to) && !e.aliases.some((a) => N.key(a) === N.key(p.to)) && !taken.has(N.key(p.to)) && e.aliases.length < ALIAS_MAX) {
+          e.aliases.push(p.to);
+          e.revision++;
+          e.updatedAt = t;
+          dirty = true;
+          log({ entityId: e.entityId, name: e.name, type: e.type, action: 'alias', after: p.to, evidence: `번역 단어장: ${p.from} = ${p.to}` });
+        }
+        continue;
+      }
       const plan = N.planFor(e, p, taken, { aliasMax: ALIAS_MAX, aliasLen: ALIAS_LEN });
       const evidence = `번역 단어장: ${p.from} = ${p.to}`;
       if (plan?.suggest) {
@@ -3316,6 +3393,7 @@ class Archive {
 
 module.exports = {
   TOPICS,
+  SUMMARY_LANGS,
   STATUS_OFF,
   nameLike,
   namesGroup,

@@ -4,7 +4,7 @@
 // The slicing follows the Memory Module's nextSlice idea (read only what comes after the last place read), and evidence
 // works the way it does there: the new messages are shown as numbered sentences, the model answers with sentence
 // numbers (plus a short phrase from the sentence), and the sentence itself is taken from the text by the program.
-const { TYPES, FIELDS, REL_TYPES, relationFits, STATUS_OFF } = require('./store.cjs');
+const { TYPES, FIELDS, REL_TYPES, relationFits, STATUS_OFF, TOPICS } = require('./store.cjs');
 const TT = require('./timetable.cjs');
 const R = require('./roster.cjs');
 const CAL = require('./calendar.cjs');
@@ -153,7 +153,8 @@ function fieldGuide() {
 /** v0.5.1 T: the 균형 볼 칸 the world added that are not person fields — asked only with evidence. */
 const customBalance = (world) => (Array.isArray(world?.balance) ? world.balance : []).filter((l) => !FIELDS.person.some((f) => f.label === l));
 const balanceGuide = (world) => { const c = customBalance(world); return c.length ? `\n인물의 균형 볼 칸(근거가 있을 때만, 없으면 적지 않는다): ${c.join(', ')} — 인물 항목에 "balance":{"${c[0]}":{"v":"값","n":["근거 문장 번호"]}}로 적는다.` : ''; };
-function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
+function buildPrompt(world, entities, part, cast, glossary = [], today = null, lang = 'ko') {
+  const en = lang === 'en';
   // 할 일 11: only a world with a board asks for score events (the model never adds them up).
   const board = world.scoreboard?.name ? world.scoreboard : null;
   const scoreRules = board
@@ -166,7 +167,9 @@ function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
   const text = part.batch.map((m) => m.content).join('\n');
   const terms = N.pairsInText(glossary, text);
   const glossed = terms.length
-    ? `[번역 단어장 — 여기 있는 이름은 name을 단어장의 한국어 표기 그대로 쓰고, 원래(로마자) 표기는 aliases에 넣어. timetable의 과목 · calendar의 행사 이름도 단어장 표기를 따라]\n${terms.map((p) => `- ${p.from} = ${p.to}`).join('\n')}\n\n`
+    ? en
+      ? `[번역 단어장 — 여기 있는 이름은 name을 원래(로마자) 표기 그대로 쓰고, 단어장의 한국어 표기는 aliases에 넣어]\n${terms.map((p) => `- ${p.from} = ${p.to}`).join('\n')}\n\n`
+      : `[번역 단어장 — 여기 있는 이름은 name을 단어장의 한국어 표기 그대로 쓰고, 원래(로마자) 표기는 aliases에 넣어. timetable의 과목 · calendar의 행사 이름도 단어장 표기를 따라]\n${terms.map((p) => `- ${p.from} = ${p.to}`).join('\n')}\n\n`
     : '';
   const system = `너는 롤플레이 세계관 설정집의 기록자다. 새 대화를 읽고, 이 세계에 **오래 유지되는 설정**만 골라 JSON으로 적는다.
 
@@ -186,6 +189,7 @@ function buildPrompt(world, entities, part, cast, glossary = [], today = null) {
 ${KIND_GUIDE}
 - rule·system·history 구별: 지켜야 하는 것(어기면 벌·꾸중을 받는 법·제도·학교 규칙)은 rule, 세계가 그렇게 돌아가는 원리(마법·능력이 작동하는 방식, 화폐·경제, 점수가 매겨지는 방식)는 system, 이야기 전에 이미 끝난 과거의 일은 history다. 예: 「밤 10시 이후 기숙사 밖 금지」는 rule, 「마법은 지팡이 없이 쓰면 힘이 흩어진다」는 system, 「100년 전 두 왕국의 전쟁」은 history.
 - rule·system에는 where(적용되는 곳)를 적는다: 그 규칙·원리가 특정 장소나 집단에서만 통하면 그 장소·집단 이름([이미 있는 항목]이나 items의 이름 그대로 — 예: 기숙사 암호는 그 기숙사, 교실 규칙은 그 학교), 세계 어디서나 통한다는 게 분명하면(법·화폐·마법의 원리처럼) "세계 전체", 어디 것인지 근거로 알 수 없으면 빈 문자열. 이름이 같아도 적용되는 곳이 다르면 다른 항목이다.
+- rule·system에는 topic(주제)을 적는다: 금지·예절(하지 말 것 · 지킬 예의), 돈·거래(화폐 · 값 · 사고팔기), 시간·영업(여는 시간 · 정해진 때), 방법·기술(하는 법 · 마법 · 기술의 원리), 유래·역사(왜 그렇게 됐는지 · 내력), 그 밖 중 하나 그대로.
 - group에는 근거가 있으면 base(본거지)를 적는다: 그 집단이 머무는 장소 이름(예: 기숙사 → 그 기숙사 건물, 가문 → 그 저택). 없으면 빈 문자열.
 - person에는 근거가 있으면 room(지내는 곳)을 적는다: 그 인물에게 배정된 방 · 숙소 · 침실처럼 지금 묵으며 지내는 장소 이름(예: 슬리데린 1학년 여학생 기숙사, 3층 7호실). 잠깐 들른 곳은 아니다. 방을 옮겼으면 새 곳만 적는다(이전 곳은 프로그램이 남긴다). 없으면 빈 문자열. 그 장소가 [이미 있는 항목]에 없으면 장소 항목으로 같이 만든다.
 - place의 layout(배치·내부 구조)에는 안에 무엇이 어디 있는지(침대 다섯 개, 창가에 책상, 계단 아래 문), use(시설·용도)에는 무슨 곳이고 어떤 시설이 있는지만 적는다. 그곳에서 지켜야 하는 것은 rule로 따로, 누가 지내는지는 그 인물의 room으로 적는다.
@@ -239,6 +243,9 @@ ${scoreRules}
 학사일정: 날짜가 정해진 한 번뿐인 행사(입학식 · 연회 · 경기 · 방학 · 시험 · 무도회 같은 것)는 calendar에 적는다. calendar는 집단 · 장소 전체의 일만이다 — 한 사람만의 기한 · 약속(입학 답장 마감, 누구와의 약속)은 그 사람의 일정(schedule, who에 그 사람)으로 적는다. 되풀이되는 수업 · 일과는 timetable로 적는다.
 {"owner":"그 일정의 주인 — 집단이나 장소 이름(세계 전체면 빈 문자열)","date":"1991-10-31처럼(연도를 모르면 10-31)","end":"기간이면 끝나는 날","when":"날짜로 바꿀 수 없는 말(예: 다음 주 금요일)","name":"행사 이름","place":"장소","who":"참가하는 집단 · 사람","status":"취소되면 cancelled","evidence":[{"n":"12.3","q":"핵심 구절"}]}
 - 날짜가 근거 문장에 실제로 있어야 적는다. 「다음 주」처럼 상대 날짜는 [이야기 속 오늘]이 있을 때만 날짜로 바꾸고, 없으면 when에 글 그대로 둔다. 미뤄졌으면 새 날짜를 적는다(코드가 이전 날짜를 남긴다).
+${en
+    ? '정리 언어: 영어. fields의 값 · memo · relations의 note · timetable의 value · calendar의 name은 영어로 적는다(원문이 한국어여도). name은 원문에 나온 표기 그대로 — 번역하지 않는다. 칸 키 · type · topic · day 같은 정해진 값은 위에 적힌 그대로 쓴다.'
+    : '정리 언어: 한국어. fields의 값 · memo · relations의 note는 한국어로 적는다(원문이 다른 언어여도). 칸 키 · type · topic · day 같은 정해진 값은 위에 적힌 그대로 쓴다.'}
 JSON만 출력: {"items":[...],"relations":[...],"timetable":[...],"calendar":[...]${board ? ',"scores":[...]' : ''}} (적을 게 없으면 빈 배열)`;
   const user = `[세계관] ${world.name}${world.description ? `\n${clip(world.description, 1500)}` : ''}
 
@@ -484,6 +491,8 @@ function checkItems(parsed, part, cast) {
       memo: typeof it.memo === 'string' && memoOk ? noRefs(it.memo) : '',
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
+      // v0.7.0 5: rule · system — 주제 (one of TOPICS; anything else is dropped)
+      topic: (it.type === 'rule' || it.type === 'system') && TOPICS.includes(String(it.topic || '').trim()) ? String(it.topic).trim() : '',
       // v0.5.0 E: group — the place it is at (본거지), a name
       base: it.type === 'group' && typeof it.base === 'string' ? clip(it.base.trim(), 80) : '',
       // v0.5.1 I: person — the place they stay (방 배정 · 숙소), a name
