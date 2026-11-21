@@ -203,7 +203,7 @@ ${KIND_GUIDE}
 - custom(기타)은 위 어디에도 안 맞을 때만 쓴다. 무리·행렬·조직은 group, 지켜야 하는 관례·금기·법은 rule, 작동 원리는 system, 정해진 때에 돌아오는 날·행사는 schedule, 이야기 전의 과거 일은 history다.
 
 각 항목:
-{"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","maybe":"같은 것인지 애매한 이미 있는 항목 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
+{"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","maybe":"같은 것인지 애매한 이미 있는 항목 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"where":"rule·system만: 적용되는 곳(장소·집단 이름 · 세계 전체 · 모르면 빈 문자열)","topic":"rule·system만: 주제 하나(분류 칸과 다름)","memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
 
 칸 키 (이것 말고는 쓰지 마):
 ${fieldGuide(world)}${balanceGuide(world)}
@@ -476,6 +476,14 @@ function checkItems(parsed, part, cast) {
     // v0.5.0 P: a passing thing (not used again) is not kept
     if (['rule', 'system', 'schedule'].includes(it.type) && it.lasting === false) { dropped.push({ name, why: 'not lasting' }); continue; }
     const f = checkFields(it.type, it.fields, index, found);
+    // v0.8.0: a topic name written in the 분류 칸 instead of topic is the topic (and not a 분류)
+    let topicIn = String(it.topic || '').trim();
+    const catIn = String(f.fields?.category || '').trim();
+    if ((it.type === 'rule' || it.type === 'system') && !TOPICS.includes(topicIn) && TOPICS.includes(catIn)) {
+      topicIn = catIn;
+      delete f.fields.category;
+      if (f.fieldEvidence) delete f.fieldEvidence.category;
+    }
     const memoOk = !found.every((p) => p.block === 'status');
     // v0.5.1 T: 균형 볼 칸 the world added — each with its own evidence, like a field
     const bal = it.type === 'person' && it.balance && typeof it.balance === 'object' && !Array.isArray(it.balance) ? checkFields('balance', it.balance, index, found) : null;
@@ -500,7 +508,7 @@ function checkItems(parsed, part, cast) {
       // v0.5.0 C: rule · system — the place or group it holds in (a name; the service finds the setting), '' = everywhere
       where: (it.type === 'rule' || it.type === 'system') && typeof it.where === 'string' ? clip(it.where.trim(), 80) : '',
       // v0.7.0 5: rule · system — 주제 (one of TOPICS; anything else is dropped)
-      topic: (it.type === 'rule' || it.type === 'system') && TOPICS.includes(String(it.topic || '').trim()) ? String(it.topic).trim() : '',
+      topic: (it.type === 'rule' || it.type === 'system') && TOPICS.includes(topicIn) ? topicIn : '',
       // v0.5.0 E: group — the place it is at (본거지), a name
       base: it.type === 'group' && typeof it.base === 'string' ? clip(it.base.trim(), 80) : '',
       // v0.5.1 I: person — the place they stay (방 배정 · 숙소), a name

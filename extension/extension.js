@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.7.8';
+  const VERSION = '0.8.0-beta';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -1387,7 +1387,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   // v0.6.2 ②: a rule or system one batch spoke of — kept, not in {{세계}} (the same test as the server's)
   const LAW_NAME = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)|\b(?:laws?|decrees?|statutes?|acts?|codes?|charters?|treaty|treaties|rules?|regulations?|edicts?)\b/i; // the server's (inject.cjs)
   function isOnce(e) {
-    return ['rule', 'system', 'custom', 'history'].includes(e.type) && !(e.appliesTo && e.appliesTo !== 'world') && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(e.name) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
+    // v0.8.0: only once the world has been read long enough (the server's onceReady)
+    return world()?.onceReady !== false && ['rule', 'system', 'custom', 'history'].includes(e.type) && !(e.appliesTo && e.appliesTo !== 'world') && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(e.name) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
   }
   const topicRank = (t) => { const i = (st.topics || []).indexOf(t); return i < 0 ? 99 : i; };
   const ruleRow = (e) => `<div class="wt-rule" data-q="${esc(`${e.name} ${ruleText(e)} ${e.topic || ''}`.toLowerCase())}"><span class="tcap${e.topic ? '' : ' none'}">${esc(e.topic || '주제 없음')}</span><div class="rb"><button class="rt" type="button" data-act="open" data-id="${esc(e.entityId)}">${esc(e.name)}</button>${st.ruleKind ? `<small class="kind">${e.type === 'system' ? '시스템' : '규칙'}</small>` : ''}${ruleText(e) ? `<p class="rd">${esc(clip(ruleText(e), 220))}</p>` : ''}</div></div>`;

@@ -18,6 +18,9 @@ function temp(t) {
 test('1) 「한 번만 나왔어요」 leaves out a rule of a place or group and money', (t) => {
   const s = temp(t);
   const w = s.createWorld({ name: 'Hogwarts' });
+  // v0.8.0: 「한 번 나옴」 only in a world read long enough (100 messages)
+  s.linkRoom('roomOnce0000000000001', w.worldId);
+  s.setRoomRead('roomOnce0000000000001', { lastId: 'm120', count: 120 });
   s.applyAuto(w.worldId, [{ type: 'place', name: 'Great Hall' }]);
   const hall = s.listEntities(w.worldId)[0].entityId;
   s.applyAuto(w.worldId, [

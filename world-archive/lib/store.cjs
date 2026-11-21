@@ -77,8 +77,23 @@ function houseYearPlan(doc) {
   }
   return plan;
 }
+/**
+ * v0.8.0: a calendar made by code is a 학사일정 (Academic Calendar) only in a world with a school; elsewhere 일정표
+ * (Calendar) — a 센티넬 센터's check-up days are not a school year.
+ */
+function calendarName(doc, owner, lang) {
+  const school = (doc?.entities || []).some((e) => (e.type === 'group' || e.type === 'place') && SCHOOL_GROUP.test([e.name, ...(e.aliases || [])].join(' ')));
+  const word = lang === 'en' ? (school ? 'Academic Calendar' : 'Calendar') : school ? '학사일정' : '일정표';
+  return owner ? owner.name + ' ' + word : (lang === 'en' ? 'World ' : '세계 ') + word;
+}
 const SCHOOL_GROUP = /school|academy|college|hogwarts|학교|학원|아카데미/i;
 /** v0.7.4 1: money (화폐 · currency …) is never 「한 번만 나왔어요」 either. */
+/**
+ * v0.8.0: 「한 번 나옴」 means something only once a world has been read long enough — in a room of 50 messages (two
+ * reading batches) nearly every rule was spoken of in one batch, and leaving them all out of {{세계}} empties it.
+ * Below this many messages read (all the world's rooms together) nothing is 「한 번 나옴」.
+ */
+const ONCE_MIN_MESSAGES = 100;
 const ONCE_MONEY = /(화폐|통화|환율|갈레온)|\b(?:currency|currencies|money|coinage|exchange rates?|galleons?|sickles?|knuts?)\b/i;
 /** v0.7.2 E: a name that says a law (the same words as inject.cjs LAW_NAME). */
 const ONCE_LAW = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)|\b(?:laws?|decrees?|statutes?|acts?|codes?|charters?|treaty|treaties|regulations?|edicts?)\b/i;
@@ -274,6 +289,22 @@ const NOT_INSIDE = /(아래|밑|옆|근처|부근|너머|건너편|맞은편|바
 /** v0.7.2 0): English says it before the name (「beneath the Black Lake」 · 「next to Ollivanders」). */
 const NOT_INSIDE_EN = /\b(?:below|beneath|under(?:neath)?|beside|next to|near(?:by)?|outside(?: of)?|beyond|across(?: from)?|opposite|by|off|above|overlooking|facing|towards?|behind|in front of|on the way to|close to|along)\s+(?:the\s+)?$/i;
 const UNDER_EN = /\b(?:below|beneath|under(?:neath)?)\s+(?:the\s+)?$/i;
+/**
+ * v0.8.0: a 위치 whose own sentence says the place is NOT inside the other — 「격리 병동은 그 안에 있는 게 아니라」 right
+ * after the inner place, or every mention of the outer place is 「센터 옆 · 근처 · 너머 · 맞은편 · 밖」 / 「next to · beside ·
+ * outside · behind …」. Under (아래 · below) is left out: underground under a building is still in it.
+ */
+const NOT_IN_SAID = /안에\s*있는\s*(?:게|것이|건|것은)\s*아니|안이\s*아니|안에\s*있지\s*않|\b(?:is\s+)?not\s+(?:inside|within)\b|\bisn'?t\s+(?:inside|within)\b/i;
+const NEAR_AFTER = /^\s*(?:의\s*)?(?:바로\s*)?(?:옆|근처|부근|너머|건너편|맞은편|바깥|밖)/;
+const NEAR_BEFORE_EN = /\b(?:beside|next\s+to|near(?:by)?|outside(?:\s+of)?|beyond|across\s+from|opposite|behind|in\s+front\s+of|close\s+to)\s+(?:the\s+)?$/i;
+function saidNotInside(evidence, inner, outer) {
+  const t = String(evidence || '').toLowerCase();
+  if (!t) return false;
+  const at = (e) => { const out = []; for (const n of [e?.name, ...(e?.aliases || [])].map((x) => String(x || '').toLowerCase()).filter((x) => x.length >= 2)) for (let i = t.indexOf(n); i >= 0; i = t.indexOf(n, i + 1)) out.push([i, n.length]); return out; };
+  if (at(inner).some(([i, n]) => NOT_IN_SAID.test(t.slice(i + n, i + n + 40)))) return true;
+  const o = at(outer);
+  return o.length > 0 && o.every(([i, n]) => NEAR_AFTER.test(t.slice(i + n, i + n + 12)) || NEAR_BEFORE_EN.test(t.slice(Math.max(0, i - 40), i)));
+}
 /** A building: underground under it is still in it (v0.5.0 E). */
 const BUILDING = /(성|궁|궁전|저택|본관|건물|탑|별관|관|castle|manor|palace|hall|tower|estate|mansion|keep|building|school)$/i;
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
@@ -1747,7 +1778,7 @@ class Archive {
       if (!sheet) {
         if (doc.entities.length >= ENTITY_MAX) continue;
         sheet = {
-          entityId: randomUUID(), type: 'schedule', name: meta.lang === 'en' ? (owner ? owner.name + ' Academic Calendar' : 'World Academic Calendar') : owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
+          entityId: randomUUID(), type: 'schedule', name: calendarName(doc, owner, meta.lang), aliases: [], description: '',
           fields: owner ? { who: owner.name } : {}, extra: [], pinned: false, sources: {}, status: 'confirmed',
           provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, calendar: { ownerId, events: {} },
           revision: 1, createdAt: t, updatedAt: t,
@@ -1817,7 +1848,7 @@ class Archive {
       const owner = body.ownerId ? doc.entities.find((e) => e.entityId === body.ownerId && (e.type === 'group' || e.type === 'place')) : null;
       if (body.ownerId && !owner) throw new ArchiveError(404, '학사일정의 주인(집단이나 장소)을 찾지 못했습니다.');
       sheet = {
-        entityId: randomUUID(), type: 'schedule', name: owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
+        entityId: randomUUID(), type: 'schedule', name: calendarName(doc, owner), aliases: [], description: '',
         fields: owner ? { who: owner.name } : {}, extra: [], pinned: false, sources: { name: 'manual' }, status: 'confirmed',
         provenance: { source: 'manual' }, calendar: { ownerId: owner?.entityId ?? null, events: {} }, revision: 1, createdAt: t, updatedAt: t,
       };
@@ -2624,6 +2655,12 @@ class Archive {
         continue;
       }
       if (doc.relations.length >= REL_MAX) continue;
+      // v0.8.0: a 위치 whose own sentence says it is not inside is not made
+      if (raw.type === '위치') {
+        const a = doc.entities.find((x) => x.entityId === raw.from);
+        const b = doc.entities.find((x) => x.entityId === raw.to);
+        if (a?.type === 'place' && b?.type === 'place' && saidNotInside(evidence, a, b)) continue;
+      }
       const r = { relationId: randomUUID(), from: raw.from, to: raw.to, type: raw.type, note, evidence, source: 'auto', createdAt: t, updatedAt: t };
       doc.relations.push(r);
       changes.push(this.relationLog(doc, r, 'relation-add', by, meta));
@@ -2891,7 +2928,9 @@ class Archive {
     doc.keptOnce = Array.isArray(doc.keptOnce) ? doc.keptOnce : [];
     const kept = new Set(doc.keptOnce);
     const inItems = new Set(doc.items.map((x) => x.entityId));
-    doc.once = [...ents.values()].filter((e) => ['rule', 'system', 'custom', 'schedule'].includes(e.type) && !e.timetable && !e.calendar && !e.pinned
+    // v0.8.0: none until the world has been read long enough (ONCE_MIN_MESSAGES)
+    const onceOn = this.onceReady(worldId);
+    doc.once = [...ents.values()].filter((e) => onceOn && ['rule', 'system', 'custom', 'schedule'].includes(e.type) && !e.timetable && !e.calendar && !e.pinned
       && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && Number.isFinite(e.seen?.n) && e.seen.n < 2
       && !ONCE_LAW.test(e.name) && !ONCE_MONEY.test(e.name) && e.topic !== '유래·역사' && !inItems.has(e.entityId) && !kept.has(e.entityId)
       // v0.7.4 1: a rule of a place or group is that place's (not 「한 번만 나왔어요」)
@@ -3417,6 +3456,8 @@ class Archive {
         : !relationFits(r.type, a.type, b.type) ? 'kind'
         : (a.type === 'person' && isDescriptiveName(a.name)) || (b.type === 'person' && isDescriptiveName(b.name)) ? 'described name'
         : !mentions(r.evidence, a) && !mentions(r.evidence, b) ? 'evidence names neither'
+        // v0.8.0: its own sentence says it is not inside (「그 안에 있는 게 아니라」 · 「센터 옆 별관」)
+        : r.type === '위치' && a.type === 'place' && b.type === 'place' && saidNotInside(r.evidence, a, b) ? 'not inside'
         : affiliationDiffers(r, a, b) ? 'affiliation differs'
         : null;
     };
@@ -3646,6 +3687,12 @@ class Archive {
   /** The rooms linked to a world (ids). */
   roomsOfWorld(worldId) {
     return Object.entries(this.readRooms().rooms).filter(([, l]) => l.worldId === worldId).map(([roomId]) => roomId);
+  }
+
+  /** v0.8.0: has this world been read long enough for 「한 번 나옴」 (ONCE_MIN_MESSAGES, all its rooms together)? */
+  onceReady(worldId) {
+    const read = Object.values(this.readRooms().rooms).filter((l) => l.worldId === worldId).reduce((a, l) => a + (Number(l.read?.count) || 0), 0);
+    return read >= ONCE_MIN_MESSAGES;
   }
 
   /**

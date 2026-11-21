@@ -177,7 +177,8 @@ const ONCE_TYPES = new Set(['rule', 'system', 'custom', 'history']);
 // the scenes there (「여기」) even when one batch spoke of it (배정식 · 금지된 숲)
 const onceOnly = (e) => ONCE_TYPES.has(e?.type) && !(e.appliesTo && e.appliesTo !== WORLD) && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(String(e.name || '')) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
 
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null } = {}) {
+// onceOn (v0.8.0): false while the world has not been read long enough for 「한 번 나옴」 (the store's onceReady)
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null, onceOn = true } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
@@ -198,8 +199,9 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   // 「Here」: the places and groups of the scene, the places they are in (위치) and the bigger groups (소속), the groups
   // the people of the scene belong to. A rule of a place or group not here is left out.
   // Without scene information yet (a fresh start), everything is a candidate in the plain order.
-  const once = (entities || []).filter(onceOnly).length;
-  let pool = (entities || []).filter((e) => !onceOnly(e));
+  const isOnce = (e) => onceOn && onceOnly(e);
+  const once = (entities || []).filter(isOnce).length;
+  let pool = (entities || []).filter((e) => !isOnce(e));
   let skipped = 0;
   const byIdAll = new Map((entities || []).map((x) => [x.entityId, x]));
   const nameOf = (id) => byIdAll.get(id)?.name || '';
