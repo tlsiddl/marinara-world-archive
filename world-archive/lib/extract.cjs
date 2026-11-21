@@ -151,6 +151,9 @@ function fieldGuide() {
  * glossary: the room's translation glossary pairs [{ from, to }] — only those named in the batch go in.
  */
 /** v0.5.1 T: the 균형 볼 칸 the world added that are not person fields — asked only with evidence. */
+/** v0.7.2 C: each topic's meaning and what it is not (in the organizing language's examples). */
+const TOPIC_GUIDE_KO = "주제 뜻(맞는 게 없거나 애매하면 「그 밖」): 금지·예절 = 하지 말라는 것 · 지킬 예의와 그 벌(통금, 출입 금지, 식탁 예절) — 하는 법이나 허락은 아님. 돈·거래 = 화폐 · 값 · 사고팔기 · 빚(갈레온 환율, 가게 값) — 준비물 목록은 아님. 시간·영업 = 여는 · 닫는 때 · 정해진 시각 · 기한 · 학기(9시에 닫음, 열차 11시 출발) — 날마다의 일과 내용은 아님. 방법·기술 = 무엇을 하는 법 · 마법 · 기술이 돌아가는 원리(지팡이 고르는 법, 변신술 원리) — 비밀번호 · 허락 · 배정 결과는 아님. 유래·역사 = 왜 그렇게 됐는지 · 내력 · 옛일. 그 밖 = 위에 없는 것(비밀번호, 허락되는 것, 배정 · 구성, 생물 설명, 호칭).";
+const TOPIC_GUIDE_EN = "Topic meanings (none fits or unsure → 「그 밖」): 금지·예절 = what is forbidden · manners to keep and their penalty (curfew, out of bounds, table manners) — not how-to or what is allowed. 돈·거래 = money · prices · buying and selling · debts (Galleon rates, shop prices) — not a supply list. 시간·영업 = opening/closing · set times · deadlines · terms (locks at nine, train leaves at eleven) — not what a daily routine is. 방법·기술 = how to do something · how magic or a craft works (choosing a wand, laws of Transfiguration) — not a password, a permission or a sorting result. 유래·역사 = why it is so · origins · the past. 그 밖 = anything else (passwords, what is allowed, sorting and make-up, creature notes, forms of address).";
 const customBalance = (world) => (Array.isArray(world?.balance) ? world.balance : []).filter((l) => !FIELDS.person.some((f) => f.label === l));
 const balanceGuide = (world) => { const c = customBalance(world); return c.length ? `\n인물의 균형 볼 칸(근거가 있을 때만, 없으면 적지 않는다): ${c.join(', ')} — 인물 항목에 "balance":{"${c[0]}":{"v":"값","n":["근거 문장 번호"]}}로 적는다.` : ''; };
 function buildPrompt(world, entities, part, cast, glossary = [], today = null, lang = 'ko') {
@@ -189,7 +192,8 @@ function buildPrompt(world, entities, part, cast, glossary = [], today = null, l
 ${KIND_GUIDE}
 - rule·system·history 구별: 지켜야 하는 것(어기면 벌·꾸중을 받는 법·제도·학교 규칙)은 rule, 세계가 그렇게 돌아가는 원리(마법·능력이 작동하는 방식, 화폐·경제, 점수가 매겨지는 방식)는 system, 이야기 전에 이미 끝난 과거의 일은 history다. 예: 「밤 10시 이후 기숙사 밖 금지」는 rule, 「마법은 지팡이 없이 쓰면 힘이 흩어진다」는 system, 「100년 전 두 왕국의 전쟁」은 history.
 - rule·system에는 where(적용되는 곳)를 적는다: 그 규칙·원리가 특정 장소나 집단에서만 통하면 그 장소·집단 이름([이미 있는 항목]이나 items의 이름 그대로 — 예: 기숙사 암호는 그 기숙사, 교실 규칙은 그 학교), 세계 어디서나 통한다는 게 분명하면(법·화폐·마법의 원리처럼) "세계 전체", 어디 것인지 근거로 알 수 없으면 빈 문자열. 이름이 같아도 적용되는 곳이 다르면 다른 항목이다.
-- rule·system에는 topic(주제)을 적는다: 금지·예절(하지 말 것 · 지킬 예의), 돈·거래(화폐 · 값 · 사고팔기), 시간·영업(여는 시간 · 정해진 때), 방법·기술(하는 법 · 마법 · 기술의 원리), 유래·역사(왜 그렇게 됐는지 · 내력), 그 밖 중 하나 그대로.
+- rule·system에는 topic(주제)을 적는다: 금지·예절 · 돈·거래 · 시간·영업 · 방법·기술 · 유래·역사 · 그 밖 중 하나 그대로. ${en ? TOPIC_GUIDE_EN : TOPIC_GUIDE_KO}
+- 한 인물의 말 · 소문 · 농담 · 짐작 · 허세(「누구 언니가 그러는데」, 「~라고 우김」)는 규칙 · 시스템으로 만들지 않는다 — 그 인물의 memo에 적거나, 칸 값이면 소문으로 적는다. ${en ? '예: "Daphne says her sister heard Snape locks the classroom at nine" → Daphne의 memo, not a rule. "Cassian boasts Merlin was a Slytherin" → not a rule.' : '예: 「다프네가 언니한테 들었는데 스네이프가 9시에 교실을 잠근대」 → 다프네의 memo, 규칙 아님.'}
 - group에는 근거가 있으면 base(본거지)를 적는다: 그 집단이 머무는 장소 이름(예: 기숙사 → 그 기숙사 건물, 가문 → 그 저택). 없으면 빈 문자열.
 - person에는 근거가 있으면 room(지내는 곳)을 적는다: 그 인물에게 배정된 방 · 숙소 · 침실처럼 지금 묵으며 지내는 장소 이름(예: 슬리데린 1학년 여학생 기숙사, 3층 7호실). 잠깐 들른 곳은 아니다. 방을 옮겼으면 새 곳만 적는다(이전 곳은 프로그램이 남긴다). 없으면 빈 문자열. 그 장소가 [이미 있는 항목]에 없으면 장소 항목으로 같이 만든다.
 - place의 layout(배치·내부 구조)에는 안에 무엇이 어디 있는지(침대 다섯 개, 창가에 책상, 계단 아래 문), use(시설·용도)에는 무슨 곳이고 어떤 시설이 있는지만 적는다. 그곳에서 지켜야 하는 것은 rule로 따로, 누가 지내는지는 그 인물의 room으로 적는다.
@@ -646,4 +650,4 @@ function checkScores(parsed, part) {
   return out;
 }
 
-module.exports = { REF_NUMBERS, noRefs, saysValue, segmentBlocks, STATUS_LINE, isProfile, customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };
+module.exports = { TOPIC_GUIDE_KO, TOPIC_GUIDE_EN, REF_NUMBERS, noRefs, saysValue, segmentBlocks, STATUS_LINE, isProfile, customBalance, HUMAN_SPECIES, whoseCheck, checkCalendar, checkTimetable, checkScores, unread, batches, buildPrompt, checkItems, checkRelations, relationFits, checkFields, overlap, readReply, squash, HOLD_BACK };

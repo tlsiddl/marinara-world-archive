@@ -29,7 +29,7 @@ const TITLE_ENDINGS = ['선생님', '교수님', '선생', '교수', '부인', '
 /** Ranks: 「공작부인」 is a title of its own (the duchess), not 「공작」 with 「부인」 written onto it. */
 const RANKS = new Set(['공작', '후작', '백작', '자작', '남작', '대공', '왕', '국왕', '여왕', '황제', '황후', '왕비', '왕자', '공주', '영주']);
 /** Words that make a name a role, not a given name and a family name (「슬리데린 5학년 반장」). */
-const ROLE = /\d|반장|사감|감독|회장|단장|대장|주인|장수|학생|학년|하인|집사|관리인|수위|사서|선배|후배|기사단/;
+const ROLE = /\d|반장|사감|감독|회장|단장|대장|주인|장수|학생|학년|하인|집사|관리인|수위|사서|선배|후배|기사단|\b(?:prefects?|head|captain|students?|years?|first-years?|servants?|butler|caretaker|librarian|keeper|knights?|maids?|footman|valet|governess|nanny|owner|clerk)\b/i;
 
 const HANGUL = /^[가-힣]+$/;
 const len = (s) => [...s].length;
@@ -256,21 +256,30 @@ function speciesPairs(entities, skip = () => false) {
  * in the other (소속), not two rules said to hold in different places. [{ a, b, why }], the fuller one first.
  */
 const THING_TYPES = new Set(['place', 'group', 'rule', 'system', 'schedule', 'custom']);
-const SAME_WORD = new Map([['특급', '급행'], ['특급열차', '급행열차'], ['여자', '여학생'], ['남자', '남학생'], ['침실', '기숙사'], ['숙소', '기숙사'], ['기숙사방', '기숙사'], ['지하실', '지하'], ['지하감옥', '지하'], ['감옥', '지하'], ['express', '급행열차']]);
-const PLAIN_WORDS = new Set(['기숙사', '학교', '마법학교', '건물', '본관', '교실', '전용', '공용', '의']);
+const SAME_WORD = new Map([['특급', '급행'], ['특급열차', '급행열차'], ['여자', '여학생'], ['남자', '남학생'], ['침실', '기숙사'], ['숙소', '기숙사'], ['기숙사방', '기숙사'], ['지하실', '지하'], ['지하감옥', '지하'], ['감옥', '지하'], ['express', '급행열차'],
+  // v0.7.2 0): English words read alike (plural, the same thing said two ways)
+  ['bedroom', 'dormitory'], ['bedchamber', 'dormitory'], ['dorm', 'dormitory'], ['quarters', 'dormitory'], ['dungeon', '지하'], ['cellar', '지하'], ['basement', '지하'], ['underground', '지하'],
+  ['carriage', 'car'], ['coach', 'car'], ['compartment', 'car'], ['loch', 'lake'], ['lavatory', 'washroom'], ['bathroom', 'washroom'], ['toilet', 'washroom'], ['lesson', 'class'], ['lessons', 'class']]);
+const PLAIN_WORDS = new Set(['기숙사', '학교', '마법학교', '건물', '본관', '교실', '전용', '공용', '의',
+  'the', 'a', 'an', 'of', 'house', 'school', 'building', 'main', 'dormitory', 'classroom', 'hall', 'castle', 'side']);
 /** Word ends that are words of their own when they stick to the word before (「급행열차」 → 급행 · 열차). */
 const TAIL_WORDS = ['열차', '기숙사', '휴게실', '교실', '침실', '지하실', '감옥', '선착장', '도서관', '사무실'];
 const splitWord = (w) => {
   const t = TAIL_WORDS.find((x) => w.length > x.length && w.endsWith(x));
   return t ? [w.slice(0, -t.length), t] : [w];
 };
-const thingWords = (name) => String(name || '').normalize('NFC').toLowerCase().replace(/[()「」『』"'“”‘’·,.]/g, ' ').split(/\s+/).filter(Boolean).flatMap(splitWord).map((w) => SAME_WORD.get(w) || w);
+// v0.7.2 0): English words one by one — hyphens apart, a plural as its singular (dormitories · dungeons), "the" away
+const singular = (w) => (!/^[a-z]{4,}$/.test(w) ? w : w.endsWith('ies') ? w.slice(0, -3) + 'y' : /(ss|us|is)$/.test(w) ? w : w.endsWith('s') ? w.slice(0, -1) : w);
+const thingWords = (name) => String(name || '').normalize('NFC').toLowerCase().replace(/[()「」『』"'“”‘’·,.]/g, ' ').replace(/(?<=[a-z])-(?=[a-z])/g, ' ').split(/\s+/).filter(Boolean).flatMap(splitWord).map(singular).map((w) => SAME_WORD.get(w) || w).filter((w) => w !== 'the');
 function thingPairs(entities, relations = [], skip = () => false) {
   const linked = new Set((relations || []).filter((r) => r.type === '위치' || r.type === '소속').flatMap((r) => [r.from + '|' + r.to, r.to + '|' + r.from]));
   const filled = (e) => Object.values(e.fields || {}).filter(Boolean).length + (e.description ? 1 : 0) + (e.aliases || []).length;
   const key = (n) => String(n || '').normalize('NFC').toLowerCase().replace(/\s+/g, '');
   // the words of the names of groups and places the world has
-  const known = new Set(entities.filter((e) => e.type === 'group' || e.type === 'place').flatMap((e) => [e.name, ...(e.aliases || [])]).filter((n) => !/\s/.test(String(n).trim())).map((n) => String(n).normalize('NFC').toLowerCase()));
+  const known = new Set(entities.filter((e) => e.type === 'group' || e.type === 'place').flatMap((e) => [e.name, ...(e.aliases || [])]).filter((n) => !/\s/.test(String(n).trim())).map((n) => String(n).normalize('NFC').toLowerCase()).flatMap((n) => [n, singular(n)]));
+  // v0.7.2 D: two 시간표 that hold the same cells (a house's and its first-years') — 「같은 것일 수 있음」, never merged
+  // (the subject only: 「Charms」 · 「Charms (with Ravenclaw)」 are one class)
+  const cellsOf = (e) => new Set(Object.values(e.timetable?.cells || {}).map((c) => `${c.day}|${c.slot}|${String(c.subject || c.value || '').replace(/\s*[(（].*$/, '').trim().toLowerCase()}`));
   const byType = new Map();
   // v0.6.2 ②: rules and systems are looked at together (「애니마구스 등록」 a rule and a system)
   const kindKey = (t) => (t === 'rule' || t === 'system' ? 'rule|system' : t);
@@ -281,6 +290,16 @@ function thingPairs(entities, relations = [], skip = () => false) {
       const x = list[i], y = list[j];
       if (skip(x.entityId, y.entityId) || linked.has(x.entityId + '|' + y.entityId)) continue;
       if (x.appliesTo && y.appliesTo && x.appliesTo !== y.appliesTo) continue;
+      if (x.timetable && y.timetable) {
+        const cx = cellsOf(x), cy = cellsOf(y);
+        const both = [...cx].filter((c) => cy.has(c)).length;
+        const less = Math.min(cx.size, cy.size);
+        if (less >= 3 && both * 5 >= less * 4) {
+          const [a, b] = cx.size >= cy.size ? [x, y] : [y, x];
+          out.push({ a: a.entityId, b: b.entityId, why: `시간표 칸 ${both}개가 같음`, type: a.type });
+        }
+        continue;
+      }
       if (x.timetable || y.timetable) continue;
       let why = null;
       const kx = new Set([x.name, ...(x.aliases || [])].map(key).filter((k) => k.length >= 2));

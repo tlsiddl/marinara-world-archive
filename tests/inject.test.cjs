@@ -109,7 +109,9 @@ test('kind order: 인물 · 장소 · 집단 · 규칙 · 시스템 · 일정 ·
   ]);
   const heads = out.text.match(/^\[[^\]]+\]$/gm);
   assert.deepEqual(heads, ['[인물]', '[장소]', '[집단]', '[규칙]', '[시스템]', '[일정]', '[역사]', '[기타]']);
-  assert.match(out.text, /\[시스템\]\n- 기숙사 점수\n {2}분류: 점수\n {2}작동 방식: 잘하면 더하고 어기면 뺀다\n {2}제약·대가: 교수만 줄 수 있다/);
+  // v0.7.2 K: {{세계}} says the 주제, not the 분류 (the screen keeps the 분류)
+  assert.match(out.text, /\[시스템\]\n- 기숙사 점수\n {2}작동 방식: 잘하면 더하고 어기면 뺀다\n {2}제약·대가: 교수만 줄 수 있다/);
+  assert.doesNotMatch(out.text, /분류: 점수/);
   assert.match(out.text, /\[역사\]\n- 북부 전쟁\n {2}시기: 100년 전 \/ 관련 인물·집단: 두 왕국\n {2}결과·영향: 강이 국경이 됨/);
 });
 
