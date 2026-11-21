@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.6.6';
+  const VERSION = '0.7.0';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -294,6 +294,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 .wt-rule .rb{min-width:0;flex:1}.wt-rule .rt{display:inline;border:0;padding:0;background:transparent;text-align:left;color:var(--wa-ink);font:700 15px/1.45 var(--wa-serif);letter-spacing:0;cursor:pointer}
 .wt-rule .rt:hover{text-decoration:underline}.wt-rule .kind{margin-left:6px;font-size:12px;color:var(--wa-muted)}
 .wt-rule .rd{margin:3px 0 0;color:var(--wa-ink);opacity:.86;font-size:13.5px;line-height:1.6;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.emb-view{display:flex;justify-content:flex-end;margin:-6px 0 10px}.emb-view .view-lang{margin-right:0}
 .view-lang{display:inline-flex;flex:none;white-space:nowrap;align-items:center;gap:2px;border:1px solid var(--wa-line);border-radius:999px;padding:2px;margin-right:8px}.view-lang small{font-size:12px;color:var(--wa-muted);padding:0 6px 0 8px}
 .view-lang button{border:0;border-radius:999px;padding:3px 11px;background:transparent;color:var(--wa-ink);font:12.5px/1.5 var(--wa-sans);letter-spacing:0;cursor:pointer}.view-lang button.on{background:var(--wa-ink);color:var(--wa-paper)}
 .back-check{margin:14px 0 0;padding:12px 14px;border:1px solid var(--wa-ink);border-radius:10px}.back-check h4{margin:0 0 8px;font:700 14px/1.45 var(--wa-serif)}.back-check dl{margin:0}.back-check dt{font-size:12.5px;color:var(--wa-muted);margin-top:8px}.back-check dd{margin:2px 0 0}.back-check dd.to{font-family:var(--wa-serif)}
@@ -554,11 +555,16 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       </div>`;
   }
 
+  /** v0.7.0 3: 「보기: 원문 · 한국어」 — in the top bar, and (기억 서재 칸, no top bar) at the top of the page. */
+  function viewLangHtml() {
+    return st.worldId ? `<span class="view-lang" role="group" aria-label="보기"><small>보기</small><button type="button" data-act="view-lang" data-lang="orig" aria-pressed="${!st.viewKo}" class="${st.viewKo ? '' : 'on'}">원문</button><button type="button" data-act="view-lang" data-lang="ko" aria-pressed="${!!st.viewKo}" class="${st.viewKo ? 'on' : ''}">한국어${st.koBusy ? ' …' : ''}</button></span>` : '';
+  }
+  const refreshViewLang = () => root.querySelectorAll('.view-lang').forEach((x) => { x.outerHTML = viewLangHtml(); });
   function topHtml() {
     const opts = st.worlds.map((w) => `<option value="${esc(w.worldId)}" ${w.worldId === st.worldId ? 'selected' : ''}>${esc(w.name)}${w.worldId === st.room?.worldId ? '  · 이 방' : ''}</option>`).join('');
     return `${st.worlds.length ? `<select id="worldSelect" aria-label="세계관 고르기">${opts}</select>` : '<span class="sub">아직 세계관이 없습니다</span>'}
       <span class="grow"></span>
-      ${st.worldId ? `<span class="view-lang" role="group" aria-label="보기"><small>보기</small><button type="button" data-act="view-lang" data-lang="orig" aria-pressed="${!st.viewKo}" class="${st.viewKo ? '' : 'on'}">원문</button><button type="button" data-act="view-lang" data-lang="ko" aria-pressed="${!!st.viewKo}" class="${st.viewKo ? 'on' : ''}">한국어${st.koBusy ? ' …' : ''}</button></span>` : ''}
+      ${viewLangHtml()}
       <button id="themeToggle" class="round" type="button" data-act="theme" aria-label="${st.theme === 'dark' ? '밝게' : '어둡게'}">${icon(st.theme === 'dark' ? 'sun' : 'moon')}</button>
       <button id="close" class="round" type="button" data-act="close" aria-label="닫기">${icon('close')}</button>`;
   }
@@ -1671,7 +1677,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       ? `<p class="msg bad" role="status">서버 쪽 World Archive(v${esc(st.serverVersion)})와 이 화면(v${esc(VERSION)})의 판이 달라요. 서버 쪽을 업데이트해 주세요 — 서버에서 설치 명령을 다시 실행하면 됩니다.</p>`
       : '';
     const nav = EMBEDDED && st.loaded && world() && st.view !== 'tabs' && !st.detail && !st.editing && (['log', 'scores', 'world', 'overview'].includes(st.view) || KIND[st.view]) ? subtabsHtml(worldMap(), null) : '';
-    el.main.innerHTML = skew + (st.msg && !(st.readOnly && st.msg === UPDATE_MSG) ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + nav + mainHtml();
+    const viewBar = EMBEDDED && st.loaded && st.worldId ? `<div class="emb-view" data-no-tr>${viewLangHtml()}</div>` : '';
+    el.main.innerHTML = viewBar + skew + (st.msg && !(st.readOnly && st.msg === UPDATE_MSG) ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + nav + mainHtml();
     el.main.scrollTop = keep;
     lastScreen = screen;
     if (st.query) filterCards();
@@ -1707,14 +1714,14 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     if (!missing.size || koAsking || !st.worldId) return;
     koAsking = true;
     st.koBusy = true;
-    el.top.innerHTML = topHtml();
+    refreshViewLang();
     const texts = [...missing].slice(0, 120);
     const worldId = st.worldId;
     api('POST', `/worlds/${worldId}/translate`, { texts })
       .then((r) => { for (const [k, v] of Object.entries(r.items || {})) koCache.set(k, v); for (const t of texts) if (!koCache.has(t)) koFailed.add(t); })
       .catch((e) => { for (const t of texts) koFailed.add(t); st.msg = `한국어 보기: ${e?.message || e}`; st.bad = true; })
       // never a whole redraw (a form being written stays): the top bar, and the Korean put into the nodes there are
-      .finally(() => { koAsking = false; st.koBusy = false; el.top.innerHTML = topHtml(); if (st.viewKo && st.worldId === worldId) koView(); });
+      .finally(() => { koAsking = false; st.koBusy = false; refreshViewLang(); if (st.viewKo && st.worldId === worldId) koView(); });
   }
   /** Korean for these settings values (the edit form in the Korean view), into koCache. */
   async function koFor(values) {
