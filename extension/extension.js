@@ -86,7 +86,7 @@ label.f em{display:block;font:12.5px/1.5 var(--wa-sans);letter-spacing:0;font-st
 h3.grp{font:700 16px/1.4 var(--wa-serif);margin:22px 0 10px;display:flex;align-items:baseline;gap:8px}h3.grp small{font:12px var(--wa-sans);color:var(--wa-muted)}
 .fact-caps{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 10px}
 .fact-cap{display:inline-flex;align-items:baseline;gap:7px;border:1.2px solid var(--wa-ink);border-radius:999px;padding:4px 13px;font:600 14px/1.45 var(--wa-serif);background:transparent;color:var(--wa-ink)}.fact-cap small{font:12px var(--wa-sans);color:var(--wa-muted);font-weight:400}button.fact-cap{cursor:pointer}
-.rel-caps{display:flex;flex-wrap:wrap;gap:8px}.rel-cap{border:1px solid var(--wa-line);border-radius:999px;padding:4px 12px;background:transparent;color:var(--wa-ink);font:13.5px/1.45 var(--wa-sans);cursor:pointer}.rel-cap b{font-family:var(--wa-serif)}.rel-cap small{color:var(--wa-muted)}
+.rel-caps{display:flex;flex-wrap:wrap;gap:8px}.rel-cap{border:1px solid var(--wa-line);border-radius:999px;padding:4px 12px;background:transparent;color:var(--wa-ink);font:13.5px/1.45 var(--wa-sans);cursor:pointer;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.rel-cap b{font-family:var(--wa-serif)}.rel-cap small{color:var(--wa-muted);font-size:12px}.rel-cap .note-dot{font-style:normal;color:var(--wa-muted);margin-left:4px}
 small.was,.past.was{color:#2f5fa8}
 .hid-toggle{display:inline-flex;align-items:center;gap:6px;margin:6px 0 0;font:12.5px var(--wa-sans);color:var(--wa-muted);border:1px dashed var(--wa-line);border-radius:999px;padding:2px 10px}.hid-toggle input{width:auto;margin:0}
 .rel-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--wa-line)}.rel-row span{flex:1;min-width:180px}.rel-row select{width:auto;max-width:220px;padding:5px 8px}.rel-row.add{border-bottom:0}
@@ -689,8 +689,6 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
    * v0.7.0 6: how a list is laid out — 집단으로 묶기 · 장소로 묶기 · 가나다, and 숨은 설정 있음 · 반복 등장만. In a group,
    * 「맡은 사람 · 선생님」 and 「함께 사는 동물」 apart from the members.
    */
-  const ROLE_C = /(교수|교사|선생|사감|기숙사장|반장|감독생|교장|부교장|학장|원장|단장|회장|대장|주장|관리인|관리자|사서|집사|하인|하녀|시종|주인|점원|지배인|유모|가정교사|마부|요리사|정원사|운전사)/;
-  const ANIMAL_C = /(고양이|강아지|개|부엉이|올빼미|니즐|크니즐|쥐|두꺼비|불사조|용|드래곤|말|토끼|여우|늑대|표범|까마귀|뱀|사슴|곰|cat|dog|owl|kneazle|toad|rat|phoenix|dragon|horse|raven|snake)/i;
   const LIST_MODES = { person: [['group', '집단으로 묶기'], ['place', '장소로 묶기'], ['abc', '가나다']], other: [['place', '장소로 묶기'], ['abc', '가나다']] };
   function listGroups(type, list) {
     const mode = st.listMode?.[type] || (type === 'person' ? 'group' : 'abc');
@@ -698,12 +696,17 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const out = new Map();
     const put = (k, e) => { if (!out.has(k)) out.set(k, []); out.get(k).push(e); };
     if (mode === 'group' && type === 'person') {
+      // the same as each group's 명단 (server roster.cjs): 구성원 / 맡은 사람 · 선생님 / 지난 구성원 / 함께 사는 동물
+      const groups = st.entities.filter((x) => x.type === 'group');
+      for (const g of groups) if (!st.rosters?.[g.entityId]) void loadRoster(g.entityId);
+      const where = new Map(); // personId → [group name, kind] — the first group (by name) that lists them
+      for (const g of [...groups].sort((a, b) => a.name.localeCompare(b.name, 'ko'))) {
+        for (const m of st.rosters?.[g.entityId]?.members || []) if (!where.has(m.entityId)) where.set(m.entityId, [g.name, m.kind]);
+      }
+      const KIND_WORD = { member: '', staff: ' · 맡은 사람 · 선생님', past: ' · 지난 구성원', animal: ' · 함께 사는 동물' };
       for (const e of list) {
-        const g = (st.relations || []).find((x) => x.type === '소속' && x.from === e.entityId && st.entities.find((y) => y.entityId === x.to)?.type === 'group');
-        const gname = g ? nameOfId(g.to) : '소속 없음';
-        const animal = ANIMAL_C.test(String(e.fields?.species || ''));
-        const staff = !animal && ROLE_C.test(String(e.fields?.affiliation || ''));
-        put(`${gname}${animal ? ' · 함께 사는 동물' : staff ? ' · 맡은 사람 · 선생님' : ''}`, e);
+        const at = where.get(e.entityId);
+        put(at ? `${at[0]}${KIND_WORD[at[1]] ?? ''}` : '소속 없음', e);
       }
     } else {
       const m = worldMap();
@@ -758,7 +761,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     if (st.rosters[id]) return;
     st.rosters[id] = { loading: true };
     try { st.rosters[id] = await api('GET', `/worlds/${st.worldId}/entities/${id}/members`); } catch { st.rosters[id] = { members: [], failed: true }; }
-    if (st.detail === id || st.view === 'tabs') render();
+    if (st.detail === id || st.view === 'tabs' || (st.view === 'person' && !st.detail)) render();
   }
   /** v0.7.0 7: the pickers (지내는 곳 · 적용되는 곳 · 본거지 · 시간표 칸 · 명단 더하기 …) show only in 「고치기」. */
   let EDIT_ON = false;
@@ -934,7 +937,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       const other = st.entities.find((x) => x.entityId === (r.from === e.entityId ? r.to : r.from));
       if (!other) return '';
       // v0.7.0 6: 「친구 테오 마렌」 — the kind and the other one, a capsule that opens them
-      return `<button class="rel-cap" type="button" data-act="open" data-id="${esc(other.entityId)}">${esc(r.type)} <b>${esc(other.name)}</b>${r.note ? ` <small>${esc(r.note)}</small>` : ''}</button>`;
+      // one line: the kind small and pale, then the name; the note (「기숙사 사감」) on hover or press, not in the capsule
+      return `<button class="rel-cap" type="button" data-act="open" data-id="${esc(other.entityId)}"${r.note ? ` title="${esc(r.note)}"` : ''}><small>${esc(r.type)}</small> <b>${esc(other.name)}</b>${r.note ? '<i class="note-dot" aria-hidden="true">·</i>' : ''}</button>`;
     }).join('');
     const relSec = rels ? `<div class="sec"><small>관계</small><div class="rel-caps">${rels}</div></div>` : '';
     const empty = !facts && !secs && !extra && !memo && !f.state && !rels;
