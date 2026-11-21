@@ -59,8 +59,9 @@ function entityLine(e, nameOf = () => '', today = null, names = 'ko', knownOf = 
   // v0.5.0 C: where a rule or system holds
   const where = e.appliesTo && nameOf(e.appliesTo) ? ` [${nameOf(e.appliesTo)}에서]` : '';
   const lines = [`- ${shown}${aliases}${where}`];
-  const defs = FIELDS[e.type] || [];
   const fields = e.fields || {};
+  // v0.7.8 C: an animal's 머리색 is its 털 · 깃털
+  const defs = (FIELDS[e.type] || []).map((d) => (d.key === 'hair' && R.animalIn(fields.species).length ? { ...d, label: '털 · 깃털' } : d));
   // v0.5.0 S: a field only a profile block has said so far
   const veiled = (k) => (e.hidden?.[k] ? ' (아직 드러나지 않음)' : '');
   const total = e.type === 'group' ? R.headcount(fields.size) : null;
