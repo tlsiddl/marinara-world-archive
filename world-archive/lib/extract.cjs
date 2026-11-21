@@ -142,8 +142,10 @@ const KIND_GUIDE = [
 /** Kinds whose name must appear in the text (a proper name or a fixed title). The others are named by description. */
 const NAMED_KINDS = new Set(['person', 'place', 'group']);
 
-function fieldGuide() {
-  return TYPES.map((t) => `${t}: ${FIELDS[t].map((f) => `${f.key}(${f.label})`).join(', ') || '(칸 없음, memo만)'}`).join('\n');
+function fieldGuide(world = null) {
+  // v0.7.6: an optional person field (기숙사 · 학년) only in a world that turns it on
+  const on = new Set(world?.personFields || []);
+  return TYPES.map((t) => `${t}: ${FIELDS[t].filter((f) => !f.optional || on.has(f.key)).map((f) => `${f.key}(${f.label})`).join(', ') || '(칸 없음, memo만)'}`).join('\n');
 }
 
 /**
@@ -204,7 +206,8 @@ ${KIND_GUIDE}
 {"type":"person|place|group|rule|system|schedule|history|custom","name":"가장 정식인 이름","aliases":["원문에 나온 다른 호칭"],"match":"이미 있는 항목을 가리키면 그 이름, 아니면 null","maybe":"같은 것인지 애매한 이미 있는 항목 이름, 아니면 null","fields":{"칸키":{"v":"값","n":["근거 문장 번호"]}},"memo":"칸에 안 맞는 중요한 사실 (없으면 빈 문자열)","evidence":[{"n":"문장 번호(예: 12.3)","q":"그 문장 속 핵심 구절"}]}
 
 칸 키 (이것 말고는 쓰지 마):
-${fieldGuide()}${balanceGuide(world)}
+${fieldGuide(world)}${balanceGuide(world)}
+- person의 hair(머리색) · eyes(눈색)는 외형에 나온 짧은 값만(예: "black", "grey-green", 「검은색」). 외형 칸은 그대로 다 적는다.${(world?.personFields || []).length ? ' house(기숙사)는 기숙사 이름만, year(학년)는 숫자만(예: 1).' : ''}
 
 칸 쓰는 법:
 - 칸마다 그 값이 나온 문장 번호를 n에 1~3개 적는다. 그 칸의 내용이 실제로 쓰인 문장이어야 한다(다른 사실이 쓰인 문장을 대지 마).
