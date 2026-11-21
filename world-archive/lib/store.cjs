@@ -926,17 +926,29 @@ class Archive {
     if (body.aliases !== undefined || !base) out.aliases = cleanAliases(body.aliases, out.name);
     else if (body.name !== undefined) out.aliases = cleanAliases(out.aliases, out.name);
     if (body.description !== undefined || !base) out.description = cleanText(body.description, DESC_MAX, '설명');
-    if (body.fields !== undefined || !base) out.fields = cleanFields(out.type, body.fields);
-    else if (body.type !== undefined) {
-      // kind changed without new fields: keep only the fields the new kind also has
-      const keep = Object.fromEntries(Object.entries(out.fields || {}).filter(([k]) => FIELDS[out.type].some((f) => f.key === k)));
-      out.fields = keep;
-    }
+    // kind changed: keep only the fields the new kind also has
+    const kept = () => Object.fromEntries(Object.entries(base?.fields || {}).filter(([k]) => FIELDS[out.type].some((f) => f.key === k)));
+    if (!base) out.fields = cleanFields(out.type, body.fields);
+    else if (body.fields !== undefined && body.fields !== null) {
+      // v0.7.7 (셸이 찾음): fields are merged — only the keys sent change; "" or null takes that key off; keys not sent stay
+      if (!isObject(body.fields)) throw new ArchiveError(400, '칸 내용은 {칸: 내용} 모양으로 보내 주세요.');
+      const merged = body.type !== undefined && body.type !== base.type ? kept() : { ...(base.fields || {}) };
+      for (const [key, value] of Object.entries(body.fields)) {
+        const def = FIELDS[out.type].find((f) => f.key === key);
+        if (!def) throw new ArchiveError(400, `'${key}'은(는) 이 종류에 없는 칸입니다.`);
+        const x = value == null ? '' : def.kind === 'line' ? cleanText(value, LINE_MAX, def.label).replace(/\s+/g, ' ') : cleanText(value, TEXT_MAX, def.label);
+        if (x) merged[key] = x; else delete merged[key];
+      }
+      out.fields = merged;
+    } else if (body.type !== undefined) out.fields = kept();
     if (body.extra !== undefined || !base) out.extra = cleanExtra(body.extra);
     // 할 일 10 (사령탑 추가): per field, put the earlier value into {{세계}} too — 「(과거: ○○)」. Off by default.
     if (body.pastInPrompt !== undefined) {
       if (!isObject(body.pastInPrompt) || !Object.values(body.pastInPrompt).every((v) => typeof v === 'boolean')) throw new ArchiveError(400, 'pastInPrompt는 {칸: true/false}입니다.');
-      out.pastInPrompt = Object.fromEntries(Object.entries(body.pastInPrompt).filter(([, v]) => v));
+      // v0.7.7: merged like fields — the keys sent change, the rest stay
+      const p = { ...(base?.pastInPrompt || {}) };
+      for (const [k, v] of Object.entries(body.pastInPrompt)) if (v) p[k] = true; else delete p[k];
+      out.pastInPrompt = p;
     }
     if (body.pinned !== undefined || !base) {
       if (body.pinned !== undefined && typeof body.pinned !== 'boolean') throw new ArchiveError(400, 'pinned는 true 또는 false입니다.');
@@ -1012,7 +1024,10 @@ class Archive {
     // v0.7.0 7: 「아직 드러나지 않음」 set by the person, field by field ({ key: true } — only fields that have a value)
     if (body.hidden !== undefined) {
       if (!isObject(body.hidden) || !Object.values(body.hidden).every((v) => typeof v === 'boolean')) throw new ArchiveError(400, 'hidden은 {칸: true/false}입니다.');
-      const h = Object.fromEntries(Object.entries(body.hidden).filter(([k, v]) => v && (entity.fields || {})[k]).map(([k]) => [k, true]));
+      // v0.7.7: merged — the keys sent change (true: hidden, false: shown), the rest stay; only fields that have a value
+      const h = { ...(entity.hidden || {}) };
+      for (const [k, v] of Object.entries(body.hidden)) if (v && (entity.fields || {})[k]) h[k] = true; else delete h[k];
+      for (const k of Object.keys(h)) if (!(entity.fields || {})[k]) delete h[k];
       if (Object.keys(h).length) entity.hidden = h; else delete entity.hidden;
       if (JSON.stringify(before.hidden || {}) !== JSON.stringify(entity.hidden || {})) entity.sources = { ...(entity.sources || {}), hidden: 'manual' };
     }
