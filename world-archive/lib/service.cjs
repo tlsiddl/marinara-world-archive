@@ -302,7 +302,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         // v0.6.2 ⑨: this batch's profile blocks read by code too — empty fields filled, people the reader left out made
         const profiles = part.batch.flatMap((x) => P.parseProfiles(x.content));
         if (profiles.length) {
-          const pc = s.applyProfiles(worldId, profiles, { pairs: glossary || [], story: storyOf(messages), says: X.saysValue, roomId, by: 'profile' });
+          const pc = s.applyProfiles(worldId, profiles, { pairs: glossary || [], story: storyOf(messages), says: X.saysValue, roomId, by: 'profile', lang });
           job.added += pc.filter((c) => c.action === 'create').length;
           job.changed += pc.filter((c) => c.action !== 'create').length;
         }
@@ -350,7 +350,7 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
         const storyNow = CAL.storyToday(part.batch.length ? [...messages.slice(0, part.end)] : []);
         const yearStart = world.yearStart || 9;
         const year = storyNow ? CAL.schoolYear(storyNow.date, yearStart) : null;
-        job.cells = (job.cells || 0) + s.applyTimetable(worldId, cells, { ...meta, year }).filter((c) => c.action === 'cell' || c.action === 'cell-pending').length;
+        job.cells = (job.cells || 0) + s.applyTimetable(worldId, cells, { ...meta, year, lang }).filter((c) => c.action === 'cell' || c.action === 'cell-pending').length;
         const cal = X.checkCalendar(parsed, part, cast, storyNow);
         const calEvents = [];
         for (const c of cal.events) {
@@ -499,6 +499,13 @@ async function organizeLang(world, roomId, { fresh = true } = {}) {
   if (world?.summaryLang === 'en' || world?.summaryLang === 'ko') return world.summaryLang;
   const known = fresh ? await memoryRoom(roomId) : memoryDays.get(roomId);
   return known?.lang === 'en' ? 'en' : 'ko';
+}
+/** v0.7.1: a world's 정리 언어 for work not tied to one room (recheck, buttons): English when any of its rooms is. */
+async function worldLang(worldId) {
+  const world = store().getWorld(worldId);
+  if (world.summaryLang === 'en' || world.summaryLang === 'ko') return world.summaryLang;
+  for (const roomId of store().roomsOfWorld(worldId)) if ((await organizeLang(world, roomId)) === 'en') return 'en';
+  return 'ko';
 }
 const organizeLangNow = (world, roomId) => (world?.summaryLang === 'en' || world?.summaryLang === 'ko' ? world.summaryLang : memoryDays.get(roomId)?.lang === 'en' ? 'en' : 'ko');
 
@@ -699,6 +706,7 @@ async function routes(r) {
   r.post('/worlds/:worldId/relations/recheck', handle(async (req) => {
     // v0.6.2: the rooms' messages, read from the engine (no model) — for ② ③ ④ ⑤ ⑨
     const sentences = await roomSentences(req.params.worldId);
+    const lang = await worldLang(req.params.worldId);
     const retyped = s().convertGroups(req.params.worldId, null, { by: 'recheck' });
     const removed = s().recheckRelations(req.params.worldId, { by: 'recheck' });
     // v0.5.0 O: other names that are pieces of sentences
@@ -706,12 +714,12 @@ async function routes(r) {
     // v0.6.2 ⑦: 학사일정 entries that are one person's
     const personal = s().personalEvents(req.params.worldId, { by: 'recheck' }).filter((c) => c.action === 'create').map((c) => c.name);
     // v0.6.2 ⑤: English words in Korean field values that the rooms' glossaries have
-    const glossed = sentences?.glossary?.length ? s().glossaryValues(req.params.worldId, sentences.glossary, { by: 'recheck' }).length : 0;
+    const glossed = lang !== 'en' && sentences?.glossary?.length ? s().glossaryValues(req.params.worldId, sentences.glossary, { by: 'recheck' }).length : 0;
     // v0.6.2 ②: 「한 번 나옴」 — the batches each setting was spoken of in, counted again from the history
     const seenMoved = s().recountSeen(req.params.worldId);
     // v0.6.2 ③ ④: status lines as evidence go back; 「아직 드러나지 않음」 again field by field, against the rooms' sentences
     // v0.6.2 ⑨: the rooms' profile blocks read by code (empty fields, people left out, 「서로 다른 말을 해요」)
-    const fromProfiles = sentences ? s().applyProfiles(req.params.worldId, sentences.profiles, { pairs: sentences.glossary, story: sentences.story, says: X.saysValue, by: 'recheck' }) : [];
+    const fromProfiles = sentences ? s().applyProfiles(req.params.worldId, sentences.profiles, { pairs: sentences.glossary, story: sentences.story, says: X.saysValue, by: 'recheck', lang }) : [];
     const fieldsBack = s().recheckFields(req.params.worldId, { isStatus: (x) => X.STATUS_LINE.test(String(x).trim()), says: X.saysValue, noRefs: X.noRefs, ...(sentences || {}) }, { by: 'recheck' });
     // v0.5.0 R: described names checked again against their sentence
     const all = s().listEntities(req.params.worldId);
@@ -722,7 +730,9 @@ async function routes(r) {
     s().linkSubgroups(req.params.worldId, { by: 'recheck' });
     const filled = s().fillGroups(req.params.worldId, { by: 'recheck' });
     s().linkAffiliations(req.params.worldId, null, { by: 'recheck' });
-    return { retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, personal, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
+    // v0.7.1: organized in English — what code wrote in Korean, in English
+    const english = lang === 'en' ? s().englishValues(req.params.worldId, { by: 'recheck' }).length : 0;
+    return { lang, english, retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, personal, once: s().listEntities(req.params.worldId).filter(onceOnly).length, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
   }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));
@@ -924,9 +934,10 @@ async function gatherTimetables(worldId, { model = true } = {}) {
   };
   const pairs = [];
   for (const roomId of s.roomsOfWorld(worldId)) pairs.push(...(glossaries.get(roomId) || (await roomGlossary(engineApi(), roomId)) || []));
+  const english = (await worldLang(worldId)) === 'en'; // v0.7.1: subjects stay as written
   const subjectKo = (v) => {
     const t = String(v || '').trim();
-    if (!/[A-Za-z]/.test(t)) return t;
+    if (english || !/[A-Za-z]/.test(t)) return t;
     const whole = pairs.find((p) => p.from.toLowerCase() === t.toLowerCase());
     if (whole) return whole.to;
     let out = t;
@@ -943,9 +954,9 @@ async function gatherTimetables(worldId, { model = true } = {}) {
     const base = strip(e.name) || e.name;
     const sheet = s.readEntities(worldId).entities.find((x) => x.timetable?.ownerId === owner.entityId);
     const had = Object.values(sheet?.timetable?.cells || {});
-    const all = found.map((c) => ({ ownerId: owner.entityId, day: c.day, slot: c.slot, value: subjectKo(c.after) || (/시간표|timetable/i.test(base) ? '수업' : base), evidence: '「' + e.name + '」에서 모음' }));
+    const all = found.map((c) => ({ ownerId: owner.entityId, day: c.day, slot: c.slot, value: subjectKo(c.after) || (/시간표|timetable/i.test(base) ? (english ? 'Class' : '수업') : base), evidence: '「' + e.name + '」에서 모음' }));
     const cells = all.filter((c) => !had.some((h) => h.day === c.day && overlaps(h.slot, c.slot)));
-    if (cells.length) s.applyTimetable(worldId, cells, { by: 'timetable-gather' });
+    if (cells.length) s.applyTimetable(worldId, cells, { by: 'timetable-gather', lang: await worldLang(worldId) });
     if (!manual(e)) s.deleteEntity(worldId, e.entityId, s.listEntities(worldId).find((x) => x.entityId === e.entityId).revision);
     out.moved.push({ name: e.name, cells: cells.map((c) => `${owner.name} ${c.day} ${c.slot} ${c.value}`), kept: manual(e), ...(all.length > cells.length ? { already: all.length - cells.length } : {}) });
   }
@@ -973,7 +984,7 @@ async function gatherTimetables(worldId, { model = true } = {}) {
       byFrom.get(e).push({ ownerId: owner.entityId, day, slot, value, evidence: '「' + e.name + '」에서 모음', ownerName: owner.name });
     }
     for (const [e, cells] of byFrom) {
-      s.applyTimetable(worldId, cells, { by: 'timetable-gather' });
+      s.applyTimetable(worldId, cells, { by: 'timetable-gather', lang: await worldLang(worldId) });
       if (!manual(e)) s.deleteEntity(worldId, e.entityId, s.listEntities(worldId).find((x) => x.entityId === e.entityId).revision);
       out.moved.push({ name: e.name, cells: cells.map((c) => `${c.ownerName} ${c.day} ${c.slot} ${c.value}`), kept: manual(e), byModel: true });
     }
@@ -1437,4 +1448,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { memoryToday, organizeLang, translateView, translateBack, trHash, readFromNow, pastCost, tidyCandidates, fillSpecies, gatherTimetables, gatherCalendar, fillPlaces, fillApplies, fillTopics, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useApp: (a) => { appRef = a; memoryDays.clear(); }, useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
+module.exports = { memoryToday, organizeLang, worldLang, translateView, translateBack, trHash, readFromNow, pastCost, tidyCandidates, fillSpecies, gatherTimetables, gatherCalendar, fillPlaces, fillApplies, fillTopics, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useApp: (a) => { appRef = a; memoryDays.clear(); }, useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };

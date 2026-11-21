@@ -100,9 +100,15 @@ function kindOfType(type) {
   return 'custom';
 }
 
-/** 「Male」 → 남성; a number → 「52살」; the rest as written. */
-function tidyValue(key, v) {
+/** 「Male」 → 남성; a number → 「52살」; the rest as written. v0.7.1: in English (lang 'en') Male · Female · the number as written. */
+function tidyValue(key, v, lang = 'ko') {
   const s = String(v || '').trim().replace(/[.。]$/, '');
+  if (lang === 'en') {
+    if (key === 'gender' && /^(male|man|boy|m|남|남자|남성)$/i.test(s)) return 'Male';
+    if (key === 'gender' && /^(female|woman|girl|f|여|여자|여성)$/i.test(s)) return 'Female';
+    const age = key === 'age' && s.match(/^(\d{1,4})\s*(살|세)$/);
+    return age ? age[1] : s;
+  }
   if (key === 'gender') {
     if (/^(male|man|boy|m|남|남자|남성)$/i.test(s)) return '남성';
     if (/^(female|woman|girl|f|여|여자|여성)$/i.test(s)) return '여성';
