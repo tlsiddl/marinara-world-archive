@@ -130,14 +130,33 @@ function shortAliases(e, p, taken, { aliasMax = 20, aliasLen = 60 } = {}) {
  * nouns only; rules, systems, schedules, history and the rest are not names to translate) with a Korean name and a
  * romanized other name. The original is longestLatin().
  */
-function glossaryNames(entities) {
+function glossaryNames(entities, cache = {}) {
   const out = [];
   for (const e of entities) {
-    if (!NAMED_KINDS.has(e.type) || !hasHangul(e.name) || hasLatin(e.name)) continue;
-    const best = longestLatin(e);
-    if (best) out.push({ original: best, translation: e.name, kind: KIND_KO[e.type] });
+    if (!NAMED_KINDS.has(e.type)) continue;
+    if (hasHangul(e.name) && !hasLatin(e.name)) {
+      const best = longestLatin(e);
+      if (best) out.push({ original: best, translation: e.name, kind: KIND_KO[e.type] });
+      continue;
+    }
+    // v0.7.2 J: a world organized in English — the name as written, its Korean other name (or the Korean view's fixed one)
+    if (!hasLatin(e.name) || hasHangul(e.name)) continue;
+    const ko = (e.aliases || []).find((a) => hasHangul(a) && !hasLatin(a)) || cache[e.name];
+    if (ko) out.push({ original: e.name, translation: ko, kind: KIND_KO[e.type] });
+  }
+  return out;
+}
+/** v0.7.2 J: the name pairs of a world organized in English — whole names and, for two words to two words, each word. */
+function englishNamePairs(entities, cache = {}) {
+  const out = [];
+  for (const p of glossaryNames(entities, cache)) {
+    if (!hasLatin(p.original)) continue;
+    out.push({ from: p.original, to: p.translation });
+    const a = p.original.trim().split(/\s+/);
+    const b = p.translation.trim().split(/\s+/);
+    if (a.length === 2 && b.length === 2) for (let i = 0; i < 2; i++) if (a[i].length >= 3) out.push({ from: a[i], to: b[i] });
   }
   return out;
 }
 
-module.exports = { key, hashPairs, pairsInText, matchFor, pairFor, planFor, shortAliases, manualName, glossaryNames, longestLatin, latinOnly, KIND_KO, NAMED_KINDS };
+module.exports = { key, hashPairs, pairsInText, matchFor, pairFor, planFor, shortAliases, manualName, glossaryNames, englishNamePairs, longestLatin, latinOnly, KIND_KO, NAMED_KINDS };

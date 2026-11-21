@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.7.1';
+  const VERSION = '0.7.2';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -913,10 +913,13 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   /** 「잡다한 설정 정리」 candidates (v0.5.0 P · Q): the person picks — 휴지통 (undoable) · 칸 비우기 · 남기기. */
   function tidyHtml() {
     const t = st.tidy;
-    if (!t || (!t.items.length && !t.fields.length)) return '';
+    const once = t?.once || [];
+    if (!t || (!t.items.length && !t.fields.length && !once.length)) return '';
     const items = t.items.map((x) => `<li><b>${esc(x.name)}</b> <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-trash" data-id="${esc(x.entityId)}">휴지통으로</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}">남기기</button></li>`).join('');
     const fields = t.fields.map((x) => `<li><b>${esc(x.name)}</b> · ${x.key === 'description' ? '메모' : x.key === 'appearance' ? '외형' : '성격'}: ${esc(x.value)} <small>${esc(x.why || '')}</small> <button class="quiet" type="button" data-act="tidy-clear" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">칸 비우기</button><button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}" data-key="${esc(x.key)}">남기기</button></li>`).join('');
-    return `<div class="paper"><h2>잡다한 설정 정리 · 후보 ${t.items.length + t.fields.length}</h2><p class="hint">지우지 않았습니다. 고른 것만 휴지통으로 가고 기록에서 되돌릴 수 있습니다.</p>${items ? `<ul class="hist">${items}</ul>` : ''}${fields ? `<ul class="hist">${fields}</ul>` : ''}</div>`;
+    // v0.7.2 E: two rows — ① what the model found passing ② spoken of once (by code), 「남길까요」
+    const onceRows = once.map((x) => `<li><b>${esc(x.name)}</b> <small>${esc(KIND[x.type]?.label || '')}${x.topic ? ` · ${esc(x.topic)}` : ''}</small> <button class="quiet" type="button" data-act="tidy-keep" data-id="${esc(x.entityId)}">남기기</button><button class="quiet" type="button" data-act="tidy-trash" data-id="${esc(x.entityId)}">휴지통으로</button></li>`).join('');
+    return `<div class="paper"><h2>잡다한 설정 정리 · 후보 ${t.items.length + t.fields.length + once.length}</h2><p class="hint">지우지 않았습니다. 고른 것만 휴지통으로 가고 기록에서 되돌릴 수 있습니다.</p>${items || fields ? `<h3 class="grp">① 오래가지 않는 것 같아요 <small>모델 판정</small></h3>` : ''}${items ? `<ul class="hist">${items}</ul>` : ''}${fields ? `<ul class="hist">${fields}</ul>` : ''}${onceRows ? `<h3 class="grp">② 한 번만 나왔어요 — 남길까요 <small>${once.length}개</small></h3><ul class="hist">${onceRows}</ul>` : ''}</div>`;
   }
 
   function detailHtml(e) {
@@ -969,6 +972,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
             <div class="eyebrow">${k.label}</div>
             <h1 style="margin-bottom:6px">${esc(e.name)}</h1>
             ${e.aliases.length ? `<p class="al">다른 이름 · ${esc(e.aliases.join(', '))}</p>` : ''}
+            ${e.nameSuggest && e.nameSuggest !== e.name && !st.readOnly ? `<p class="sub" style="margin:6px 0 0">대화에서는 「${esc(e.nameSuggest)}」${copula(e.nameSuggest)} 더 많이 불려요. 대표 이름을 바꿀까요? <button class="quiet" type="button" data-act="name-suggest" data-id="${esc(e.entityId)}">바꾸기</button></p>` : ''}
             ${e.glossaryName && e.glossaryName !== e.name ? `<p class="sub" style="margin:6px 0 0">번역 단어장에는 「${esc(e.glossaryName)}」${copula(e.glossaryName)} <button class="quiet" type="button" data-act="glossary-name" data-id="${esc(e.entityId)}">적용</button></p>` : ''}
           </div>
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}${e.nameCheck ? `<span class="pill" title="근거 문장에는 「${esc(e.nameCheck.said)}」이(가) 나옵니다. 이름을 확인해 주세요(고치면 사라집니다).">이름 확인 필요</span>` : ''}
@@ -1317,7 +1321,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   const SQ = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
   const GROUP_ENDS = ['마법학교', '기숙사', '기사단', '가문', '집안', '일가', '학교', '학원', '조직', '무리', '일행', 'family', 'school', 'house'];
   const groupKeysC = (g) => [...new Set([g.name, ...(g.aliases || [])].map(SQ).flatMap((k) => { const end = GROUP_ENDS.find((x) => k.endsWith(x) && k.length - x.length >= 2); return [k, end ? k.slice(0, -end.length) : k]; }))].filter((k) => k.length >= 2);
-  const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus'];
+  const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus', 'grounds', 'manor', 'estate', 'hall', 'headquarters', 'hq'];
   const VEHICLE = /(열차|기차|마차|보트|급행|호차|(^|\s)배(\s|$)|express|train|carriage|coach|boat)/i; // v0.6.4 f: the same as the server's
   function groupOfPlaceC(p, all) {
     if (p?.type !== 'place' || VEHICLE.test(String(p.name || ''))) return null;
@@ -1369,7 +1373,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   const caps = (list, label = (e) => e.name) => `<div class="wt-row">${list.map((e) => `<button class="cap" type="button" data-act="open" data-id="${esc(e.entityId)}" data-q="${esc(label(e).toLowerCase())}">${esc(label(e))}</button>`).join('')}</div>`;
   const ruleText = (e) => e.description || e.fields?.how || e.fields?.category || '';
   // v0.6.2 ②: a rule or system one batch spoke of — kept, not in {{세계}} (the same test as the server's)
-  const LAW_NAME = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)/;
+  const LAW_NAME = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)|\b(?:laws?|decrees?|statutes?|acts?|codes?|charters?|treaty|treaties|rules?|regulations?|edicts?)\b/i; // the server's (inject.cjs)
   function isOnce(e) {
     return ['rule', 'system', 'custom', 'history'].includes(e.type) && !(e.appliesTo && e.appliesTo !== 'world') && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(e.name) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
   }
@@ -1942,6 +1946,16 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       root.querySelector('#entityForm > .actions')?.insertAdjacentHTML('beforebegin', box);
       root.getElementById('backCheck')?.scrollIntoView?.({ block: 'nearest' });
     },
+    // v0.7.2 L: 「대표 이름을 바꿀까요 [바꾸기]」 — the same ordinary rename (the old name stays as an other name)
+    'name-suggest': (b) => run(async () => {
+      const e = st.entities.find((x) => x.entityId === b.dataset.id);
+      if (!e?.nameSuggest) throw Error('설정을 찾지 못했습니다. 새로 불러온 뒤 다시 해 주세요.');
+      const name = e.nameSuggest;
+      const aliases = [...e.aliases, e.name].filter((a, i, all) => a !== name && all.indexOf(a) === i).slice(0, 20);
+      await api('PATCH', `/worlds/${st.worldId}/entities/${e.entityId}`, { name, aliases, revision: e.revision });
+      await loadEntities();
+      await loadRoom();
+    }, '대표 이름을 바꿨습니다.'),
     // 「번역 단어장에는 ○○예요 [적용]」: an ordinary rename by the person; the old name stays as an other name.
     'glossary-name': (b) => run(async () => {
       const e = st.entities.find((x) => x.entityId === b.dataset.id);

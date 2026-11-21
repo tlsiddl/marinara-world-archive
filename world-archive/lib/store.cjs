@@ -25,6 +25,10 @@ const TOPICS = ['금지·예절', '돈·거래', '시간·영업', '방법·기�
 /** v0.7.0 3: 정리 언어 — auto (the room's 기억 서재 기억 언어, else ko) · ko · en. */
 const SUMMARY_LANGS = ['auto', 'ko', 'en'];
 const TRANSLATION_MAX = 6000;
+/** v0.7.2 E: a name that says a law (the same words as inject.cjs LAW_NAME). */
+const ONCE_LAW = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)|\b(?:laws?|decrees?|statutes?|acts?|codes?|charters?|treaty|treaties|regulations?|edicts?)\b/i;
+/** v0.7.2 I: a 종 in Korean that code can put in English. */
+const SPECIES_EN = { 유령: 'Ghost', 고양이: 'Cat', 부엉이: 'Owl', 올빼미: 'Owl', 두꺼비: 'Toad', 집요정: 'House-elf', 고블린: 'Goblin', 켄타우로스: 'Centaur', 거인: 'Giant', 반거인: 'Half-giant', 니즐: 'Kneazle', 반니즐: 'Half-Kneazle', 개: 'Dog', 쥐: 'Rat', 불사조: 'Phoenix', 용: 'Dragon', 늑대인간: 'Werewolf', 뱀파이어: 'Vampire', 인어: 'Merperson', 요정: 'Fairy' };
 /** v0.7.1: 분류 words the reader wrote in Korean (often the 주제 list) and their English, for a world organized in English. */
 const ENGLISH_CATEGORY = {
   '금지·예절': 'Prohibitions & etiquette', '돈·거래': 'Money & trade', '시간·영업': 'Hours & timing', '방법·기술': 'Methods & techniques',
@@ -155,7 +159,9 @@ const isDescriptiveName = (n) => /의\s/.test(String(n || ''));
 const isGroupName = (n) => /(무리|일행|들)$/.test(String(n || '').trim());
 const squashName = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/[\s"'“”‘’·,.()]+/g, '');
 /** What a longer group name may add and still be the same group, not one inside it (「슬리데린 기숙사」 is 「슬리데린」). */
-const SAME_GROUP_SUFFIX = new Set(['기숙사', '가문', '집안', '일가', '학교', '마법학교', '학원', '기사단', '조직', '무리', '일행', 'house', 'family', 'school']);
+const SAME_GROUP_SUFFIX = new Set(['기숙사', '가문', '집안', '일가', '학교', '마법학교', '학원', '기사단', '조직', '무리', '일행', 'house', 'family', 'school',
+  // v0.7.2 0): English
+  'household', 'clan', 'gang', 'order', 'guild', 'club', 'society', 'dormitory']);
 /** A squashed group name without such an ending (「슬리데린기숙사」 → 「슬리데린」); itself when nothing of 2+ letters is left. */
 // v0.6.2: the longest ending first (「호그와트마법학교」 → 「호그와트」, not 「호그와트마법」)
 const SUFFIX_LONGEST = [...SAME_GROUP_SUFFIX].sort((a, b) => b.length - a.length);
@@ -174,7 +180,7 @@ const namesGroup = (text, g) => {
  * longest group name it holds; or when its name is the group's and a building word (「호그와트 성」 → 「호그와트」). null when
  * the 칸 names no group (or names a place of the world first).
  */
-const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus'];
+const GROUP_BUILDING = ['성', '성채', '본관', '교정', '캠퍼스', '본부', 'castle', 'campus', 'grounds', 'manor', 'estate', 'hall', 'headquarters', 'hq'];
 /** v0.6.4 f: a vehicle is not 「in」 a group (the school's train goes elsewhere) — a big place of its own. */
 const VEHICLE = /(열차|기차|마차|보트|급행|호차|(^|\s)배(\s|$)|express|train|carriage|coach|boat)/i;
 const groupOfPlace = (place, entities) => {
@@ -193,7 +199,7 @@ const groupOfPlace = (place, entities) => {
 /** Two group names for the same group (「슬리데린」 · 「슬리데린 기숙사」 · 「그리핀도르 1학년 무리」 ~ 「그리핀도르 1학년」). */
 const sameGroupName = (name, g) => { const k = squashName(name); return groupKeys(g).some((x) => x === k || x === groupCore(k)); };
 /** A 소속 piece that reads as a group: a year, a house, a family, a club… (not 「교수」 · 「부교장」 · 「주인」). */
-const GROUPISH = /(학년|기숙사|가문|집안|반|동아리|클럽|길드|기사단|협회|조합|교단|무리|일행|여학생|남학생|학생회|연구회|부대|분대|소대)$/;
+const GROUPISH = /(학년|기숙사|가문|집안|반|동아리|클럽|길드|기사단|협회|조합|교단|무리|일행|여학생|남학생|학생회|연구회|부대|분대|소대)$|\b(?:years?|first-years?|second-years?|houses?|family|families|clan|gang|club|guild|society|order|council|team|crew|household|students|boys|girls)$/i;
 const KEEP_AS_IS = new Set(['rule', 'system', 'schedule', 'history', 'custom']);
 /** 적용되는 곳 (v0.5.0 C): rules and systems can hold in one place or group; empty is the whole world. */
 const APPLIES_TYPES = new Set(['rule', 'system']);
@@ -201,11 +207,14 @@ const APPLIES_TO = new Set(['place', 'group']);
 /** 적용되는 곳 「세계 전체」 (v0.5.0 D); none at all is 「모름」. */
 const WORLD = 'world';
 /** An other name of a group that names a place: what its 본거지 can be made from (v0.5.0 E). */
-const PLACE_ALIAS = /(성|궁|궁전|저택|본관|건물|캠퍼스|교정|castle|manor|palace|hall|campus|tower)$/i;
+const PLACE_ALIAS = /(성|궁|궁전|저택|본관|건물|캠퍼스|교정|castle|manor|palace|hall|campus|tower|estate|mansion|keep|grounds|building)$/i;
 /** Words after a place's name that say near it, not in it (「검은 호수 아래」 · 「리키 콜드런 뒷문 너머」). */
 const NOT_INSIDE = /(아래|밑|옆|근처|부근|너머|건너편|맞은편|바깥|밖|떨어진|가는 길|위쪽|아랫|기슭)/;
+/** v0.7.2 0): English says it before the name (「beneath the Black Lake」 · 「next to Ollivanders」). */
+const NOT_INSIDE_EN = /\b(?:below|beneath|under(?:neath)?|beside|next to|near(?:by)?|outside(?: of)?|beyond|across(?: from)?|opposite|by|off|above|overlooking|facing|towards?|behind|in front of|on the way to|close to|along)\s+(?:the\s+)?$/i;
+const UNDER_EN = /\b(?:below|beneath|under(?:neath)?)\s+(?:the\s+)?$/i;
 /** A building: underground under it is still in it (v0.5.0 E). */
-const BUILDING = /(성|궁|궁전|저택|본관|건물|탑|별관|관|castle|manor|palace|hall|tower)$/i;
+const BUILDING = /(성|궁|궁전|저택|본관|건물|탑|별관|관|castle|manor|palace|hall|tower|estate|mansion|keep|building|school)$/i;
 /** Words of English names that say nothing about who it is ("Hogwarts School of Witchcraft and Wizardry"). */
 const NAME_FILLER = new Set(['the', 'and', 'of', 'for', 'with', 'from', 'into', 'house', 'school', 'family', 'lady', 'lord', 'miss', 'mister', 'mrs', 'mr', 'sir', 'madam', 'madame', 'professor', 'young', 'little', 'your', 'grace', 'head']);
 /**
@@ -315,6 +324,23 @@ function aliasOff(e, a, entities) {
   const own = new Set(animalIn(`${e.name} ${e.fields?.species || ''}`));
   const theirs = animalIn(a).filter((x) => !own.has(x));
   if (theirs.length && (own.size || e.fields?.species)) return { why: `다른 동물(${theirs[0]})` };
+  // v0.7.2 G: a sign or a sentence (「Ollivanders: Makers of Fine Wands since 382 B.C.」) is not a name
+  if (/[:;]/.test(a) || String(a).trim().split(/\s+/).length >= 6) return { why: '이름이 아님(문구)' };
+  // v0.7.2 G: a person's other name holding another person's family name (McGonagall's 「Miss Vane」, Pansy's 「Vane」) is
+  // the name of the one spoken to, not of the one speaking — unless that family name is in this person's own name
+  if (e.type === 'person') {
+    const words = (n) => String(n || '').normalize('NFC').toLowerCase().split(/[^\p{L}'’-]+/u).filter((w) => (/[가-힣]/.test(w) ? w.length >= 2 : w.length >= 3));
+    const mine = new Set(words(e.name));
+    const surnames = new Set();
+    for (const x of entities || []) {
+      if (x.entityId === e.entityId || x.type !== 'person') continue;
+      for (const n of [x.name, ...(x.aliases || [])]) { const w = words(n); if (w.length >= 2) surnames.add(w.at(-1)); }
+    }
+    // 「Clara Vane」 for 「Clara」 holds her own name: hers
+    const aw = words(a);
+    const hit = aw.some((w) => mine.has(w)) ? null : aw.find((w) => surnames.has(w));
+    if (hit) return { why: `다른 사람의 성(${hit})` };
+  }
   return null;
 }
 
@@ -681,11 +707,17 @@ class Archive {
       return { schemaVersion: SCHEMA, worldId, items: {} }; // only a view: a broken cache is made again
     }
   }
-  /** add: { hash: ko }. Keeps the newest TRANSLATION_MAX. */
-  saveTranslations(worldId, add) {
+  /** v0.7.2 J: the Korean view's fixed names { original: ko } — the first translation of a name with no glossary pair. */
+  nameTranslations(worldId) {
+    const names = this.readTranslations(worldId).names;
+    return isObject(names) ? names : {};
+  }
+  /** add: { hash: ko }; names: { original: ko } (only new ones — a fixed name stays). Keeps the newest TRANSLATION_MAX. */
+  saveTranslations(worldId, add, names = null) {
     this.getWorld(worldId);
     const doc = this.readTranslations(worldId);
     const t = now();
+    if (names) { doc.names = isObject(doc.names) ? doc.names : {}; for (const [k, v] of Object.entries(names)) if (typeof v === 'string' && v.trim() && !doc.names[k]) doc.names[k.slice(0, 200)] = v.trim().slice(0, 200); }
     for (const [h, ko] of Object.entries(add || {})) if (/^[0-9a-f]{20}$/.test(h) && typeof ko === 'string' && ko.trim()) doc.items[h] = { ko: ko.slice(0, 4000), at: t };
     const keys = Object.keys(doc.items);
     if (keys.length > TRANSLATION_MAX) for (const k of keys.sort((a, b) => String(doc.items[a].at).localeCompare(String(doc.items[b].at))).slice(0, keys.length - TRANSLATION_MAX)) delete doc.items[k];
@@ -932,6 +964,8 @@ class Archive {
       next.sources.name = 'manual';
       delete next.glossaryName;
       delete entity.glossaryName;
+      delete next.nameSuggest; // v0.7.2 L
+      delete entity.nameSuggest;
     }
     const before = structuredClone(entity);
     if (entity.pending && next.fields) {
@@ -1480,7 +1514,10 @@ class Archive {
     let doc = this.readEntities(worldId);
     const found = [];
     for (const p of doc.entities.filter((e) => e.type === 'place' && !insideOf(doc).has(e.entityId))) {
-      const seg = String(p.fields?.location || '').split(/[,，;]/)[0].trim();
+      // v0.7.2 0): English puts a word before the name (「in the Great Hall」 · 「beneath the Black Lake」): read after it
+      const seg0 = String(p.fields?.location || '').split(/[,，;]/)[0].trim();
+      const lead = (seg0.match(/^(?:(?:in|inside|within|at|on|part of|on the grounds of|under(?:neath)?|below|beneath|beside|next to|near(?:by)?|outside(?: of)?|beyond|behind|across(?: from)?|off|by|above|opposite|along|overlooking|facing|close to)\s+)?(?:the\s+)?/i) || [''])[0];
+      const seg = seg0.slice(lead.length);
       if (!seg) continue;
       const k = squashName(seg);
       let best = null;
@@ -1497,9 +1534,12 @@ class Archive {
       const after = seg.slice(seg.indexOf(best.name) >= 0 ? seg.indexOf(best.name) + best.name.length : 0);
       // under a building is still in it when the place is underground (「지하 선착장 · 성 아래」); under a bridge or a
       // cliff is not (사령탑 E 덧붙임)
-      const underBuilding = /지하/.test(p.name + ' ' + p.fields.location) && /^\s*\S*\s*(바로\s*)?(아래|밑)/.test(after.replace(/^\s*기초/, ''))
+      // v0.7.2 0): English puts 「beneath」 · 「next to」 before the name; underground under a building is still in it
+      const before = lead + seg.slice(0, Math.max(0, seg.indexOf(best.name)));
+      const deep = /지하|\b(?:dungeons?|underground|cellars?|basement|vaults?|harbou?r|crypt)\b/i.test(p.name + ' ' + p.fields.location);
+      const underBuilding = deep && (/^\s*\S*\s*(바로\s*)?(아래|밑)/.test(after.replace(/^\s*기초/, '')) || UNDER_EN.test(before))
         && (best.o.type === 'group' || BUILDING.test(best.name));
-      if (NOT_INSIDE.test(after) && !underBuilding) continue;
+      if ((NOT_INSIDE.test(after) || NOT_INSIDE_EN.test(before)) && !underBuilding) continue;
       // 「호그와트 급행열차 3호차」 is not in 호그와트: the name with the next word names something else the world has
       const next = after.trim().split(/\s+/)[0];
       if (next && doc.entities.some((x) => x !== p && x !== best.o && squashName(x.name).startsWith(squashName(best.name + next)))) continue;
@@ -1606,7 +1646,7 @@ class Archive {
       if (!sheet) {
         if (doc.entities.length >= ENTITY_MAX) continue;
         sheet = {
-          entityId: randomUUID(), type: 'schedule', name: owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
+          entityId: randomUUID(), type: 'schedule', name: meta.lang === 'en' ? (owner ? owner.name + ' Academic Calendar' : 'World Academic Calendar') : owner ? owner.name + ' 학사일정' : '세계 학사일정', aliases: [], description: '',
           fields: owner ? { who: owner.name } : {}, extra: [], pinned: false, sources: {}, status: 'confirmed',
           provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, calendar: { ownerId, events: {} },
           revision: 1, createdAt: t, updatedAt: t,
@@ -1783,6 +1823,7 @@ class Archive {
     const doc = this.readEntities(worldId);
     const t = now();
     const changes = [];
+    let touchedCells = 0;
     const to = (e, key, value) => {
       if (e.sources?.[key] === 'manual' || !e.fields?.[key] || e.fields[key] === value) return;
       changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before: e.fields[key], after: value, evidence: '', why: '정리 언어 영어로' });
@@ -1790,18 +1831,83 @@ class Archive {
       e.revision++;
       e.updatedAt = t;
     };
+    const pairs = Array.isArray(meta.pairs) ? meta.pairs : [];
+    const back = (v) => { const k = String(v || '').trim(); const p = pairs.find((x) => x.to === k && /[A-Za-z]/.test(x.from)); return p ? p.from : null; };
     for (const e of doc.entities) {
+      // v0.7.2 I: the names code made in Korean (a 시간표 · 학사일정 sheet), never one the person named
+      if ((e.timetable || e.calendar) && e.sources?.name !== 'manual') {
+        const m = String(e.name).match(/^(.*?)\s*(시간표|학사일정)(\s*\(.*\))?$/);
+        if (m) {
+          const owner = doc.entities.find((x) => x.entityId === (e.timetable?.ownerId || e.calendar?.ownerId));
+          const head = m[1] === '세계' && e.calendar ? 'World' : owner?.name || m[1];
+          const name = `${head} ${m[2] === '시간표' ? 'Timetable' : 'Academic Calendar'}${m[3] || ''}`;
+          if (name !== e.name && !/[가-힣]/.test(head)) {
+            changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'rename', before: e.name, after: name, addedAliases: [], removedAliases: [], evidence: '', why: '정리 언어 영어로' });
+            e.name = name;
+            e.revision++;
+            e.updatedAt = t;
+          }
+        }
+      }
+      // v0.7.2 I: a 시간표 subject the glossary pairs (변신술 → Transfiguration); others as they are
+      for (const [key, c] of Object.entries(e.timetable?.cells || {})) {
+        const cellBefore = structuredClone(c);
+        let did = false;
+        for (const k of ['value', 'subject']) {
+          const en = /[가-힣]/.test(String(c[k] || '')) ? back(c[k]) : null;
+          if (en) { c[k] = en; did = true; }
+        }
+        if (!did) continue;
+        e.revision++;
+        e.updatedAt = t;
+        touchedCells++;
+        changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'cell', key, before: cellBefore.value || '', after: c.value, cellBefore, evidence: '', why: '정리 언어 영어로' });
+      }
       const f = e.fields || {};
+      if (e.type === 'person' && f.species && SPECIES_EN[String(f.species).trim()]) to(e, 'species', SPECIES_EN[String(f.species).trim()]);
       if (e.type === 'person' && f.gender) { const g = P.tidyValue('gender', f.gender, 'en'); if (/^(Male|Female)$/.test(g)) to(e, 'gender', g); }
       if (e.type === 'person' && f.age) { const a = String(f.age).trim().match(/^(\d{1,4})\s*(살|세)$/); if (a) to(e, 'age', a[1]); }
       if ((e.type === 'schedule' || e.type === 'history') && String(f.when || '').trim() === '매주') to(e, 'when', 'Weekly');
       if ((e.type === 'rule' || e.type === 'system') && f.category) { const c = ENGLISH_CATEGORY[String(f.category).replace(/\s+/g, '')]; if (c) to(e, 'category', c); }
     }
-    if (changes.length) {
+    if (changes.length || touchedCells) {
       this.writeJson(this.entityFile(worldId), doc);
-      this.pushHistory(worldId, changes);
+      if (changes.length) this.pushHistory(worldId, changes);
     }
     return changes;
+  }
+
+  /**
+   * v0.7.2 L: 「대표 이름을 ○○로 바꿀까요」 — a person's, place's or group's other name that is not a piece of its name,
+   * said in the story sentences more than twice as often as the name (three times or more). Only shown
+   * (e.nameSuggest); never over a name the person chose. Returns how many settings show one.
+   */
+  suggestNames(worldId, story) {
+    this.getWorld(worldId);
+    if (!Array.isArray(story) || !story.length) return 0;
+    const doc = this.readEntities(worldId);
+    const text = story.join('\n');
+    const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const count = (n) => { const t = String(n || '').trim(); if (t.length < 2) return 0; const re = /[A-Za-z]/.test(t) ? new RegExp(`(?<![A-Za-z])${reEsc(t)}(?![A-Za-z])`, 'gi') : new RegExp(reEsc(t), 'g'); return (text.match(re) || []).length; };
+    let n = 0;
+    let dirty = false;
+    for (const e of doc.entities) {
+      if (!['person', 'place', 'group'].includes(e.type)) continue;
+      let best = null;
+      if (e.sources?.name !== 'manual') {
+        const own = new Set(String(e.name).toLowerCase().split(/\s+/));
+        const mine = count(e.name);
+        for (const a of e.aliases || []) {
+          if (!nameLike(a) || String(a).toLowerCase().split(/\s+/).every((w) => own.has(w))) continue; // a piece of the name
+          const c = count(a);
+          if (c >= 3 && c > mine * 2 && (!best || c > best.c)) best = { a, c };
+        }
+      }
+      if ((e.nameSuggest || null) !== (best?.a || null)) { if (best) e.nameSuggest = best.a; else delete e.nameSuggest; dirty = true; }
+      if (best) n++;
+    }
+    if (dirty) this.writeJson(this.entityFile(worldId), doc);
+    return n;
   }
 
   applyTimetable(worldId, cells, meta = {}) {
@@ -2465,7 +2571,7 @@ class Archive {
           words = words.slice(k);
         }
         const r = words.join(' ');
-        if (squashName(r).length < 2 || !GROUPISH.test(r) || ROLE_WORDS.test(words.at(-1)) || !/\p{Script=Hangul}/u.test(r) || covered(r) || isOther(r)) continue;
+        if (squashName(r).length < 2 || !GROUPISH.test(r) || ROLE_WORDS.test(words.at(-1)) || !/\p{L}/u.test(r) || covered(r) || isOther(r)) continue;
         const key = squashName(r);
         const it = pieces.get(key) || { name: r, people: new Set(), prefixes: new Map() };
         it.people.add(p.entityId);
@@ -2557,7 +2663,8 @@ class Archive {
   saveTidy(worldId, out) {
     this.getWorld(worldId);
     fs.mkdirSync(path.join(this.dir, 'tidy'), { recursive: true });
-    this.writeJson(this.tidyFile(worldId), { schemaVersion: SCHEMA, at: out.at, items: out.items, fields: out.fields });
+    const old = fs.existsSync(this.tidyFile(worldId)) ? this.readTidy(worldId) : null;
+    this.writeJson(this.tidyFile(worldId), { schemaVersion: SCHEMA, at: out.at, items: out.items, fields: out.fields, keptOnce: old?.keptOnce || [] });
   }
   readTidy(worldId) {
     this.getWorld(worldId);
@@ -2568,15 +2675,26 @@ class Archive {
     const ents = new Map(this.readEntities(worldId).entities.map((e) => [e.entityId, e]));
     doc.items = doc.items.filter((x) => ents.has(x.entityId));
     doc.fields = doc.fields.filter((x) => { const e = ents.get(x.entityId); return e && (x.key === 'description' ? e.description : e.fields?.[x.key]); });
+    // v0.7.2 E ②: by code, always as the world is now — spoken of in one batch only, not pinned · the person's · a law
+    // (법 · 제도 · law · statute …) · 유래·역사 · history, and not already in ① or kept
+    doc.keptOnce = Array.isArray(doc.keptOnce) ? doc.keptOnce : [];
+    const kept = new Set(doc.keptOnce);
+    const inItems = new Set(doc.items.map((x) => x.entityId));
+    doc.once = [...ents.values()].filter((e) => ['rule', 'system', 'custom', 'schedule'].includes(e.type) && !e.timetable && !e.calendar && !e.pinned
+      && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && Number.isFinite(e.seen?.n) && e.seen.n < 2
+      && !ONCE_LAW.test(e.name) && e.topic !== '유래·역사' && !inItems.has(e.entityId) && !kept.has(e.entityId))
+      .map((e) => ({ entityId: e.entityId, name: e.name, type: e.type, topic: e.topic || null }));
     return doc;
   }
   /** 「남기기」: a candidate taken off the list (nothing changes in the world). */
   keepTidy(worldId, entityId, key = null) {
     const doc = this.readTidy(worldId);
     if (key) doc.fields = doc.fields.filter((x) => !(x.entityId === entityId && x.key === key));
-    else doc.items = doc.items.filter((x) => x.entityId !== entityId);
-    this.writeJson(this.tidyFile(worldId), doc);
-    return doc;
+    else if (doc.items.some((x) => x.entityId === entityId)) doc.items = doc.items.filter((x) => x.entityId !== entityId);
+    else doc.keptOnce = [...new Set([...(doc.keptOnce || []), entityId])].slice(-2000); // v0.7.2 E ②: 「남기기」
+    const { once: _once, ...save } = doc;
+    this.writeJson(this.tidyFile(worldId), save);
+    return this.readTidy(worldId);
   }
 
   /** 구성원 명단 of a group (v0.5.0): gathered from the 소속 relations by code; see roster.cjs. */
@@ -3033,6 +3151,14 @@ class Archive {
             hide = true;
             ev = evs.join(' / ');
           }
+          // v0.7.2 F: a value in English (a world organized in English) is the story's own words: a story sentence
+          // naming the setting that holds more than half of the value's words of four letters or more has said it
+          if (hide !== false && /[A-Za-z]/.test(String(value)) && !/[가-힣]/.test(String(value))) {
+            const wordsOf = (x) => [...new Set(String(x).toLowerCase().match(/[a-z][a-z'-]{3,}/g) || [])];
+            const want = wordsOf(value);
+            const hit = want.length ? about.find((x) => { const got = new Set(wordsOf(x.s)); return want.filter((w) => got.has(w)).length * 2 > want.length; }) : null;
+            if (hit) { hide = false; ev = hit.s; }
+          }
           // v0.6.6 2: 성별 — a story sentence naming the person, or the one after it, with he · him · his / she · her
           // (그 · 그녀) of that gender: the story has said it
           if (key === 'gender' && e.type === 'person' && hide !== false) {
@@ -3076,12 +3202,30 @@ class Archive {
         : !relationFits(r.type, a.type, b.type) ? 'kind'
         : (a.type === 'person' && isDescriptiveName(a.name)) || (b.type === 'person' && isDescriptiveName(b.name)) ? 'described name'
         : !mentions(r.evidence, a) && !mentions(r.evidence, b) ? 'evidence names neither'
+        : affiliationDiffers(r, a, b) ? 'affiliation differs'
         : null;
     };
+    // v0.7.2 H: a person's 소속 칸 names another group (Gryffindor) and not this one (Slytherin first-years), and the two
+    // are not one inside the other — the 칸 wins; the relation goes and is shown as 「서로 다른 말을 해요」
+    const groupUp = new Map();
+    for (const r of doc.relations) if (r.type === '소속' && byId.get(r.from)?.type === 'group' && byId.get(r.to)?.type === 'group') groupUp.set(r.from, [...(groupUp.get(r.from) || []), r.to]);
+    const chain = (id) => { const seen = new Set([id]); const q = [id]; while (q.length) for (const u of groupUp.get(q.shift()) || []) if (!seen.has(u)) { seen.add(u); q.push(u); } return seen; };
+    const related = (x, y) => chain(x).has(y) || chain(y).has(x);
+    function affiliationDiffers(r, a, b) {
+      if (r.type !== '소속' || a.type !== 'person' || b.type !== 'group') return false;
+      const aff = String(a.fields?.affiliation || '').trim();
+      if (!aff || namesGroup(aff, b)) return false;
+      return doc.entities.some((g) => g.type === 'group' && g.entityId !== b.entityId && namesGroup(aff, g) && !related(g.entityId, b.entityId));
+    }
     for (const r of doc.relations) {
       const why = whyOff(r);
       if (why) out.push({ r, why });
       else keep.push(r);
+      if (why === 'affiliation differs') {
+        const a = byId.get(r.from);
+        const b = byId.get(r.to);
+        a.differs = { ...(a.differs || {}), affiliation: { value: b.name, evidence: String(r.evidence || '').slice(0, 300), at: now() } };
+      }
     }
     // Relations a crowd → group change took away come back when they fit again under today's rules (e.g. 소속 between
     // two groups, allowed since) — only while both settings are still there and nothing like them exists.

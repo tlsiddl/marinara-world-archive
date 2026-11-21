@@ -56,6 +56,8 @@ test('by code: the 「위치·소속」 칸 begins with a place (or a group: its
 
 test('「장소 위치 채우기」: code first, then the model once for what is left; a group named as outside means its 본거지', async (t) => {
   const { s, w, id, up } = world(t);
+  // v0.7.2 B: joined only when the place's own text (위치 · 용도 · 설명 · 근거) names the outer one and says inside
+  s.applyAuto(w.worldId, [{ type: 'place', name: '저택 서재', memo: '하르트 저택 안 2층 서재' }, { type: 'place', name: '시계 공방', memo: '별시계 학원 안의 작은 공방' }]);
   const asked = [];
   service._test.useEngine({
     model: async (cid) => ({ id: cid }),
@@ -63,16 +65,21 @@ test('「장소 위치 채우기」: code first, then the model once for what is
       { name: '장미 온실', in: '하르트 저택' },
       { name: '은화 은행', in: '없는 곳' },
       { name: '거울 호수', in: '별시계 학원' },
+      { name: '저택 서재', in: '하르트 저택' },
+      { name: '시계 공방', in: '별시계 학원' },
     ] }), usage: { prompt_tokens: 500, completion_tokens: 40 } }; },
     parseJsonObject: real.parseJsonObject,
   });
   const r = await service.fillPlaces(w.worldId);
   assert.equal(r.calls, 1);
   assert.ok(r.byCode.length >= 2);
-  assert.deepEqual(r.byModel.map((x) => [x.name, x.in]), [['장미 온실', '하르트 저택'], ['거울 호수', '별시계 학원']]);
-  assert.deepEqual(up('장미 온실'), ['하르트 저택']);
-  assert.deepEqual(up('거울 호수'), ['별시계 성'], 'the group → its 본거지');
+  assert.deepEqual(r.byModel.map((x) => [x.name, x.in]), [['저택 서재', '하르트 저택'], ['시계 공방', '별시계 학원']]);
+  assert.deepEqual(up('저택 서재'), ['하르트 저택']);
+  assert.deepEqual(up('시계 공방'), ['별시계 성'], 'the group → its 본거지');
+  assert.deepEqual(up('장미 온실'), [], 'a guess from the names alone is not taken');
+  assert.deepEqual(up('거울 호수'), [], '「성 아래 산기슭」 does not say inside');
   assert.match(asked[0], /\[혼자인 장소\][\s\S]*은화 은행/);
+  assert.match(asked[0], /설명: 하르트 저택 안 2층 서재/);
   assert.ok(r.left.includes('은화 은행') && r.left.includes('하르트 저택'));
   assert.equal(r.big, r.left.length);
   void id;

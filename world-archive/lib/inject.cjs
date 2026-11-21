@@ -64,7 +64,10 @@ function entityLine(e, nameOf = () => '', today = null, names = 'ko', knownOf = 
   // v0.5.0 S: a field only a profile block has said so far
   const veiled = (k) => (e.hidden?.[k] ? ' (아직 드러나지 않음)' : '');
   const total = e.type === 'group' ? R.headcount(fields.size) : null;
-  const short = defs.filter((d) => d.kind === 'line' && fields[d.key] && !(total && d.key === 'size')).map((d) => `${d.label}: ${oneLine(fields[d.key])}${veiled(d.key)}${was(e, d.key)}`);
+  // v0.7.2 K: a rule's or system's 분류 stays on the screen; {{세계}} says its 주제
+  const isLaw = e.type === 'rule' || e.type === 'system';
+  const short = defs.filter((d) => d.kind === 'line' && fields[d.key] && !(total && d.key === 'size') && !(isLaw && d.key === 'category')).map((d) => `${d.label}: ${oneLine(fields[d.key])}${veiled(d.key)}${was(e, d.key)}`);
+  if (isLaw && e.topic) short.unshift(`주제: ${e.topic}`);
   // v0.5.1 J: how many in all, and how many of them have a name here
   if (total) { const k = knownOf(e.entityId); short.push(`인원: ${k != null ? `이름 아는 사람 ${k}명 / ` : ''}전체 ${total}명`); }
   // v0.5.1 I: where a person stays now (방 배정)
@@ -135,6 +138,9 @@ function tailLines(world, entities, { recurring = null, names = 'ko' } = {}) {
  * Only confirmed settings go into the prompt. Pinned ones first, then the ones in the current scene (scene: a Set of
  * entity ids named in the latest messages), then by kind, then by name.
  */
+/** v0.7.2 A: spoken of in more reading batches first, then the latest evidence (not the name). */
+const seenN = (e) => (Number.isFinite(e?.seen?.n) ? e.seen.n : 1);
+const often = (a, b) => seenN(b) - seenN(a) || String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
 function orderEntities(entities, scene = null) {
   const inScene = (e) => Number(!!scene?.has(e.entityId));
   return entities
@@ -145,6 +151,7 @@ function orderEntities(entities, scene = null) {
         Number(b.pinned) - Number(a.pinned) ||
         inScene(b) - inScene(a) ||
         TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) ||
+        often(a, b) ||
         a.name.localeCompare(b.name, 'ko'),
     );
 }
@@ -161,8 +168,9 @@ function orderEntities(entities, scene = null) {
  * One counted before v0.5.1 (no seen) is not judged here; recheck counts it.
  */
 // 「법」 as a law: stuck to the word before (「유지법」), not a how-to (「받는 법」) and not 「마법」
-const LAW_NAME = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)/;
-const WORLD_SYSTEM = /([^\s마]법(\s|$)|령(\s|$)|제도|화폐|통화)/;
+// v0.7.2 0): law · decree · statute · act · currency · money beside 법 · 령 · 제도 · 화폐
+const LAW_NAME = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)|\b(?:laws?|decrees?|statutes?|acts?|codes?|charters?|treaty|treaties|rules?|regulations?|edicts?)\b/i;
+const WORLD_SYSTEM = /([^\s마]법(\s|$)|령(\s|$)|제도|화폐|통화)|\b(?:laws?|decrees?|statutes?|acts?|codes?|charters?|treaty|treaties|rules?|regulations?|edicts?)\b|\b(?:currency|currencies|money|coinage|coins?|exchange rates?|galleons?)\b/i;
 const ONCE_TYPES = new Set(['rule', 'system', 'custom', 'history']);
 // v0.6.5 1: only the whole world's (or nobody said where) — a rule or system of a place or group stays, and goes into
 // the scenes there (「여기」) even when one batch spoke of it (배정식 · 금지된 숲)
@@ -242,10 +250,12 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     const near = (e) => (sheetOwner(e) ? (scene.has(sheetOwner(e)) ? 0 : here.get(sheetOwner(e)) ?? 99) : whereKnown(e) ? here.get(e.appliesTo) ?? 99 : 0);
     // in each part, a rule named in the latest messages (it is in the scene) comes first
     const named = (e) => Number(!scene.has(e.entityId));
+    // v0.7.2 A: within a part — named in the latest messages, the nearer place, spoken of more often, the latest
+    // evidence; the name only breaks a tie (it used to decide what the budget cut)
     ordered = keep.filter((e) => e.status === 'confirmed').map((e) => [rank(e), e]).sort(([ra, a], [rb, b]) => ra - rb
       || (ra >= 2 ? named(a) - named(b) : 0)
-      || (ra === 2 ? String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) : 0)
       || (ra === 3 ? near(a) - near(b) : 0)
+      || often(a, b)
       || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
       || a.name.localeCompare(b.name, 'ko')).map(([, e]) => e);
     part = (e) => Math.min(rank(e), 5);

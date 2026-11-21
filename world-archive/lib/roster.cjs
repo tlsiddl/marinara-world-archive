@@ -9,18 +9,22 @@
  * description (「캐로 자매 중 한 명」, 「판시 파킨슨의 사촌」), not counted as a name known.
  */
 /** Role words: a 소속 칸 with one is someone who holds a post there, not a plain member (and such a piece is not a group). */
-const ROLE_WORDS = /(교수|교사|선생|사감|기숙사장|반장|감독생|교장|부교장|학장|원장|단장|부단장|회장|부회장|대장|주장|관리인|관리자|사서|집사|하인|하녀|시종|주인|점원|지배인|족장|우두머리|지도자|수장|유모|가정교사|마부|요리사|정원사|운전사|기사)/;
+// v0.7.2 0): the English beside them (Head of House, Professor, Prefect, maid, butler, governess …)
+const ROLE_WORDS = /(교수|교사|선생|사감|기숙사장|반장|감독생|교장|부교장|학장|원장|단장|부단장|회장|부회장|대장|주장|관리인|관리자|사서|집사|하인|하녀|시종|주인|점원|지배인|족장|우두머리|지도자|수장|유모|가정교사|마부|요리사|정원사|운전사|기사)|\b(?:professors?|teachers?|heads? of house|prefects?|head (?:boy|girl)|headmaster|headmistress|deputy head(?:master|mistress)?|caretaker|groundskeeper|gamekeeper|keeper of (?:keys|grounds)|librarian|matron|butler|(?:parlou?r|house|kitchen|lady'?s )?maids?|servants?|footman|footmen|valet|housekeeper|steward|governess|nanny|tutor|cook|gardener|coachman|chauffeur|clerk|shopkeeper|proprietor|owner|innkeeper|landlord|landlady|barman|barmaid|manager|captain|chief|leader|chairman|president|secretary|treasurer|knight)\b/i;
 // each animal once, its Korean and English words together (부엉이 = owl), so a translation is not another animal
 const ANIMALS = [['표범', 'leopard', 'panther'], ['고양이', 'cat', 'kitten'], ['개', '강아지', 'dog', 'puppy', 'hound'], ['늑대', 'wolf'], ['여우', 'fox'], ['부엉이', '올빼미', 'owl'], ['까마귀', 'raven', 'crow'], ['뱀', 'snake', 'serpent'], ['쥐', 'rat', 'mouse'], ['두꺼비', 'toad'], ['불사조', 'phoenix'], ['용', '드래곤', 'dragon'], ['사슴', 'stag', 'deer'], ['곰', 'bear'], ['토끼', 'rabbit', 'hare'], ['말', 'horse', 'pony'], ['니즐', '크니즐', 'kneazle', 'half-kneazle']];
 const animalIn = (s) => { const w = String(s || '').normalize('NFC').toLowerCase().split(/[^\p{L}-]+/u).filter(Boolean); return ANIMALS.filter((g) => g.some((x) => (/[a-z]/.test(x) ? w.includes(x) || w.includes(x + 's') : w.some((y) => y === x || (x.length >= 2 && y.endsWith(x)))))).map((g) => g[0]); };
 /** v0.6.2 ⑥: a member whose 종 is an animal (니즐 · 부엉이 …, not a goblin or a ghost) — 「함께 사는 동물」. */
 const isAnimal = (p) => animalIn(p?.fields?.species).length > 0;
-const PAST_WORDS = /(출신|졸업|전직|前|예전|옛|과거|였던|였음|창립자|설립자)/;
+const PAST_WORDS = /(출신|졸업|전직|前|예전|옛|과거|였던|였음|창립자|설립자)|\b(?:former(?:ly)?|ex-|graduated?|alumn(?:us|a|i|ae)|found(?:er|ers|ing)|co-founder|retired|used to be)\b/i;
 /** 「○○의 사촌」 · 「○○ 중 한 명」 · 「주근깨 있는 그리핀도르 남학생」: a person named by a description. */
 function unnamed(name) {
   const n = String(name || '').trim();
   return /의\s/.test(n) || /(중 한 명|중 하나)$/.test(n) || /\s(있는|없는|입은|든|쓴)\s/.test(n)
-    || (/\s/.test(n) && /(여학생|남학생|학생|소년|소녀|아이|사람|남자|여자)$/.test(n));
+    || (/\s/.test(n) && /(여학생|남학생|학생|소년|소녀|아이|사람|남자|여자)$/.test(n))
+    // v0.7.2 0): 「Pansy Parkinson's cousin」 · 「one of the Carrow girls」 · 「the freckled Gryffindor boy」
+    || /\S['’]s\s+\S/.test(n) || /\bone of\b/i.test(n)
+    || (/\s/.test(n) && /\b(?:boys?|girls?|students?|man|men|woman|women|child|children|kid|kids|person|people|lads?|lass)$/i.test(n));
 }
 
 /**
