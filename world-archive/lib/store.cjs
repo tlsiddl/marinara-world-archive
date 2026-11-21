@@ -25,6 +25,14 @@ const TOPICS = ['금지·예절', '돈·거래', '시간·영업', '방법·기�
 /** v0.7.0 3: 정리 언어 — auto (the room's 기억 서재 기억 언어, else ko) · ko · en. */
 const SUMMARY_LANGS = ['auto', 'ko', 'en'];
 const TRANSLATION_MAX = 6000;
+/** v0.7.1: 분류 words the reader wrote in Korean (often the 주제 list) and their English, for a world organized in English. */
+const ENGLISH_CATEGORY = {
+  '금지·예절': 'Prohibitions & etiquette', '돈·거래': 'Money & trade', '시간·영업': 'Hours & timing', '방법·기술': 'Methods & techniques',
+  '유래·역사': 'Origins & history', '그밖': 'Other', '기타': 'Other', '금지': 'Prohibition', '예절': 'Etiquette', '금기': 'Taboo', '관례': 'Custom',
+  '법': 'Law', '제도': 'Institution', '학교규칙': 'School rule', '규칙': 'Rule', '마법': 'Magic', '능력': 'Ability', '경제': 'Economy',
+  '점수': 'Scoring', '점수·평가': 'Scoring & evaluation', '화폐': 'Currency', '거래': 'Trade', '시간': 'Timing', '영업': 'Business hours',
+  '방법': 'Method', '기술': 'Technique', '유래': 'Origin', '역사': 'History', '교통': 'Transport', '통신': 'Communication', '의식': 'Ritual',
+};
 /** v0.6.2 ③: the lasting fields a scene's status line (옷차림 · 자세 · 기분) never backs — with 메모. */
 const STATUS_OFF = new Set(['appearance', 'personality', 'background', 'family']);
 /** 할 일 11: a room's score events (the board's name and unit are the world's). */
@@ -1765,6 +1773,37 @@ class Archive {
    * wrote is not written over — 「대화에서는 ○○예요 [적용] [무시]」 (pending) instead. Each change is in the history
    * ('cell', undoable). Returns the changes.
    */
+  /**
+   * v0.7.1: a world organized in English — values code wrote in Korean put into English where code can tell:
+   * 성별 남성 · 여성 → Male · Female, 나이 「107살」 → 107, 「매주」 → Weekly, a 분류 that is one of ENGLISH_CATEGORY's
+   * Korean words. Never the person's field. Recorded ('field', undoable). Returns the changes.
+   */
+  englishValues(worldId, meta = {}) {
+    this.getWorld(worldId);
+    const doc = this.readEntities(worldId);
+    const t = now();
+    const changes = [];
+    const to = (e, key, value) => {
+      if (e.sources?.[key] === 'manual' || !e.fields?.[key] || e.fields[key] === value) return;
+      changes.push({ id: randomUUID(), at: t, by: meta.by || 'recheck', roomId: null, messageIds: [], entityId: e.entityId, name: e.name, type: e.type, action: 'field', key, before: e.fields[key], after: value, evidence: '', why: '정리 언어 영어로' });
+      e.fields = { ...e.fields, [key]: value };
+      e.revision++;
+      e.updatedAt = t;
+    };
+    for (const e of doc.entities) {
+      const f = e.fields || {};
+      if (e.type === 'person' && f.gender) { const g = P.tidyValue('gender', f.gender, 'en'); if (/^(Male|Female)$/.test(g)) to(e, 'gender', g); }
+      if (e.type === 'person' && f.age) { const a = String(f.age).trim().match(/^(\d{1,4})\s*(살|세)$/); if (a) to(e, 'age', a[1]); }
+      if ((e.type === 'schedule' || e.type === 'history') && String(f.when || '').trim() === '매주') to(e, 'when', 'Weekly');
+      if ((e.type === 'rule' || e.type === 'system') && f.category) { const c = ENGLISH_CATEGORY[String(f.category).replace(/\s+/g, '')]; if (c) to(e, 'category', c); }
+    }
+    if (changes.length) {
+      this.writeJson(this.entityFile(worldId), doc);
+      this.pushHistory(worldId, changes);
+    }
+    return changes;
+  }
+
   applyTimetable(worldId, cells, meta = {}) {
     this.getWorld(worldId);
     const doc = this.readEntities(worldId);
@@ -1786,8 +1825,8 @@ class Archive {
         if (doc.entities.length >= ENTITY_MAX) continue;
         const older = doc.entities.some((e) => e.type === 'schedule' && e.timetable?.ownerId === owner.entityId);
         sheet = {
-          entityId: randomUUID(), type: 'schedule', name: owner.name + ' 시간표' + (year && older ? ` (${year})` : ''), aliases: [], description: '',
-          fields: { when: '매주', who: owner.name }, extra: [], pinned: false, sources: { when: 'auto', who: 'auto' }, status: 'confirmed',
+          entityId: randomUUID(), type: 'schedule', name: owner.name + (meta.lang === 'en' ? ' Timetable' : ' 시간표') + (year && older ? ` (${year})` : ''), aliases: [], description: '',
+          fields: { when: meta.lang === 'en' ? 'Weekly' : '매주', who: owner.name }, extra: [], pinned: false, sources: { when: 'auto', who: 'auto' }, status: 'confirmed',
           provenance: { source: 'auto', by, roomId: meta.roomId ?? null, evidence }, timetable: { ownerId: owner.entityId, cells: {}, ...(year ? { year } : {}) },
           revision: 1, createdAt: t, updatedAt: t,
         };
@@ -2706,13 +2745,13 @@ class Archive {
         }
         if (!e) {
           const other = (x) => (x && nameLike(x) && !find(['person'], [x]) ? x : '');
-          e = make('person', kor || p.name, [kor ? p.name : '', other(p.nick), other(p.title)], p.lines.name || p.name);
+          e = opts.lang === 'en' ? make('person', p.name, [kor || '', other(p.nick), other(p.title)], p.lines.name || p.name) : make('person', kor || p.name, [kor ? p.name : '', other(p.nick), other(p.title)], p.lines.name || p.name);
           if (!e) continue;
         }
         e.sources = e.sources || {};
         for (const [key, raw] of Object.entries(p.fields)) {
           if (!FIELDS.person.some((f) => f.key === key)) continue;
-          const value = P.tidyValue(key, raw).slice(0, 2000);
+          const value = P.tidyValue(key, raw, opts.lang).slice(0, 2000);
           const before = e.fields?.[key] || '';
           const evidence = (p.lines[key] || '').slice(0, 300);
           if (before) {
@@ -2757,13 +2796,13 @@ class Archive {
             const had = Object.values(sheet?.timetable?.cells || {});
             const span = (a, b) => { const x = TT.span(a); const y = TT.span(b); return x && y ? x[0] < y[1] && y[0] < x[1] : a === b; };
             const wanted = TT.parseWhen(TT.englishWhen(info)).filter((c) => !had.some((h) => h.day === c.day && span(h.slot, c.slot)));
-            for (const c of wanted) laterCells.push({ ownerId: owner.entityId, day: c.day, slot: c.slot, value: subjectFrom(c.after, opts.pairs) || '수업', evidence: (p.line || info).slice(0, 300) });
+            for (const c of wanted) laterCells.push({ ownerId: owner.entityId, day: c.day, slot: c.slot, value: (opts.lang === 'en' ? String(c.after || '').trim() : subjectFrom(c.after, opts.pairs)) || (opts.lang === 'en' ? 'Class' : '수업'), evidence: (p.line || info).slice(0, 300) });
             continue;
           }
         }
         if (!e && !kor && !cells) continue;
         if (!e) {
-          e = make(type, kor || p.subject, [kor ? p.subject : ''], p.line || info);
+          e = opts.lang === 'en' ? make(type, p.subject, [kor || ''], p.line || info) : make(type, kor || p.subject, [kor ? p.subject : ''], p.line || info);
           if (!e) continue;
           if (cells) {
             e.fields.when = info;
@@ -2790,7 +2829,7 @@ class Archive {
       this.pushHistory(worldId, changes);
     }
     // v0.6.6 3: the timetable cells after the settings are saved (applyTimetable reads and writes the file itself)
-    if (laterCells.length) changes.push(...this.applyTimetable(worldId, laterCells, { by, roomId: opts.roomId ?? null }));
+    if (laterCells.length) changes.push(...this.applyTimetable(worldId, laterCells, { by, roomId: opts.roomId ?? null, lang: opts.lang }));
     return changes;
   }
 

@@ -244,7 +244,7 @@ ${scoreRules}
 {"owner":"그 일정의 주인 — 집단이나 장소 이름(세계 전체면 빈 문자열)","date":"1991-10-31처럼(연도를 모르면 10-31)","end":"기간이면 끝나는 날","when":"날짜로 바꿀 수 없는 말(예: 다음 주 금요일)","name":"행사 이름","place":"장소","who":"참가하는 집단 · 사람","status":"취소되면 cancelled","evidence":[{"n":"12.3","q":"핵심 구절"}]}
 - 날짜가 근거 문장에 실제로 있어야 적는다. 「다음 주」처럼 상대 날짜는 [이야기 속 오늘]이 있을 때만 날짜로 바꾸고, 없으면 when에 글 그대로 둔다. 미뤄졌으면 새 날짜를 적는다(코드가 이전 날짜를 남긴다).
 ${en
-    ? '정리 언어: 영어. fields의 값 · memo · relations의 note · timetable의 value · calendar의 name은 영어로 적는다(원문이 한국어여도). name은 원문에 나온 표기 그대로 — 번역하지 않는다. 칸 키 · type · topic · day 같은 정해진 값은 위에 적힌 그대로 쓴다.'
+    ? '정리 언어: 영어. fields의 값 · memo · relations의 note · timetable의 value · calendar의 name은 영어로 적는다(원문이 한국어여도). name은 원문에 나온 표기 그대로 — 번역하지 않는다. rule · system의 category(분류)는 짧은 영어 낱말(예: Law, Custom, Taboo, Magic, Ability, Economy, Scoring) — topic(주제)과 다른 칸이니 주제 이름을 쓰지 않는다. 칸 키 · type · topic · day 같은 정해진 값은 위에 적힌 그대로 쓴다.'
     : '정리 언어: 한국어. fields의 값 · memo · relations의 note는 한국어로 적는다(원문이 다른 언어여도). 칸 키 · type · topic · day 같은 정해진 값은 위에 적힌 그대로 쓴다.'}
 JSON만 출력: {"items":[...],"relations":[...],"timetable":[...],"calendar":[...]${board ? ',"scores":[...]' : ''}} (적을 게 없으면 빈 배열)`;
   const user = `[세계관] ${world.name}${world.description ? `\n${clip(world.description, 1500)}` : ''}
