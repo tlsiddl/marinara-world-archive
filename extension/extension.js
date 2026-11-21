@@ -78,6 +78,19 @@ input,select,textarea{width:100%;border-radius:3px;background:var(--wa-field);bo
 textarea{min-height:84px;resize:vertical}
 label.f{display:block;font:700 14px/1.45 var(--wa-serif);letter-spacing:0;color:var(--wa-ink);margin:16px 0 6px}
 label.f em{display:block;font:12.5px/1.5 var(--wa-sans);letter-spacing:0;font-style:normal;color:var(--wa-muted);margin:2px 0 0}
+.c-line{margin:6px 0 0;font:600 13.5px/1.5 var(--wa-serif);color:var(--wa-ink)}
+.c-two{margin:6px 0 0;font-size:13px;line-height:1.55;color:var(--wa-muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.c-hid{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.hid-cap{display:inline-block;margin-left:8px;font:12px/1.5 var(--wa-sans);color:var(--wa-muted);border:1px dashed var(--wa-muted);border-radius:999px;padding:0 9px;vertical-align:middle}.c-hid .hid-cap{margin-left:0}
+.list-bar{margin:4px 0 16px}.bar-gap{flex:0 0 14px}
+h3.grp{font:700 16px/1.4 var(--wa-serif);margin:22px 0 10px;display:flex;align-items:baseline;gap:8px}h3.grp small{font:12px var(--wa-sans);color:var(--wa-muted)}
+.fact-caps{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 10px}
+.fact-cap{display:inline-flex;align-items:baseline;gap:7px;border:1.2px solid var(--wa-ink);border-radius:999px;padding:4px 13px;font:600 14px/1.45 var(--wa-serif);background:transparent;color:var(--wa-ink)}.fact-cap small{font:12px var(--wa-sans);color:var(--wa-muted);font-weight:400}button.fact-cap{cursor:pointer}
+.rel-caps{display:flex;flex-wrap:wrap;gap:8px}.rel-cap{border:1px solid var(--wa-line);border-radius:999px;padding:4px 12px;background:transparent;color:var(--wa-ink);font:13.5px/1.45 var(--wa-sans);cursor:pointer}.rel-cap b{font-family:var(--wa-serif)}.rel-cap small{color:var(--wa-muted)}
+small.was,.past.was{color:#2f5fa8}
+.hid-toggle{display:inline-flex;align-items:center;gap:6px;margin:6px 0 0;font:12.5px var(--wa-sans);color:var(--wa-muted);border:1px dashed var(--wa-line);border-radius:999px;padding:2px 10px}.hid-toggle input{width:auto;margin:0}
+.rel-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--wa-line)}.rel-row span{flex:1;min-width:180px}.rel-row select{width:auto;max-width:220px;padding:5px 8px}.rel-row.add{border-bottom:0}
+.cal-form input{max-width:200px}
 .caps{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}.caps button{border:1px solid var(--wa-line);border-radius:999px;padding:5px 13px;background:transparent;font:14px/1.4 var(--wa-serif);color:var(--wa-ink);cursor:pointer}.caps button.on{background:var(--wa-ink);color:var(--wa-paper);border-color:var(--wa-ink)}
 .budget-now{margin:4px 0 0;font-size:13px}.budget-now b{color:#a33a2a;font-weight:600}
 .ko{font-family:var(--wa-serif)!important;letter-spacing:0!important;text-transform:none!important}
@@ -499,6 +512,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   async function loadAll(followRoom) {
     const status = await api('GET', '/status');
     st.fields = status.fields || {};
+    st.topics = status.topics || []; // v0.7.0 5
     st.serverVersion = status.version || null; // 할 일 8: the screen and the server module should be the same version
     st.readOnly = Number(status.contract || 1) !== PANEL_CONTRACT; // 연동 v2: another contract level — look, do not change
     await loadRoom();
@@ -638,24 +652,80 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       <div class="paper mobile-only"><p class="sub" style="margin:0">프리셋에 <b>{{세계}}</b>를 넣은 자리에 연결한 세계관 설정이 들어갑니다.</p></div>`;
   }
 
+  /**
+   * v0.7.0 6: a card says who it is in four lines — the name; 「나이 · 성별 · 지내는 곳」 (other kinds: their short
+   * fields); 외형 · 성격 in two lines (other kinds: their first texts or 메모); 숨은 설정 as dashed capsules. No 「자동」
+   * stamp, number or date here (they are small at the bottom of the page).
+   */
+  const nameOfId = (id) => st.entities.find((x) => x.entityId === id)?.name || '';
+  function cardLine(e) {
+    const f = e.fields || {};
+    if (e.type === 'person') {
+      const where = e.room ? `지내는 곳 ${nameOfId(e.room)}` : e.work ? `일하는 곳 ${nameOfId(e.work)}` : '';
+      return [f.age, f.gender, where].filter(Boolean).join(' · ');
+    }
+    return defs(e.type).filter((x) => x.kind === 'line' && f[x.key]).slice(0, 3).map((x) => f[x.key]).join(' · ');
+  }
+  function cardTwo(e) {
+    const f = e.fields || {};
+    if (e.type === 'person') return [f.appearance, f.personality].filter(Boolean);
+    const texts = defs(e.type).filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => f[x.key]);
+    return [...texts, e.description].filter(Boolean).slice(0, 2);
+  }
   function cardHtml(e) {
-    const d = defs(e.type);
-    const chips = d.filter((f) => f.kind === 'line' && e.fields?.[f.key]).map((f) => `<span class="chip" title="${esc(f.label)}">${esc(e.fields[f.key])}</span>`).join('');
-    const firstText = d.find((f) => f.kind === 'text' && f.key !== 'state' && e.fields?.[f.key]);
-    const snip = firstText ? e.fields[firstText.key] : e.description;
+    const line = cardLine(e);
+    const two = cardTwo(e);
+    const hid = Object.keys(e.hidden || {}).map((k) => defs(e.type).find((x) => x.key === k)?.label || k);
     return `<button class="card" type="button" data-act="open" data-id="${esc(e.entityId)}" data-search="${esc([e.name, ...e.aliases].join(' ').toLowerCase())}">
-      ${e.pinned ? '<span class="pill pin">고정</span>' : e.provenance?.source === 'auto' ? '<span class="pill pin">자동</span>' : ''}
+      ${e.pinned ? '<span class="pill pin">고정</span>' : ''}
       <div class="nm">${esc(e.name)}</div>
-      ${e.aliases.length ? `<div class="al">${esc(e.aliases.join(' · '))}</div>` : ''}
-      ${chips ? `<div class="chips">${chips}</div>` : ''}
-      ${snip ? `<p class="snip">${esc(snip)}</p>` : ''}
-      <div class="foot"><span>${KIND[e.type].en} · ${shortId(e.entityId)}</span><span>${fmtDate(e.updatedAt)}</span></div>
+      ${line ? `<p class="c-line">${esc(line)}</p>` : ''}
+      ${two.map((t) => `<p class="c-two">${esc(t)}</p>`).join('')}
+      ${hid.length ? `<div class="c-hid">${hid.map((h) => `<span class="hid-cap">${esc(h)} · 숨은 설정</span>`).join('')}</div>` : ''}
     </button>`;
+  }
+
+  /**
+   * v0.7.0 6: how a list is laid out — 집단으로 묶기 · 장소로 묶기 · 가나다, and 숨은 설정 있음 · 반복 등장만. In a group,
+   * 「맡은 사람 · 선생님」 and 「함께 사는 동물」 apart from the members.
+   */
+  const ROLE_C = /(교수|교사|선생|사감|기숙사장|반장|감독생|교장|부교장|학장|원장|단장|회장|대장|주장|관리인|관리자|사서|집사|하인|하녀|시종|주인|점원|지배인|유모|가정교사|마부|요리사|정원사|운전사)/;
+  const ANIMAL_C = /(고양이|강아지|개|부엉이|올빼미|니즐|크니즐|쥐|두꺼비|불사조|용|드래곤|말|토끼|여우|늑대|표범|까마귀|뱀|사슴|곰|cat|dog|owl|kneazle|toad|rat|phoenix|dragon|horse|raven|snake)/i;
+  const LIST_MODES = { person: [['group', '집단으로 묶기'], ['place', '장소로 묶기'], ['abc', '가나다']], other: [['place', '장소로 묶기'], ['abc', '가나다']] };
+  function listGroups(type, list) {
+    const mode = st.listMode?.[type] || (type === 'person' ? 'group' : 'abc');
+    if (mode === 'abc') return [[null, list]];
+    const out = new Map();
+    const put = (k, e) => { if (!out.has(k)) out.set(k, []); out.get(k).push(e); };
+    if (mode === 'group' && type === 'person') {
+      for (const e of list) {
+        const g = (st.relations || []).find((x) => x.type === '소속' && x.from === e.entityId && st.entities.find((y) => y.entityId === x.to)?.type === 'group');
+        const gname = g ? nameOfId(g.to) : '소속 없음';
+        const animal = ANIMAL_C.test(String(e.fields?.species || ''));
+        const staff = !animal && ROLE_C.test(String(e.fields?.affiliation || ''));
+        put(`${gname}${animal ? ' · 함께 사는 동물' : staff ? ' · 맡은 사람 · 선생님' : ''}`, e);
+      }
+    } else {
+      const m = worldMap();
+      for (const e of list) {
+        const at = e.type === 'person' ? e.room || e.work : e.type === 'place' ? m.top(e.entityId) : e.appliesTo && e.appliesTo !== 'world' ? e.appliesTo : e.base || null;
+        put(at ? nameOfId(at) || '어디인지 모름' : e.appliesTo === 'world' ? '세계 전체' : '어디인지 모름', e);
+      }
+    }
+    const last = (k) => /^(소속 없음|어디인지 모름)/.test(k);
+    return [...out].sort(([a], [b]) => Number(last(a)) - Number(last(b)) || a.localeCompare(b, 'ko'));
+  }
+  function listBar(type) {
+    const mode = st.listMode?.[type] || (type === 'person' ? 'group' : 'abc');
+    const fl = st.listFilter || {};
+    const cap = (act, key, label, on) => `<button type="button" class="${on ? 'on' : ''}" data-act="${act}" data-type="${type}" data-key="${key}" aria-pressed="${on}">${label}</button>`;
+    return `<div class="caps list-bar">${(LIST_MODES[type] || LIST_MODES.other).map(([k, l]) => cap('list-mode', k, l, mode === k)).join('')}<span class="bar-gap"></span>${cap('list-filter', 'hidden', '숨은 설정 있음', fl.hidden)}${type === 'person' ? cap('list-filter', 'recur', '반복 등장만', fl.recur) : ''}</div>`;
   }
 
   function listHtml(type) {
     const k = KIND[type];
-    const list = st.entities.filter((e) => e.type === type).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name, 'ko'));
+    const fl = st.listFilter || {};
+    const list = st.entities.filter((e) => e.type === type && (!fl.hidden || Object.keys(e.hidden || {}).length) && (!fl.recur || type !== 'person' || e.pinned || (e.seen?.n || 0) >= 2)).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name, 'ko'));
     return `
       <div class="eyebrow">${k.en} · ${list.length}</div>
       <h1>${k.label}</h1>
@@ -668,7 +738,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       ${type === 'group' && st.groupSuggest?.length ? `<p class="sub" style="margin:-6px 0 14px">소속 칸에만 있는 이름 · ${st.groupSuggest.map((g) => `<button class="quiet" type="button" data-act="group-make" data-name="${esc(g.name)}" title="${esc(g.people.join(', '))}의 소속 칸${g.owner ? ` · 지금은 「${esc(g.owner)}」의 다른 이름` : ''}">${esc(g.name)} · 집단으로 만들기</button>`).join(' ')}</p>` : ''}
       ${type === 'schedule' && !st.readOnly ? `<p class="sub" style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="cal-gather" title="날짜가 정해진 한 번뿐인 행사 일정을 그 집단·장소의 학사일정으로 옮깁니다(코드로)">학사일정으로 모으기</button> <button class="quiet" type="button" data-act="tt-gather" title="요일·시간이 정해진 수업·일과 일정을 그 집단·사람의 시간표 칸으로 옮깁니다. 코드로 먼저 하고, 안 되는 것만 작은 호출 한 번">시간표로 모으기</button></p>` : ''}
       ${pairsOf(type).length || ((type === 'rule' || type === 'system') && (st.differ || []).length) ? `<p style="margin:-6px 0 14px"><button class="quiet" type="button" data-act="dupes">${type === 'person' ? '같은 사람일 수 있음' : '같은 것일 수 있음'} ${pairsOf(type).length}쌍${(type === 'rule' || type === 'system') && (st.differ || []).length ? ` · 서로 다른 말 ${st.differ.length}묶음` : ''}</button></p>` : ''}
-      ${list.length ? `<div class="cards">${list.map(cardHtml).join('')}</div><p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
+      ${listBar(type)}
+      ${list.length ? `${listGroups(type, list).map(([g, items]) => `${g ? `<h3 class="grp">${esc(g)} <small>${items.length}</small></h3>` : ''}<div class="cards">${items.map(cardHtml).join('')}</div>`).join('')}<p class="sub" id="noHit" hidden>찾는 이름이 없습니다.</p>`
         : `<div class="empty"><h2>아직 ${k.label} 설정이 없습니다</h2><p>「새 ${k.label}」으로 첫 항목을 만들어 주세요.</p></div>`}`;
   }
 
@@ -689,19 +760,37 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     try { st.rosters[id] = await api('GET', `/worlds/${st.worldId}/entities/${id}/members`); } catch { st.rosters[id] = { members: [], failed: true }; }
     if (st.detail === id || st.view === 'tabs') render();
   }
+  /** v0.7.0 7: the pickers (지내는 곳 · 적용되는 곳 · 본거지 · 시간표 칸 · 명단 더하기 …) show only in 「고치기」. */
+  let EDIT_ON = false;
+  const editOn = () => EDIT_ON && !st.readOnly;
+  const REL_TYPES_C = ['가족', '소속', '친구', '적대', '연인', '스승·제자', '위치', '기타'];
+  /** v0.7.0 7: 관계 — add, take off, turn around, another kind (each saved at once, in 기록). */
+  function relEditHtml(e) {
+    const rels = (st.relations || []).filter((x) => x.from === e.entityId || x.to === e.entityId);
+    const nameOf = (id) => st.entities.find((x) => x.entityId === id)?.name || '?';
+    const row = (x) => `<div class="rel-row"><span><b>${esc(nameOf(x.from))}</b> → <b>${esc(nameOf(x.to))}</b></span><select data-rel-type="${esc(x.relationId)}" aria-label="관계 종류">${REL_TYPES_C.map((t) => `<option ${t === x.type ? 'selected' : ''}>${t}</option>`).join('')}</select><button class="quiet" type="button" data-act="rel-type" data-id="${esc(x.relationId)}">종류 바꾸기</button><button class="quiet" type="button" data-act="rel-flip" data-id="${esc(x.relationId)}">방향 바꾸기</button><button class="quiet" type="button" data-act="rel-del" data-id="${esc(x.relationId)}">빼기</button></div>`;
+    const others = st.entities.filter((x) => x.entityId !== e.entityId).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    return `<div class="sec rel-edit"><small>관계</small>${rels.map(row).join('') || '<p class="sub">아직 이어진 관계가 없습니다.</p>'}
+      <div class="rel-row add"><select id="relTo" aria-label="이을 설정">${others.map((x) => `<option value="${esc(x.entityId)}">${esc(x.name)} · ${esc(KIND[x.type]?.label || '')}</option>`).join('')}</select><select id="relType" aria-label="관계 종류">${REL_TYPES_C.map((t) => `<option>${t}</option>`).join('')}</select><button type="button" data-act="rel-add" data-id="${esc(e.entityId)}">관계 더하기</button></div></div>`;
+  }
+  /** v0.7.0 7: 학사일정 — a new day by hand (the reader's stay as they are). */
+  function calAddHtml(e) {
+    return `<div class="tt-form cal-form"><input id="calDate" maxlength="10" placeholder="날짜(1891-09-01)" aria-label="날짜"><input id="calName" maxlength="60" placeholder="행사 이름" aria-label="행사 이름"><input id="calPlace" maxlength="60" placeholder="장소(비워도 돼요)" aria-label="장소"><button type="button" data-act="cal-add" data-id="${esc(e.entityId)}">일정 더하기</button></div>`;
+  }
+
   function rosterHtml(g) {
     const r = st.rosters?.[g.entityId];
     if (!r || r.loading) { if (!r) void loadRoster(g.entityId); return '<div class="sec"><small>구성원 명단</small><p class="sub">불러오는 중…</p></div>'; }
     const list = r.members || [];
     const inList = new Set(list.map((m) => m.entityId));
-    const chip = (m) => `<button class="quiet" type="button" data-act="open" data-id="${esc(m.entityId)}">${esc(m.name)}${m.unnamed ? ' <small>(이름 모름)</small>' : ''}${m.via ? ` <small>· ${esc(m.via)}</small>` : ''}</button><button class="quiet" type="button" data-act="member-off" data-group="${esc(m.viaId || g.entityId)}" data-id="${esc(m.entityId)}" title="${esc(m.via || g.name)}의 명단에서 빼기 — 그 인물의 소속 칸에서 이 이름을 지웁니다" aria-label="${esc(m.name)} 빼기">×</button>`;
+    const chip = (m) => `<button class="quiet" type="button" data-act="open" data-id="${esc(m.entityId)}">${esc(m.name)}${m.unnamed ? ' <small>(이름 모름)</small>' : ''}${m.via ? ` <small>· ${esc(m.via)}</small>` : ''}</button>${editOn() ? `<button class="quiet" type="button" data-act="member-off" data-group="${esc(m.viaId || g.entityId)}" data-id="${esc(m.entityId)}" title="${esc(m.via || g.name)}의 명단에서 빼기 — 그 인물의 소속 칸에서 이 이름을 지웁니다" aria-label="${esc(m.name)} 빼기">×</button>` : ''}`;
     const part = (kind, label) => {
       const rows = list.filter((m) => m.kind === kind);
       return rows.length ? `<p><small>${label} ${rows.length}</small><br>${rows.map(chip).join('')}</p>` : '';
     };
     const named = list.filter((m) => !m.unnamed).length;
     const others = st.entities.filter((x) => x.type === 'person' && !inList.has(x.entityId)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-    const add = others.length ? `<span class="roster-add"><select id="rosterPick" aria-label="명단에 더할 인물">${others.map((x) => `<option value="${esc(x.entityId)}">${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="member-add" data-group="${esc(g.entityId)}">명단에 더하기</button></span>` : '';
+    const add = editOn() && others.length ? `<span class="roster-add"><select id="rosterPick" aria-label="명단에 더할 인물">${others.map((x) => `<option value="${esc(x.entityId)}">${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="member-add" data-group="${esc(g.entityId)}">명단에 더하기</button></span>` : '';
     const body = list.length ? part('member', '구성원') + part('staff', '맡은 사람') + part('past', '지난 구성원') + part('animal', '함께 사는 동물') : '<p class="sub">아직 이 집단에 소속된 인물이 없습니다.</p>';
     // v0.5.1 J: with a 전체 인원 — 「이름 아는 사람 M명 / 전체 N명」
     const head = r.counts?.total ? `이름 아는 사람 ${r.counts.known}명 / 전체 ${r.counts.total}명` : `${list.length}명${named !== list.length ? ` (이름 아는 사람 ${named}명)` : ''}`;
@@ -745,7 +834,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const clash = (e.timetable.overlaps || []).filter(([a, b]) => e.timetable.cells[a] && e.timetable.cells[b]);
     const clashHtml = clash.length ? `<div class="tt-clash" role="status"><b>시간이 겹쳐요 ${clash.length}</b>${clash.map(([a, b]) => `<p>${[a, b].map((k) => `${esc(label(k))}${st.readOnly ? '' : ` <button class="quiet" type="button" data-act="cell-clear" data-id="${esc(e.entityId)}" data-key="${esc(k)}">이 칸 지우기</button>`}`).join(' ↔ ')}</p>`).join('')}</div>` : '';
     const owner = st.entities.find((x) => x.entityId === e.timetable.ownerId);
-    const form = st.readOnly ? '' : `<div class="tt-form"><select id="ttDay" aria-label="요일">${TT_DAYS.map((d) => `<option>${d}</option>`).join('')}</select><input id="ttSlot" maxlength="24" placeholder="때(1교시 · 오전 · 09:00–10:30)" aria-label="때"><input id="ttValue" maxlength="80" placeholder="내용(비우면 그 칸을 지움)" aria-label="내용"><button class="quiet" type="button" data-act="cell-save" data-id="${esc(e.entityId)}">칸 저장</button></div>`;
+    const form = !editOn() ? '' : `<div class="tt-form"><select id="ttDay" aria-label="요일">${TT_DAYS.map((d) => `<option>${d}</option>`).join('')}</select><input id="ttSlot" maxlength="24" placeholder="때(1교시 · 오전 · 09:00–10:30)" aria-label="때"><input id="ttValue" maxlength="80" placeholder="내용(비우면 그 칸을 지움)" aria-label="내용"><button class="quiet" type="button" data-act="cell-save" data-id="${esc(e.entityId)}">칸 저장</button></div>`;
     return `<div class="sec"><small>시간표${owner ? ` · ${esc(owner.name)}` : ''} · 칸 ${cells.length}</small>${clashHtml}${table}${form}</div>`;
   }
 
@@ -754,7 +843,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const where = st.entities.find((x) => x.entityId === e.appliesTo);
     const tag = e.sources?.appliesTo === 'auto' ? '<span class="auto-tag">· 자동</span>' : '';
     const opts = st.entities.filter((x) => x.type === 'place' || x.type === 'group').sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, 'ko') : a.type === 'group' ? -1 : 1));
-    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="appliesPick" aria-label="적용되는 곳"><option value="" ${e.appliesTo ? '' : 'selected'}>모름</option><option value="world" ${e.appliesTo === 'world' ? 'selected' : ''}>세계 전체</option>${opts.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === e.appliesTo ? 'selected' : ''}>${esc(x.name)} · ${x.type === 'group' ? '집단' : '장소'}</option>`).join('')}</select><button class="quiet" type="button" data-act="applies-set" data-id="${esc(e.entityId)}">바꾸기</button></span>`;
+    const pick = !editOn() ? '' : `<span class="roster-add"><select id="appliesPick" aria-label="적용되는 곳"><option value="" ${e.appliesTo ? '' : 'selected'}>모름</option><option value="world" ${e.appliesTo === 'world' ? 'selected' : ''}>세계 전체</option>${opts.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === e.appliesTo ? 'selected' : ''}>${esc(x.name)} · ${x.type === 'group' ? '집단' : '장소'}</option>`).join('')}</select><button class="quiet" type="button" data-act="applies-set" data-id="${esc(e.entityId)}">바꾸기</button></span>`;
     const shown = where ? `<button class="quiet" type="button" data-act="open" data-id="${esc(where.entityId)}">${esc(where.name)}</button>` : e.appliesTo === 'world' ? '세계 전체' : '모름 <small>(장면 방식에서 맨 뒤에 넣음)</small>';
     return `<div class="sec"><small>적용되는 곳${tag}</small><p>${shown}</p>${pick}</div>`;
   }
@@ -764,7 +853,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const at = st.entities.find((x) => x.entityId === g.base);
     const tag = g.sources?.base === 'auto' ? '<span class="auto-tag">· 자동</span>' : '';
     const places = st.entities.filter((x) => x.type === 'place').sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="basePick" aria-label="본거지"><option value="">없음</option>${places.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === g.base ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="base-set" data-id="${esc(g.entityId)}">바꾸기</button></span>`;
+    const pick = !editOn() ? '' : `<span class="roster-add"><select id="basePick" aria-label="본거지"><option value="">없음</option>${places.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === g.base ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="base-set" data-id="${esc(g.entityId)}">바꾸기</button></span>`;
     return `<div class="sec"><small>본거지${tag}</small><p>${at ? `<button class="quiet" type="button" data-act="open" data-id="${esc(at.entityId)}">${esc(at.name)}</button>` : '<span class="sub">없음</span>'}</p>${pick}</div>`;
   }
 
@@ -774,8 +863,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const tag = p.sources?.room === 'auto' ? '<span class="auto-tag">· 자동</span>' : '';
     const places = st.entities.filter((x) => x.type === 'place').sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     const past = (p.roomPast || []).map((x) => st.entities.find((y) => y.entityId === x.placeId)?.name).filter(Boolean);
-    if (!at && !past.length && st.readOnly) return '';
-    const pick = st.readOnly ? '' : `<span class="roster-add"><select id="roomPick" aria-label="지내는 곳"><option value="">없음</option>${places.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === p.room ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="room-set" data-id="${esc(p.entityId)}">바꾸기</button></span>`;
+    if (!at && !past.length && !editOn()) return '';
+    const pick = !editOn() ? '' : `<span class="roster-add"><select id="roomPick" aria-label="지내는 곳"><option value="">없음</option>${places.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === p.room ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select><button class="quiet" type="button" data-act="room-set" data-id="${esc(p.entityId)}">바꾸기</button></span>`;
     return `<div class="sec"><small>지내는 곳${tag}</small><p>${at ? `<button class="quiet" type="button" data-act="open" data-id="${esc(at.entityId)}">${esc(at.name)}</button>` : '<span class="sub">없음</span>'}${past.length ? ` <small class="past">이전: ${esc(past.join(', '))}</small>` : ''}</p>${pick}</div>`;
   }
   /** 지내는 사람 (v0.5.1 I) · v0.6.2 ⑥ 여기서 일하는 사람: the people whose 지내는 곳 / 일하는 곳 is this place. */
@@ -813,12 +902,23 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const d = defs(e.type);
     const f = e.fields || {};
     const src = e.sources || {};
-    const tag = (k) => (src[k] === 'auto' ? '<span class="auto-tag">· 자동</span>' : '') + (e.hidden?.[k] ? '<span class="auto-tag" title="프로필 블록에만 있고 이야기에는 아직 나오지 않았습니다">· 아직 드러나지 않음</span>' : '');
+    // v0.7.0 6: no 「자동」 stamp by each field (the bottom says where it came from); 숨은 설정 as a dashed capsule
+    const tag = (k) => (e.hidden?.[k] ? '<span class="hid-cap" title="프로필 블록에만 있고 이야기에는 아직 나오지 않았습니다">아직 드러나지 않음</span>' : '');
     // 할 일 10: the earlier value small under the field; a newer value from the story for a field the person wrote.
-    const was = (k) => (e.past?.[k]?.[0] ? `<small class="past">이전: ${esc(e.past[k][0].value)} <button class="quiet" type="button" data-act="past-prompt" data-id="${esc(e.entityId)}" data-key="${esc(k)}" title="켜면 {{세계}}에 「(과거: …)」가 붙습니다">${e.pastInPrompt?.[k] ? '프롬프트에 넣는 중 · 끄기' : '프롬프트에도 넣기'}</button></small>` : '');
+    const was = (k) => (e.past?.[k]?.[0] ? `<small class="past was">이전: ${esc(e.past[k][0].value)} <button class="quiet" type="button" data-act="past-prompt" data-id="${esc(e.entityId)}" data-key="${esc(k)}" title="켜면 {{세계}}에 「(과거: …)」가 붙습니다">${e.pastInPrompt?.[k] ? '프롬프트에 넣는 중 · 끄기' : '프롬프트에도 넣기'}</button></small>` : '');
     const wait = (k) => (e.pending?.[k] ? `<small class="pending">대화에서는 「${esc(e.pending[k].value)}」${copula(e.pending[k].value)} <button class="quiet" type="button" data-act="pending" data-id="${esc(e.entityId)}" data-key="${esc(k)}">적용</button><button class="quiet" type="button" data-act="pending-drop" data-id="${esc(e.entityId)}" data-key="${esc(k)}">무시</button></small>` : '');
-    const facts = d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<div class="fact"><small>${esc(x.label)}${tag(x.key)}</small><b>${esc(f[x.key])}</b>${was(x.key)}${wait(x.key)}</div>`).join('');
-    const secs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).map((x) => `<div class="sec"><small>${esc(x.label)}${tag(x.key)}</small><p>${esc(f[x.key])}</p>${was(x.key)}${wait(x.key)}</div>`).join('');
+    // v0.7.0 6: the short fields as capsules under the name (나이 · 성별 · 소속 · 지내는 곳 / 일하는 곳), then 외형 → 성격 →
+    // 배경 → … → 지금, empty ones left out
+    const roomP = e.type === 'person' && e.room ? st.entities.find((x) => x.entityId === e.room) : null;
+    const workP = e.type === 'person' && e.work ? st.entities.find((x) => x.entityId === e.work) : null;
+    const facts = [
+      ...d.filter((x) => x.kind === 'line' && f[x.key]).map((x) => `<span class="fact-cap"><small>${esc(x.label)}</small>${esc(f[x.key])}${tag(x.key)}</span>${was(x.key)}${wait(x.key)}`),
+      roomP ? `<button class="fact-cap" type="button" data-act="open" data-id="${esc(roomP.entityId)}"><small>지내는 곳</small>${esc(roomP.name)}</button>` : '',
+      workP ? `<button class="fact-cap" type="button" data-act="open" data-id="${esc(workP.entityId)}"><small>일하는 곳</small>${esc(workP.name)}</button>` : '',
+    ].join('');
+    const ORDER = ['appearance', 'personality', 'background', 'family'];
+    const textDefs = d.filter((x) => x.kind === 'text' && x.key !== 'state' && f[x.key]).sort((a, b) => (ORDER.indexOf(a.key) + 1 || 99) - (ORDER.indexOf(b.key) + 1 || 99));
+    const secs = textDefs.map((x) => `<div class="sec"><small>${esc(x.label)}${tag(x.key)}</small><p>${esc(f[x.key])}</p>${was(x.key)}${wait(x.key)}</div>`).join('');
     const extra = (e.extra || []).filter((x) => x.value).map((x) => `<div class="sec"><small>${esc(x.label)}</small><p>${esc(x.value)}</p></div>`).join('');
     const memo = e.description ? `<div class="sec"><small>${d.length ? '메모' : '내용'}${tag('description')}</small><p>${esc(e.description)}</p></div>` : '';
     // v0.5.0 L: 「확인 안 됨 · ○○의 말」
@@ -833,9 +933,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const rels = (st.relations || []).filter((r) => r.from === e.entityId || r.to === e.entityId).map((r) => {
       const other = st.entities.find((x) => x.entityId === (r.from === e.entityId ? r.to : r.from));
       if (!other) return '';
-      return `<button class="quiet" type="button" data-act="open" data-id="${esc(other.entityId)}">${esc(r.type)} · ${esc(other.name)}${r.note ? ` (${esc(r.note)})` : ''}${r.source === 'auto' ? '<span class="auto-tag">· 자동</span>' : ''}</button>`;
+      // v0.7.0 6: 「친구 테오 마렌」 — the kind and the other one, a capsule that opens them
+      return `<button class="rel-cap" type="button" data-act="open" data-id="${esc(other.entityId)}">${esc(r.type)} <b>${esc(other.name)}</b>${r.note ? ` <small>${esc(r.note)}</small>` : ''}</button>`;
     }).join('');
-    const relSec = rels ? `<div class="sec"><small>관계</small><p>${rels}</p></div>` : '';
+    const relSec = rels ? `<div class="sec"><small>관계</small><div class="rel-caps">${rels}</div></div>` : '';
     const empty = !facts && !secs && !extra && !memo && !f.state && !rels;
     const askKey = `entity:${e.entityId}`;
     return `
@@ -843,18 +944,19 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       <div class="paper">
         <div class="sheet-head">
           <div>
-            <div class="eyebrow">${k.en} · ${shortId(e.entityId)}</div>
+            <div class="eyebrow">${k.label}</div>
             <h1 style="margin-bottom:6px">${esc(e.name)}</h1>
             ${e.aliases.length ? `<p class="al">다른 이름 · ${esc(e.aliases.join(', '))}</p>` : ''}
             ${e.glossaryName && e.glossaryName !== e.name ? `<p class="sub" style="margin:6px 0 0">번역 단어장에는 「${esc(e.glossaryName)}」${copula(e.glossaryName)} <button class="quiet" type="button" data-act="glossary-name" data-id="${esc(e.entityId)}">적용</button></p>` : ''}
           </div>
           ${e.pinned ? '<span class="pill">늘 먼저 넣기</span>' : ''}${e.nameCheck ? `<span class="pill" title="근거 문장에는 「${esc(e.nameCheck.said)}」이(가) 나옵니다. 이름을 확인해 주세요(고치면 사라집니다).">이름 확인 필요</span>` : ''}
         </div>
-        ${facts ? `<div class="facts">${facts}</div>` : ''}
-        ${once}${differs}${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'person' ? roomHtml(e) + workHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}${relSec}
-        ${f.state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
+        ${facts ? `<div class="fact-caps">${facts}</div>` : ''}
+        ${once}${differs}${rumors}${e.type === 'rule' || e.type === 'system' ? appliesHtml(e) : ''}${e.type === 'group' ? baseHtml(e) : ''}${e.type === 'place' ? stayingHtml(e) : ''}${e.timetable ? timetableHtml(e) : ''}${e.calendar ? calendarHtml(e) : ''}${secs}${extra}${memo}${e.type === 'group' ? rosterHtml(e) : ''}
+        ${f.state ? `<div class="state"><small>지금${tag('state')}</small><p>${esc(f.state)}</p>${was('state')}${wait('state')}</div>` : ''}
+        ${relSec}
         ${empty ? '<p class="sub" style="margin-top:16px">아직 적힌 칸이 없습니다. 「고치기」에서 채워 주세요.</p>' : ''}
-        <div class="meta">만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
+        <div class="meta">${k.en} · ${shortId(e.entityId)} · 만든 날 ${fmtDate(e.createdAt)} · 고친 날 ${fmtDate(e.updatedAt)} · ${e.provenance?.source === 'auto' ? '대화에서 자동으로 추가' : '직접 입력'}${Object.values(src).includes('auto') ? ` · 자동으로 채운 칸: ${esc(Object.entries(src).filter(([, v]) => v === 'auto').map(([key]) => d.find((x) => x.key === key)?.label || (key === 'description' ? '메모' : key)).join(', '))}` : ''}${e.provenance?.evidence ? `<br>근거 “${esc(e.provenance.evidence)}”` : ''}</div>
         <div class="actions">
           <button class="primary" type="button" data-act="edit" data-id="${esc(e.entityId)}">고치기</button>
           <button type="button" data-act="pin" data-id="${esc(e.entityId)}">${e.pinned ? '고정 풀기' : '늘 먼저 넣기'}</button>
@@ -921,16 +1023,41 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       ${groups.map((g) => `<div class="paper"><p class="sub" style="margin:0 0 8px">「${esc(g.topic)}」</p><ul>${g.list.map((e) => `<li><b>${esc(e.name)}</b> <small>${esc(KIND[e.type]?.label || e.type)}${e.description ? ` · ${esc(e.description.slice(0, 80))}` : ''}</small></li>`).join('')}</ul></div>`).join('')}`;
   }
 
-  function fieldInput(x, value, hideLabel) {
+  function fieldInput(x, value, hideLabel, hidden) {
     const hint = x.hint ? `<em>${esc(x.hint)}</em>` : '';
     const label = `<label class="f" for="fd-${x.key}" ${hideLabel ? 'hidden' : ''}>${esc(x.label)}${hint}</label>`;
+    // v0.7.0 7: 「아직 드러나지 않음」 by hand (a field with a value, on a setting that is there)
+    const hid = hidden === undefined ? '' : `<label class="hid-toggle"><input type="checkbox" data-hidden="${x.key}" ${hidden ? 'checked' : ''}> 아직 드러나지 않음</label>`;
     return x.kind === 'line'
-      ? `<div>${label}<input id="fd-${x.key}" data-field="${x.key}" maxlength="200" value="${esc(value)}"></div>`
-      : `<div>${label}<textarea id="fd-${x.key}" data-field="${x.key}" maxlength="2000">${esc(value)}</textarea></div>`;
+      ? `<div>${label}<input id="fd-${x.key}" data-field="${x.key}" maxlength="200" value="${esc(value)}">${hid}</div>`
+      : `<div>${label}<textarea id="fd-${x.key}" data-field="${x.key}" maxlength="2000">${esc(value)}</textarea>${hid}</div>`;
   }
 
   function extraRow(x = { label: '', value: '' }) {
     return `<div class="extra-row" data-extra><input data-x="label" maxlength="40" placeholder="칸 이름 (예: 좋아하는 것)" value="${esc(x.label)}"><textarea data-x="value" maxlength="2000" rows="1" style="min-height:42px">${esc(x.value)}</textarea><button class="quiet" type="button" data-act="drop-extra">빼기</button></div>`;
+  }
+
+  /**
+   * v0.7.0 7: the rest of the screen in 「고치기」 — 지내는 곳 · 일하는 곳, 적용되는 곳 · 주제, 본거지 · 명단, 시간표 칸,
+   * 학사일정, 관계. The pickers act at once (each in 기록); 일하는 곳 · 주제 · 숨김 are saved with 「저장」.
+   */
+  function moreEdit(e, type) {
+    EDIT_ON = true;
+    try {
+      const places = st.entities.filter((x) => x.type === 'place').sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+      const work = type === 'person' ? `<label class="f" for="fd-work">일하는 곳<em>가게 · 장소. 소속 칸에서 자동으로 잇기도 해요</em></label><select id="fd-work" style="max-width:360px"><option value="">없음</option>${places.map((x) => `<option value="${esc(x.entityId)}" ${x.entityId === e.work ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : '';
+      const topic = type === 'rule' || type === 'system' ? `<label class="f" for="fd-topic">주제<em>규칙 · 시스템 화면에서 주제로 거를 때 써요</em></label><select id="fd-topic" style="max-width:240px"><option value="">고르지 않음</option>${(st.topics || []).map((t) => `<option ${t === e.topic ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : '';
+      return [
+        type === 'person' ? roomHtml(e) + work : '',
+        type === 'rule' || type === 'system' ? appliesHtml(e) + topic : '',
+        type === 'group' ? baseHtml(e) + rosterHtml(e) : '',
+        e.timetable ? timetableHtml(e) : '',
+        e.calendar ? calendarHtml(e) + calAddHtml(e) : '',
+        relEditHtml(e),
+      ].join('');
+    } finally {
+      EDIT_ON = false;
+    }
   }
 
   /** e: the saved setting, or null for a new one. st.draft (if any) wins over e for what is shown. */
@@ -943,6 +1070,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     const lines = d.filter((x) => x.kind === 'line');
     const texts = d.filter((x) => x.kind === 'text' && x.key !== 'state');
     const state = d.find((x) => x.key === 'state');
+    const hidOf = (key) => (isNew || !e || !(e.fields || {})[key] ? undefined : Boolean(e.hidden?.[key]));
     return `
       <button class="back" type="button" data-act="cancel">${icon('back')}${isNew ? `${k.label} 목록` : '돌아가기'}</button>
       <div class="eyebrow">${k.en} · ${isNew ? '새로 만들기' : '고치기'}</div>
@@ -955,9 +1083,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
         </div>
         <label class="f" for="fd-aliases">다른 이름<em>애칭·영어 표기·직함. 쉼표로 나눠 주세요</em></label>
         <input id="fd-aliases" value="${esc((v.aliases || []).join(', '))}">
-        ${lines.length ? `<div class="grid3">${lines.map((x) => fieldInput(x, f[x.key] || '')).join('')}</div>` : ''}
-        ${texts.map((x) => fieldInput(x, f[x.key] || '')).join('')}
-        ${state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것</small><p class="sub" style="margin:0 0 8px">${esc(state.hint || '')}</p>${fieldInput(state, f.state || '', true)}</div>` : ''}
+        ${lines.length ? `<div class="grid3">${lines.map((x) => fieldInput(x, f[x.key] || '', false, hidOf(x.key))).join('')}</div>` : ''}
+        ${texts.map((x) => fieldInput(x, f[x.key] || '', false, hidOf(x.key))).join('')}
+        ${state ? `<div class="state"><small>지금 상태 · 사건으로 바뀐 것</small><p class="sub" style="margin:0 0 8px">${esc(state.hint || '')}</p>${fieldInput(state, f.state || '', true, hidOf('state'))}</div>` : ''}
+        ${!isNew && e ? moreEdit(e, type) : ''}
         <label class="f">추가 칸<em>이 항목에만 필요한 칸</em></label>
         <div id="extras">${(v.extra || []).map(extraRow).join('')}</div>
         <button type="button" data-act="add-extra" style="margin-top:8px">칸 추가</button>
@@ -1549,6 +1678,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       extra,
       description: val('fd-desc'),
       pinned: !!root.getElementById('fd-pinned')?.checked,
+      // v0.7.0 7: 숨김 · 주제 · 일하는 곳 — only when the form shows them
+      ...(root.querySelector('[data-hidden]') ? { hidden: Object.fromEntries([...root.querySelectorAll('[data-hidden]')].map((x) => [x.dataset.hidden, x.checked])) } : {}),
+      ...(root.getElementById('fd-topic') ? { topic: val('fd-topic') } : {}),
+      ...(root.getElementById('fd-work') ? { work: val('fd-work') || null } : {}),
     };
   }
 
@@ -1785,6 +1918,42 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       st.bad = false;
       st.msg = `장소를 이었습니다 — 위치 칸으로 ${r.byCode.length}개, 모델로 ${r.byModel.length}개(호출 ${r.calls}번). 큰 장소 ${r.big}개. 기록에서 되돌릴 수 있습니다.`;
     }),
+    // v0.7.0 6: list layout capsules
+    'list-mode': (b) => { st.listMode = { ...(st.listMode || {}), [b.dataset.type]: b.dataset.key }; render(); },
+    'list-filter': (b) => { st.listFilter = { ...(st.listFilter || {}), [b.dataset.key]: !(st.listFilter || {})[b.dataset.key] }; render(); },
+    // v0.7.0 7: 관계 · 학사일정 in 「고치기」 (each at once, in 기록)
+    'rel-add': (b) => run(async () => {
+      const to = root.getElementById('relTo')?.value;
+      if (!to) return;
+      await api('POST', `/worlds/${st.worldId}/relations`, { from: b.dataset.id, to, type: root.getElementById('relType')?.value || '기타', note: '' });
+      await loadEntities();
+    }, '관계를 더했습니다.'),
+    'rel-del': (b) => run(async () => {
+      await api('DELETE', `/worlds/${st.worldId}/relations/${b.dataset.id}`);
+      await loadEntities();
+    }, '관계를 뺐습니다. 기록에서 되돌릴 수 있습니다.'),
+    'rel-flip': (b) => run(async () => {
+      const x = (st.relations || []).find((y) => y.relationId === b.dataset.id);
+      if (!x) return;
+      await api('PATCH', `/worlds/${st.worldId}/relations/${x.relationId}`, { from: x.to, to: x.from });
+      await loadEntities();
+    }, '방향을 바꿨습니다.'),
+    'rel-type': (b) => run(async () => {
+      const x = (st.relations || []).find((y) => y.relationId === b.dataset.id);
+      const type = root.querySelector(`[data-rel-type="${b.dataset.id}"]`)?.value;
+      if (!x || !type || type === x.type) return;
+      // another kind: the old one taken off and the new one made (both in 기록)
+      await api('POST', `/worlds/${st.worldId}/relations`, { from: x.from, to: x.to, type, note: x.note || '' });
+      await api('DELETE', `/worlds/${st.worldId}/relations/${x.relationId}`);
+      await loadEntities();
+    }, '관계 종류를 바꿨습니다.'),
+    'cal-add': (b) => run(async () => {
+      const name = val('calName').trim();
+      const date = val('calDate').trim();
+      if (!name || !date) throw Error('날짜와 행사 이름을 적어 주세요.');
+      await api('PUT', `/worlds/${st.worldId}/calendar/event`, { entityId: b.dataset.id, name, date, place: val('calPlace').trim() });
+      await loadEntities();
+    }, '일정을 더했습니다.'),
     'room-set': (b) => run(async () => {
       await api('PUT', `/worlds/${st.worldId}/entities/${b.dataset.id}/room`, { room: root.getElementById('roomPick')?.value || null });
       await loadEntities();

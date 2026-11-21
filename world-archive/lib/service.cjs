@@ -3,7 +3,7 @@
 // Routes are registered with app.register at the app.js anchor, so Marinara's own access checks (login, IP allowlist,
 // CSRF, host validation) cover them exactly like the engine's routes. There is no separate token.
 const path = require('node:path');
-const { Archive, ArchiveError, mentions, isDescriptiveName, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY, namesGroup } = require('./store.cjs');
+const { Archive, ArchiveError, mentions, isDescriptiveName, TYPES, FIELDS, BUDGET_DEFAULT, BUDGET_MIN, BUDGET_MAX, AUTO_EVERY, namesGroup, TOPICS } = require('./store.cjs');
 const TT = require('./timetable.cjs');
 const CAL = require('./calendar.cjs');
 const X = require('./extract.cjs');
@@ -591,6 +591,7 @@ async function routes(r) {
     memoryModule: globalThis.__marinaraMemory?.version ?? null,
     types: TYPES,
     fields: FIELDS,
+    topics: TOPICS, // v0.7.0 5
     contract: CONTRACT,
     features: CONTRACT_FEATURES,
     budget: { default: BUDGET_DEFAULT, min: BUDGET_MIN, max: BUDGET_MAX },
