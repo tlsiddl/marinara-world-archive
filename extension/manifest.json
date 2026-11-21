@@ -3,7 +3,7 @@
   "version": 1,
   "config": {
     "name": "세계관 설정집",
-    "version": "0.7.6",
+    "version": "0.7.7",
     "description": "World Archive 화면 (개발판). 세계관을 만들고 인물·장소·집단·규칙·일정을 손으로 넣은 뒤, 채팅방마다 어떤 세계관을 읽을지 고릅니다. 프리셋의 {{세계}} 자리에 들어갑니다. 서버에 World Archive 모듈을 먼저 설치해야 합니다.",
     "runtime": "client",
     "enabled": false,
