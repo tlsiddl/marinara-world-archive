@@ -74,10 +74,15 @@ button.quiet{border-color:transparent;color:var(--wa-muted);padding:6px 8px}butt
 button.danger{color:#a3321f;border-color:#a3321f}:host([data-theme=dark]) button.danger{color:#f0a18f;border-color:#f0a18f}
 :focus-visible{outline:3px solid #8fa3c9;outline-offset:2px}
 .icon{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-input,select,textarea{width:100%;border-radius:3px;background:var(--wa-field);border:1px solid var(--wa-field-line);padding:9px 11px;line-height:1.55}
+input,select,textarea{width:100%;border-radius:3px;background:var(--wa-field);border:1px solid var(--wa-field-line);padding:9px 11px;line-height:1.55;font-size:15px}
 textarea{min-height:84px;resize:vertical}
-label.f{display:block;font:11px/1.4 var(--wa-mono);letter-spacing:1.5px;color:var(--wa-muted);margin:14px 0 6px}
-label.f em{font:12px var(--wa-sans);letter-spacing:0;font-style:normal;opacity:.85;margin-left:6px}
+label.f{display:block;font:700 14px/1.45 var(--wa-serif);letter-spacing:0;color:var(--wa-ink);margin:16px 0 6px}
+label.f em{display:block;font:12.5px/1.5 var(--wa-sans);letter-spacing:0;font-style:normal;color:var(--wa-muted);margin:2px 0 0}
+.caps{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}.caps button{border:1px solid var(--wa-line);border-radius:999px;padding:5px 13px;background:transparent;font:14px/1.4 var(--wa-serif);color:var(--wa-ink);cursor:pointer}.caps button.on{background:var(--wa-ink);color:var(--wa-paper);border-color:var(--wa-ink)}
+.budget-now{margin:4px 0 0;font-size:13px}.budget-now b{color:#a33a2a;font-weight:600}
+.ko{font-family:var(--wa-serif)!important;letter-spacing:0!important;text-transform:none!important}
+.ko.lab{font-weight:700!important;font-size:14px!important;line-height:1.45!important;color:var(--wa-ink)!important;opacity:1!important}
+.ko.sm{font-size:12.5px!important;line-height:1.5!important}
 
 #launch{position:fixed;right:18px;bottom:196px;z-index:2147483600;width:64px;height:64px;padding:0;border:0;background:transparent;filter:drop-shadow(0 3px 6px #0005);transition:transform .2s}
 #launch:hover{background:transparent;transform:translateY(-2px) rotate(3deg)}
@@ -975,6 +980,18 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       </form>`;
   }
 
+  /** v0.7.0 2: {{세계}} 글자 수 — the person picks; what goes in now and what did not fit, from this room's preview. */
+  const BUDGETS = [3000, 5000, 8000, 12000];
+  function budgetHtml(w) {
+    const cur = w.injectChars;
+    const custom = st.budgetCustom || !BUDGETS.includes(cur);
+    const p = st.preview && st.preview.worldId === w.worldId ? st.preview : null;
+    const now = p ? `<p class="sub budget-now">지금 들어가는 글: ${Number(p.chars || 0).toLocaleString()}자 / ${Number(p.budget || cur).toLocaleString()}자${p.omitted?.length ? ` · <b>글자가 모자라 설정 ${p.omitted.length}개가 빠졌어요</b>` : ''}</p>` : '';
+    return `<label class="f" for="w-budget">{{세계}}에 넣을 글자 수<em>넘치면 고정하지 않은 설정부터 빠집니다. 늘리면 모델에 보내는 글도 그만큼 길어져요</em></label>
+        <div class="caps" role="radiogroup" aria-label="{{세계}}에 넣을 글자 수">${BUDGETS.map((n) => `<button type="button" role="radio" aria-checked="${!custom && cur === n}" class="${!custom && cur === n ? 'on' : ''}" data-act="budget" data-n="${n}">${n.toLocaleString()}자</button>`).join('')}<button type="button" role="radio" aria-checked="${custom}" class="${custom ? 'on' : ''}" data-act="budget" data-n="custom">직접 입력</button></div>
+        <input id="w-budget" type="number" min="300" max="20000" step="100" value="${cur}" style="max-width:200px" ${custom ? '' : 'hidden'} aria-label="직접 입력(300~20000자)">${now}`;
+  }
+
   function worldHtml() {
     const w = world();
     return `
@@ -983,7 +1000,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       <form class="paper" onsubmit="return false">
         <label class="f" for="w-name">이름</label><input id="w-name" maxlength="120" value="${esc(w.name)}">
         <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
-        <label class="f" for="w-budget">프롬프트에 넣을 최대 글자 수<em>300~20000. 넘치면 고정하지 않은 설정부터 빠집니다</em></label><input id="w-budget" type="number" min="300" max="20000" step="100" value="${w.injectChars}" style="max-width:200px">
+        ${budgetHtml(w)}
         <label class="f" for="w-mode">넣는 방식<em>장면 방식은 최근 메시지 12개에 이름이 나온 설정만 넣습니다</em></label><select id="w-mode" style="max-width:360px"><option value="all" ${w.injectMode === 'scene' ? '' : 'selected'}>전부 넣기</option><option value="scene" ${w.injectMode === 'scene' ? 'selected' : ''}>장면에 나온 것만(고정·규칙·시스템은 늘)</option></select>
         <label class="f" for="w-year">학년도 시작 달<em>시간표와 학사일정을 학년도로 나눕니다(이야기 속 날짜를 알 때)</em></label><select id="w-year" style="max-width:200px">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${(w.yearStart || 9) === i + 1 ? 'selected' : ''}>${i + 1}월</option>`).join('')}</select>
         <label class="f">{{세계}} 맨 끝 두 줄<em>글자 수 안에서 고정 설정 다음으로 먼저 자리를 잡습니다</em></label>
@@ -1463,6 +1480,21 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     if (st.query) filterCards();
     if (st.view === 'tabs' && st.tabQuery) filterTab();
     if (st.busy) root.querySelectorAll('main button, .rail button').forEach((b) => { b.disabled = true; });
+    koFix([el.side, el.top, el.rail, el.main]);
+  }
+  /**
+   * v0.7.0 1: the small fixed-width, letter-spaced styles are English decoration (WORLD · SETTINGS); a label or note in
+   * Korean in one of them is set like a Korean label (명조, no letter spacing) — labels bold 14px in ink, notes 12.5px.
+   */
+  const KO_LABEL = '.eyebrow,.wt-eyebrow,.sec small,.state small,.fact small,.rail-title,.nav-label,.wt-tt th small,.wt-mon small,.chart .num small';
+  const KO_NOTE = '.pill,.card .foot,.meta,.hist .when,.auto-tag,.card .al,.sheet-head .al,.side-bottom small,.wt-ev .d small,.brand small';
+  function koFix(parts) {
+    const hangul = /[가-힣]/;
+    for (const part of parts) {
+      if (!part) continue;
+      part.querySelectorAll(KO_LABEL).forEach((x) => { if (hangul.test(x.textContent)) x.classList.add('ko', 'lab'); });
+      part.querySelectorAll(KO_NOTE).forEach((x) => { if (hangul.test(x.textContent)) x.classList.add('ko', 'sm'); });
+    }
   }
 
   // 할 일 6 — 검색: the server finds names, other names, field values and memos (and the glossary's English names);
@@ -1573,8 +1605,21 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     theme: () => { st.theme = st.theme === 'dark' ? 'light' : 'dark'; store.set('world-archive-theme', st.theme); render(); },
     close: () => toggle(false),
     open: (b) => { if (st.view === 'tabs') { st.fromTabs = true; st.view = st.entities.find((x) => x.entityId === b.dataset.id)?.type || st.view; } st.detail = b.dataset.id; st.editing = null; st.ask = null; st.msg = ''; render(); },
-    tab: (b) => { st.tab = b.dataset.tab; st.year = null; st.tabQuery = ''; st.ttDay = null; render(); },
+    // v0.7.0 4: from 세계관 정보 · 기록 · 모든 설정 too — back to the tab view, nothing open or being edited
+    tab: (b) => { st.tab = b.dataset.tab; st.view = 'tabs'; st.detail = null; st.editing = null; st.ask = null; st.fromTabs = false; st.year = null; st.tabQuery = ''; st.ttDay = null; render(); },
     year: (b) => { st.year = b.dataset.year; render(); },
+    // v0.7.0 2: a capsule sets the number field (saved with 「저장」 like the rest of the form; no re-render, so other
+    // unsaved edits stay)
+    budget: (b) => {
+      const input = root.querySelector('#w-budget');
+      if (!input) return;
+      const custom = b.dataset.n === 'custom';
+      st.budgetCustom = custom;
+      if (!custom) input.value = b.dataset.n;
+      input.hidden = !custom;
+      b.parentElement.querySelectorAll('button').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); });
+      if (custom) input.focus();
+    },
     'tt-day': (b) => { st.ttDay = b.dataset.day; render(); },
     'roster-more': (b) => { st.rosterOpen.add(b.dataset.id); render(); },
     new: (b) => { st.view = b.dataset.type; st.editing = 'new'; st.detail = null; st.draft = null; st.msg = ''; render(); },

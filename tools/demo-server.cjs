@@ -111,7 +111,9 @@ async function call(method, url, body) {
 const ext = () => fs.readFileSync(path.join(REPO, 'extension/extension.js'), 'utf8');
 const head = (title) => `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>`;
 const setRoom = `<script>try{localStorage.setItem('marinara-active-chat-id','${ROOM}');localStorage.removeItem('world-archive-world')}catch{}</script>`;
-const standalone = `${head('설정집 단독 화면')}<style>body{margin:0;min-height:100vh;background:#1d1b19}</style></head><body>${setRoom}<script>try{localStorage.setItem('world-archive-theme',new URLSearchParams(location.search).get('theme')==='dark'?'dark':'light')}catch{}</script><script src="/extension.js"></script><script>setTimeout(()=>document.querySelector('#marinara-world-archive-root')?.shadowRoot?.querySelector('#launch')?.click(),300)</script></body></html>`;
+// ?clicks=sel1|sel2: click those, one after another, inside any shadow root (for a screenshot of one screen)
+const clicker = `<script>(async()=>{const list=(new URLSearchParams(location.search).get('clicks')||'').split('|').filter(Boolean);const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));const find=(sel)=>{let hit=null;const walk=(root)=>{if(hit)return;try{hit=root.querySelector(sel);}catch{}if(hit)return;for(const el of root.querySelectorAll('*'))if(el.shadowRoot)walk(el.shadowRoot);};walk(document);return hit;};await sleep(1200);for(const sel of list){for(let i=0;i<20&&!find(sel);i++)await sleep(150);find(sel)?.click();await sleep(700);}})();</script>`;
+const standalone = `${head('설정집 단독 화면')}<style>body{margin:0;min-height:100vh;background:#1d1b19}</style></head><body>${setRoom}<script>try{localStorage.setItem('world-archive-theme',new URLSearchParams(location.search).get('theme')==='dark'?'dark':'light')}catch{}</script><script src="/extension.js"></script><script>setTimeout(()=>document.querySelector('#marinara-world-archive-root')?.shadowRoot?.querySelector('#launch')?.click(),300)</script>${clicker}</body></html>`;
 // 기억 서재 틀 흉내: 왼쪽 메뉴 · 위 · 오른쪽 「이 세계관」 칸(설정집 패널의 rail() 내용). 진짜 틀은 기억 서재 쪽.
 const frameCss = `body{margin:0;background:#141414;font:14px/1.6 "Pretendard","Noto Sans KR",system-ui,sans-serif}
 #frame{--im-ink:#151515;--im-paper:#f4f1ea;--im-canvas:#ebe7dd;--im-line:#15151526;--im-muted:#6d685f;--im-field:#faf8f3;--im-soft:#e4dfd3;display:grid;grid-template-columns:192px minmax(0,1fr) 224px;height:100vh;max-width:1280px;margin:0 auto;background:var(--im-paper);color:var(--im-ink)}
@@ -126,7 +128,7 @@ const embedded = (theme) => `${head('기억 서재 · 세계관 칸')}<style>${f
 <div class="f-work"><div class="f-top"><span>[시험] 은사슴 학교</span></div><div id="worldMount"></div></div><aside class="f-rail" id="rail"></aside></div>
 <script>(()=>{const __WORLD_ARCHIVE_EMBEDDED__=true;\n${'/*EXT*/'}\n})();
 const inst=globalThis.__memoryWorldPanel.start(document.getElementById('worldMount'),{theme:'${theme}'});
-const fill=()=>{const r=document.getElementById('rail');if(inst.railHtml)r.innerHTML=inst.railHtml();};setInterval(fill,800);</script></body></html>`;
+const fill=()=>{const r=document.getElementById('rail');if(inst.railHtml)r.innerHTML=inst.railHtml();};setInterval(fill,800);</script>${clicker}</body></html>`;
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
