@@ -67,8 +67,42 @@ s.applyAuto(W, [
   rule('지팡이 없는 마법', '지팡이 없이 쓰면 힘이 흩어진다', 'world', 'system'), rule('화폐', '은화 하나는 동화 스물', 'world', 'system'), rule('머글 앞 마법 금지', '마법을 모르는 사람 앞에서 마법을 쓰지 않는다', 'world'),
   rule('부엉이 우편', '편지는 부엉이로 보낸다', 'world', 'system'), rule('미성년 마법 제한', '방학 중 학교 밖 마법 금지', 'world'), rule('달밤의 늑대', '보름달 밤에는 숲에 가지 않는다', 'world'),
   rule('저택 정원 출입', '하르트 가문 허락이 있어야 함', '하르트 저택'), rule('장날', '매주 토요일 장이 선다', '별빛 시장'),
+  rule('흥정 예절', '값을 두 번 넘게 깎으면 무례로 여긴다', '별빛 시장'), rule('시장 은화 저울', '은화는 상인회 저울로 달아 받는다', '별빛 시장', 'system'), rule('상인회 유래', '백 년 전 떠돌이 상인들이 모여 만든 모임에서 시작됐다', '별빛 시장'),
+  rule('지팡이 고르는 법', '손님이 고르지 않고 지팡이가 주인을 고른다 — 맞는 지팡이를 쥐면 끝에서 불꽃이 인다', '지팡이 가게', 'system'), rule('지팡이 가게 영업시간', '해 질 녘에 문을 닫고 장날에는 늦게까지 연다', '지팡이 가게'),
+  rule('찻집 조용히', '안쪽 자리에서는 큰 소리로 말하지 않는다', '찻집 「은방울」'), rule('찻값', '차 한 잔에 동화 셋, 점심때는 과자 하나가 딸려 나온다', '찻집 「은방울」'),
   rule('은사슴의 맹세', '입학 때 하는 맹세 — 어디 것인지 모름'), rule('손목 리본', '1학년은 은색 리본을 단다'),
 ]);
+// v0.7.0 5: 주제 — most set (the reader's), a few left for 「주제 채우기」
+for (const [n, t] of [['통금', '금지·예절'], ['기숙사 암호', '방법·기술'], ['점수 제도', '그 밖'], ['지팡이 없는 마법', '방법·기술'], ['화폐', '돈·거래'], ['머글 앞 마법 금지', '금지·예절'], ['부엉이 우편', '방법·기술'], ['미성년 마법 제한', '금지·예절'], ['저택 정원 출입', '금지·예절'], ['장날', '시간·영업'], ['흥정 예절', '금지·예절'], ['시장 은화 저울', '돈·거래'], ['상인회 유래', '유래·역사'], ['지팡이 고르는 법', '방법·기술'], ['지팡이 가게 영업시간', '시간·영업'], ['찻집 조용히', '금지·예절'], ['찻값', '돈·거래']]) s.setTopic(W, id(n), t, { by: 'reader' });
+// v0.7.0 3: settings written in English (an English room's reading) — 「보기: 한국어」 shows them in Korean
+const EN_KO = {
+  'Edwin Ashcombe': '에드윈 애시컴',
+  'Tall, with ink-stained fingers and a grey wool scarf he never takes off.': '키가 크고, 손가락에 잉크 얼룩이 있으며 절대 벗지 않는 회색 털목도리를 두른다.',
+  'Quiet and patient; answers a question with another question.': '조용하고 참을성이 많다. 질문에 질문으로 답한다.',
+  'Keeper of the Starclock archive since the old librarian retired.': '옛 사서가 물러난 뒤로 별시계 기록 보관소를 맡고 있다.',
+  'archivist': '기록 보관인',
+  'Quiet and patient; fond of tea.': '조용하고 참을성이 많다. 차를 좋아한다.',
+  'Archive hours': '기록 보관소 이용 시간',
+  'The archive opens at dawn and closes when the tower bell rings nine. Candles are not allowed inside.': '기록 보관소는 새벽에 열고 탑의 종이 아홉 번 울리면 닫는다. 안에서는 촛불을 켤 수 없다.',
+};
+s.applyAuto(W, [
+  person('Edwin Ashcombe', { appearance: 'Tall, with ink-stained fingers and a grey wool scarf he never takes off.', personality: 'Quiet and patient; answers a question with another question.', background: 'Keeper of the Starclock archive since the old librarian retired.', affiliation: 'archivist' }),
+  { type: 'rule', name: 'Archive hours', description: 'The archive opens at dawn and closes when the tower bell rings nine. Candles are not allowed inside.', appliesTo: id('별시계탑') },
+]);
+s.setTopic(W, id('Archive hours'), '시간·영업', { by: 'reader' });
+s.updateWorld(W, { revision: s.getWorld(W).revision, auto: { connectionId: 'demo' } });
+service._test.useEngine({
+  model: async (cid) => ({ id: cid }),
+  // the made-up translator: each numbered line of [글] from EN_KO (Korean → English for 되돌리기), else marked
+  askModel: async (m, messages) => {
+    const lines = String(messages[1].content).split('[글]\n')[1].split('\n').map((l) => l.replace(/^\d+\.\s*/, ''));
+    const back = Object.fromEntries(Object.entries(EN_KO).map(([a, b]) => [b, a]));
+    const t = lines.map((l) => EN_KO[l] || back[l] || (/[가-힣]/.test(l) ? `(EN) ${l}` : `(한국어) ${l}`));
+    return { content: JSON.stringify({ t }), usage: {} };
+  },
+  parseJsonObject: (t) => { try { return JSON.parse(t); } catch { return null; } },
+  chatMessages: async () => ({ messages: [], cast: [] }),
+});
 s.applyTimetable(W, [
   ['월', '1교시', '별자리학', '별시계탑'], ['월', '2교시', '마법 역사', '대강의실'], ['화', '1교시', '약초학', '약초 온실', 2], ['수', '1교시', '변환술', '2층 교실', 2],
   ['목', '1교시', '별자리학', '별시계탑'], ['목', '2교시', '비행', '운동장'], ['금', '1교시', '마법약', '지하 마법약 교실', 2], ['수', '밤', '천문 관측 23:00', '별시계탑'],
@@ -111,7 +145,9 @@ async function call(method, url, body) {
 const ext = () => fs.readFileSync(path.join(REPO, 'extension/extension.js'), 'utf8');
 const head = (title) => `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>`;
 const setRoom = `<script>try{localStorage.setItem('marinara-active-chat-id','${ROOM}');localStorage.removeItem('world-archive-world')}catch{}</script>`;
-const standalone = `${head('설정집 단독 화면')}<style>body{margin:0;min-height:100vh;background:#1d1b19}</style></head><body>${setRoom}<script>try{localStorage.setItem('world-archive-theme',new URLSearchParams(location.search).get('theme')==='dark'?'dark':'light')}catch{}</script><script src="/extension.js"></script><script>setTimeout(()=>document.querySelector('#marinara-world-archive-root')?.shadowRoot?.querySelector('#launch')?.click(),300)</script></body></html>`;
+// ?clicks=sel1|sel2: click those, one after another, inside any shadow root (for a screenshot of one screen)
+const clicker = `<script>(async()=>{const list=(new URLSearchParams(location.search).get('clicks')||'').split('|').filter(Boolean);const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));const find=(sel)=>{let hit=null;const walk=(root)=>{if(hit)return;try{hit=root.querySelector(sel);}catch{}if(hit)return;for(const el of root.querySelectorAll('*'))if(el.shadowRoot)walk(el.shadowRoot);};walk(document);return hit;};const byText=(t)=>{let hit=null;const walk=(root)=>{if(hit)return;for(const el of root.querySelectorAll('[data-act]'))if(!hit&&el.textContent.trim().includes(t))hit=el;for(const el of root.querySelectorAll('*'))if(el.shadowRoot)walk(el.shadowRoot);};walk(document);return hit;};await sleep(1200);for(const sel of list){if(sel.startsWith('set:')){const [,q,...v]=sel.split(':');const x=find(q);if(x){x.value=v.join(':');x.dispatchEvent(new Event('input',{bubbles:true}));}continue;}if(sel.startsWith('@')){for(let i=0;i<20&&!find(sel.slice(1));i++)await sleep(150);find(sel.slice(1))?.scrollIntoView({block:'start'});await sleep(300);continue;}const get=()=>sel.startsWith('~')?byText(sel.slice(1)):find(sel);for(let i=0;i<20&&!get();i++)await sleep(150);get()?.click();await sleep(900);}})();</script>`;
+const standalone = `${head('설정집 단독 화면')}<style>body{margin:0;min-height:100vh;background:#1d1b19}</style></head><body>${setRoom}<script>try{localStorage.setItem('world-archive-theme',new URLSearchParams(location.search).get('theme')==='dark'?'dark':'light');localStorage.setItem('world-archive-view',new URLSearchParams(location.search).get('view')==='ko'?'ko':'orig')}catch{}</script><script src="/extension.js"></script><script>setTimeout(()=>document.querySelector('#marinara-world-archive-root')?.shadowRoot?.querySelector('#launch')?.click(),300)</script>${clicker}</body></html>`;
 // 기억 서재 틀 흉내: 왼쪽 메뉴 · 위 · 오른쪽 「이 세계관」 칸(설정집 패널의 rail() 내용). 진짜 틀은 기억 서재 쪽.
 const frameCss = `body{margin:0;background:#141414;font:14px/1.6 "Pretendard","Noto Sans KR",system-ui,sans-serif}
 #frame{--im-ink:#151515;--im-paper:#f4f1ea;--im-canvas:#ebe7dd;--im-line:#15151526;--im-muted:#6d685f;--im-field:#faf8f3;--im-soft:#e4dfd3;display:grid;grid-template-columns:192px minmax(0,1fr) 224px;height:100vh;max-width:1280px;margin:0 auto;background:var(--im-paper);color:var(--im-ink)}
@@ -126,7 +162,7 @@ const embedded = (theme) => `${head('기억 서재 · 세계관 칸')}<style>${f
 <div class="f-work"><div class="f-top"><span>[시험] 은사슴 학교</span></div><div id="worldMount"></div></div><aside class="f-rail" id="rail"></aside></div>
 <script>(()=>{const __WORLD_ARCHIVE_EMBEDDED__=true;\n${'/*EXT*/'}\n})();
 const inst=globalThis.__memoryWorldPanel.start(document.getElementById('worldMount'),{theme:'${theme}'});
-const fill=()=>{const r=document.getElementById('rail');if(inst.railHtml)r.innerHTML=inst.railHtml();};setInterval(fill,800);</script></body></html>`;
+const fill=()=>{const r=document.getElementById('rail');if(inst.railHtml)r.innerHTML=inst.railHtml();};setInterval(fill,800);</script>${clicker}</body></html>`;
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');

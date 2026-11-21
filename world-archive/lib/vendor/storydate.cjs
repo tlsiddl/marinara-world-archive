@@ -1,17 +1,42 @@
 'use strict';
-// 이야기 속 날짜 읽기 (v0.5.0 K · 이야기 속 오늘). Copied unchanged from tlsiddl/marinara-memory-module main 4c7e778,
-// memory-module/lib/ledger.cjs (WEEKDAYS … storyTime): the 「§RP | 24-10-18 (금) | 11:15 | …§」 header and other date lines.
+// 이야기 속 날짜 읽기 (v0.5.0 K · 이야기 속 오늘). Copied unchanged from tlsiddl/marinara-memory-module main 8a310e0
+// (0.38.2 — 20xx가 아닌 연도, 이야기가 과거로 가면 따라감), memory-module/lib/ledger.cjs lines 1712–1976 (WEEKDAYS …
+// storyTime): the 「§RP | 24-10-18 (금) | 11:15 | …§」 header and other date lines.
 
 const WEEKDAYS = '일월화수목금토';
+
+/**
+ * A two-digit year as a full one: the century of the story's day (`base`) that puts it nearest that day, so in a
+ * story of 1766 "66-08-19" is 1766, not 2066. Without a known day, 20xx.
+ */
+function fullYear(two, base = null) {
+  const yy = Number(two);
+  const by = base ? Number(String(base).slice(0, 4)) : NaN;
+  if (!Number.isFinite(by)) return 2000 + yy;
+  const c = Math.floor(by / 100) * 100;
+  return [c - 100 + yy, c + yy, c + 100 + yy].sort((a, b) => Math.abs(a - by) - Math.abs(b - by))[0];
+}
+
+/** "24-10-18" for showing a day of 20xx; any other year is written in full ("1766-08-19"), so it reads back the same. */
+function shortDay(iso) {
+  return /^20\d{2}-/.test(String(iso || '')) ? String(iso).slice(2) : String(iso || '');
+}
 
 /** "24-10-18" / "2024-10-18" / "10-18" (year from `base`) → "2024-10-18", or null. */
 function isoDate(text, base = null) {
   const m = String(text || '').match(/(?:(\d{2}|\d{4})[-./])?(\d{1,2})[-./](\d{1,2})/);
   if (!m) return null;
-  const year = m[1] ? (m[1].length === 2 ? 2000 + Number(m[1]) : Number(m[1])) : base ? Number(base.slice(0, 4)) : null;
+  const year = m[1] ? (m[1].length === 2 ? fullYear(m[1], base) : Number(m[1])) : base ? Number(base.slice(0, 4)) : null;
   if (!year) return null;
   const d = new Date(Date.UTC(year, Number(m[2]) - 1, Number(m[3])));
+  if (year < 100) d.setUTCFullYear(year);
   return Number.isNaN(d.getTime()) || d.getUTCMonth() !== Number(m[2]) - 1 || d.getUTCDate() !== Number(m[3]) ? null : d.toISOString().slice(0, 10);
+}
+
+/** "2024-03-01", "1766.8.19", "2024/3/1" with a full year → "2024-03-01", or null (a date the user typed in). */
+function isoDateStrict(text) {
+  const m = String(text || '').trim().match(/^(\d{3,4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})\s*일?$/);
+  return m ? isoDate(`${m[1].padStart(4, '0')}-${m[2]}-${m[3]}`) : null;
 }
 
 function addDays(iso, days) {
@@ -20,14 +45,18 @@ function addDays(iso, days) {
   return d.toISOString().slice(0, 10);
 }
 
-/** The newest in-story date in a header like "§RP | 24-10-18 (금) | 11:15 | …§". */
+/**
+ * The story's day as of the last message that shows one (a header like "§RP | 24-10-18 (금) | 11:15 | …§", or the
+ * tracker's date). The last one, not the latest: a story that goes back in time, or a tracker that puts a wrong
+ * start right, is where the story is now.
+ */
 function storyDate(messages, base = null) {
   let latest = null;
   for (const m of messages || []) {
-    const own = dateInText(m.content, latest || base);
-    const found = !!own;
-    if (own && (!latest || own.date > latest)) latest = own.date;
-    if (!found && m.clock?.date && (!latest || m.clock.date > latest)) latest = m.clock.date;
+    // clockOnly: a date set by hand, or a room that reads dates from the tracker only (its clock already says).
+    const own = m.clockOnly ? null : dateInText(m.content, latest || base);
+    if (own) latest = own.date;
+    else if (m.clock?.date) latest = m.clock.date;
   }
   return latest;
 }
@@ -73,6 +102,9 @@ function dateInText(content, base = null) {
     if (at < 0) continue;
     const c = parseClock(fields[at], base);
     const time = c.time || fields.slice(at + 1, at + 3).map((f) => parseClock(f)).find((x) => x?.time && !x.date)?.time || null;
+    // "3/10" or "4.5" alone is a score as often as a day ("[서아|3/10|기분 좋음]", "[호감도|4.5]"): a day only with a
+    // year, a month word ("3월 10일", "Mar 10") or a time beside it.
+    if (/^\d{1,2}\s*[-./]\s*\d{1,2}$/.test(fields[at]) && !time) continue;
     take({ date: c.date, time });
   }
   // A numeric date with its weekday in brackets is a header wherever it stands, even inline before a line of
@@ -139,11 +171,14 @@ function parseClock(text, base = null) {
   if (compact) date = isoDate(`${compact[1]}-${compact[2]}-${compact[3]}`);
   const ko = raw.match(/(?:(\d{2}|\d{4})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일(?!\s*차)/);
   if (!date && ko) date = isoDate(`${ko[1] ? `${ko[1]}-` : ''}${ko[2]}-${ko[3]}`, base);
+  const cjk = !date && raw.match(/(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (cjk) date = isoDate(`${cjk[1] ? `${cjk[1]}-` : ''}${cjk[2]}-${cjk[3]}`, base);
   if (!date) {
     // English: "October 18, 2024", "Oct 18th", "18 October 2024", "Fri, Oct 18 2024".
     const month = (m) => MONTHS.findIndex((x) => m.toLowerCase().startsWith(x)) + 1;
-    const mdy = raw.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4}))?/i);
-    const dmy = raw.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?(?:,?\s*(\d{4}))?/i);
+    // Also "the 2nd of March" and "March the 2nd".
+    const mdy = raw.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4}))?/i);
+    const dmy = raw.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?(?:,?\s*(\d{4}))?/i);
     if (mdy) date = isoDate(`${mdy[3] ? `${mdy[3]}-` : ''}${month(mdy[1])}-${mdy[2]}`, base);
     else if (dmy) date = isoDate(`${dmy[3] ? `${dmy[3]}-` : ''}${month(dmy[2])}-${dmy[1]}`, base);
   }
@@ -167,14 +202,32 @@ function parseClock(text, base = null) {
 }
 
 /**
+ * A story-day counter in a tracker's date: "Day 3", "Day 3 of spring", "D+3", "3일차", "3일째", "제3일", "the 3rd day".
+ * Its number, or null. It is not a calendar date: the date it means is counted from a day whose date is known.
+ */
+function dayCounter(text) {
+  const t = String(text || '');
+  const m = t.match(/\bday\s*#?\s*(\d{1,4})\b/i) || t.match(/\bD\s*\+\s*(\d{1,4})\b/) || t.match(/(\d{1,4})\s*일\s*(?:차|째)/) || t.match(/제\s*(\d{1,4})\s*일/) || t.match(/\b(\d{1,4})(?:st|nd|rd|th)\s+day\b/i) || t.match(/第\s*(\d{1,4})\s*[天日]/);
+  return m ? Number(m[1]) : null;
+}
+
+const WEEKDAY_NAMES = [/\bsun(?:day)?\b|일요일/i, /\bmon(?:day)?\b|월요일/i, /\btue(?:s|sday)?\b|화요일/i, /\bwed(?:nesday)?\b|수요일/i, /\bthu(?:r|rs|rsday)?\b|목요일/i, /\bfri(?:day)?\b|금요일/i, /\bsat(?:urday)?\b|토요일/i];
+/** The weekday a tracker's date names ("Saturday", "토요일"), 0 = Sunday, or null (none, or more than one). */
+function weekdayOf(text) {
+  const hits = WEEKDAY_NAMES.map((re, i) => (re.test(String(text || '')) ? i : -1)).filter((i) => i >= 0);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
  * " (작중 24-10-18 (금) 14:00 · 날씨: 비)" after a speaker name: the story date from a tracker (when the message has
  * no date line of its own) and the tracker's weather.
  */
 function clockNote(message) {
   const c = message?.clock;
   const parts = [];
-  if ((c?.date || c?.time) && !dateInText(message.content, c?.date || null)) {
-    const day = c.date ? `${c.date.slice(2)} (${WEEKDAYS[new Date(`${c.date}T00:00:00Z`).getUTCDay()]})` : '';
+  if ((c?.date || c?.time || c?.label) && (message.clockOnly || !dateInText(message.content, c?.date || null))) {
+    // A tracker date that could not be read as a calendar day is passed on in its own words (not an older date).
+    const day = c.date ? `${shortDay(c.date)} (${WEEKDAYS[new Date(`${c.date}T00:00:00Z`).getUTCDay()]})` : c.label || '';
     parts.push(`작중 ${[day, c.time].filter(Boolean).join(' ')}`);
   }
   if (message?.weather) parts.push(`날씨: ${message.weather}`);
@@ -199,7 +252,7 @@ function notAMeal(text) {
 function storyTime(messages, base = null) {
   let latest = null;
   for (const m of messages || []) {
-    const own = dateInText(m.content, latest?.slice(0, 10) || base);
+    const own = m.clockOnly ? null : dateInText(m.content, latest?.slice(0, 10) || base);
     const found = !!own;
     // A date line without a time takes the tracker's time when the tracker is on the same day.
     const time = own?.time || (own && m.clock?.date === own.date ? m.clock.time : null);
@@ -216,4 +269,4 @@ function storyTime(messages, base = null) {
   return latest;
 }
 
-module.exports = { isoDate, addDays, storyDate, dateLine, dateInText, parseClock, storyTime, WEEKDAYS };
+module.exports = { isoDate, isoDateStrict, addDays, storyDate, dateLine, dateInText, parseClock, storyTime, WEEKDAYS, fullYear, shortDay };
