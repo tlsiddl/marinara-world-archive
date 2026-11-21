@@ -68,6 +68,17 @@ function storyToday(messages) {
   return { date, weekday: weekday || WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()], written: Boolean(weekday) };
 }
 
+/**
+ * v0.7.0 (기억 서재 0.38.2): a date someone else worked out (the Memory Module's, hand fixes included) as a story's today;
+ * the weekday the room's own header writes for that date when it does, else the calendar's.
+ */
+function todayFrom(date, messages = []) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return null;
+  const own = storyToday(messages);
+  if (own?.date === date) return own;
+  return { date, weekday: WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()], written: false, from: 'memory' };
+}
+
 const sortEvents = (events) => Object.values(events || {}).sort((a, b) => String(a.date || '9999').replace(/^--/, '0000-').localeCompare(String(b.date || '9999').replace(/^--/, '0000-')) || a.name.localeCompare(b.name, 'ko'));
 
 /**
@@ -96,4 +107,4 @@ function validCalendar(c) {
     && (e.source === 'auto' || e.source === 'manual') && (e.past === undefined || Array.isArray(e.past)) && (e.pending === undefined || isObj(e.pending)));
 }
 
-module.exports = { normDate, hasYear, daysBetween, schoolYear, storyToday, sortEvents, upcoming, calendarLine, validCalendar, NAME_MAX, WEEKDAYS };
+module.exports = { todayFrom, normDate, hasYear, daysBetween, schoolYear, storyToday, sortEvents, upcoming, calendarLine, validCalendar, NAME_MAX, WEEKDAYS };

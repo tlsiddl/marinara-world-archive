@@ -454,6 +454,29 @@ function sceneIds(entities, texts) {
   return ids;
 }
 
+/**
+ * v0.7.0 (기억 서재 0.38.2): the Memory Module's story date for a room when it is there and on for that room — its
+ * reading of the dates, and a date the person put right by hand there. Asked through this server (app.inject: the same
+ * process, no network), at most every 30 s per room; null when it is not there, off, or says nothing.
+ */
+let appRef = null;
+const memoryDays = new Map(); // roomId → { at, date }
+async function memoryToday(roomId) {
+  if (!appRef || !globalThis.__marinaraMemory) return null;
+  const hit = memoryDays.get(roomId);
+  if (hit && Date.now() - hit.at < 30_000) return hit.date;
+  let date = null;
+  try {
+    const r = await appRef.inject({ method: 'GET', url: `/api/memory-module/chats/${encodeURIComponent(roomId)}`, headers: { 'x-marinara-csrf': '1' } });
+    if (r.statusCode === 200) {
+      const j = JSON.parse(r.body);
+      if (j?.enabled && /^\d{4}-\d{2}-\d{2}$/.test(String(j.storyDate || ''))) date = j.storyDate;
+    }
+  } catch {}
+  memoryDays.set(roomId, { at: Date.now(), date });
+  return date;
+}
+
 async function updateScene(roomId, extraText = '') {
   const worldId = store().roomWorldId(roomId);
   if (!worldId) return null;
@@ -464,7 +487,8 @@ async function updateScene(roomId, extraText = '') {
   const ids = sceneIds(entities, texts);
   const recent = sceneIds(entities, texts.slice(extraText ? -3 : -2));
   // v0.5.0 K: the story's today (§RP header), for 「며칠 뒤」 and the school year
-  const today = CAL.storyToday(messages);
+  // 기억 서재가 있고 이 방에서 켜져 있으면 그 날짜(사람이 바로잡은 것 포함)를 먼저, 없을 때만 직접 읽음
+  const today = CAL.todayFrom(await memoryToday(roomId), messages) || CAL.storyToday(messages);
   if (today) store().setRoomStory(roomId, today);
   // v0.5.0 (밤샘 2): a room whose latest messages are mostly in Latin letters is in English
   const letters = texts.join(' ').replace(/[^\p{L}]/gu, '');
@@ -1239,6 +1263,7 @@ function branchOnSend(req, reply, payload) {
 }
 
 function attach(app) {
+  appRef = app;
   if (globalThis.__marinaraWorldArchive) globalThis.__marinaraWorldArchive.api = { version: 1, contract: CONTRACT, features: CONTRACT_FEATURES, roomEntities, lookup, suggest, names, roomRelations, entity };
   app.register(routes, { prefix: PREFIX });
   app.addHook('preHandler', sceneBeforeReply);
@@ -1260,4 +1285,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { readFromNow, pastCost, tidyCandidates, fillSpecies, gatherTimetables, gatherCalendar, fillPlaces, fillApplies, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
+module.exports = { memoryToday, readFromNow, pastCost, tidyCandidates, fillSpecies, gatherTimetables, gatherCalendar, fillPlaces, fillApplies, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useApp: (a) => { appRef = a; memoryDays.clear(); }, useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
