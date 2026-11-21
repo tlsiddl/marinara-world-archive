@@ -58,7 +58,7 @@ test('P: a passing thing is not kept (lasting false); 「잡다한 설정 정리
   s.applyAuto(w.worldId, [
     { type: 'system', name: '욕실 수도꼭지', fields: { how: '돌리면 물이 나온다' } },
     { type: 'rule', name: '기숙사 암호', fields: { category: '출입' } },
-    { type: 'person', name: '노을 교수', fields: { personality: '하윤에게 겁을 줌' } },
+    { type: 'person', name: '노을 교수', fields: { personality: '오늘 하윤에게 겁을 줌' } }, // v0.7.5: a passing moment (오늘) — lasting temper is never offered
   ]);
   let asked = '';
   service._test.useEngine({

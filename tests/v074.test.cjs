@@ -114,3 +114,33 @@ test('v0.7.5: recheck keeps a 위치 the 「장소 위치 채우기」 button ma
   assert.ok(has('Owlery'), 'the button\'s stays');
   assert.ok(!has('Kitchen'), 'the reader\'s with evidence naming neither still goes');
 });
+
+test('v0.7.5: ① 칸 후보 — lasting looks and temper are never offered; a passing moment is', async (t) => {
+  const service = require('../world-archive/lib/service.cjs');
+  const real = require('../world-archive/lib/vendor/engine.cjs');
+  const s = temp(t);
+  service._test.useStore(s);
+  const w = s.createWorld({ name: 'Hogwarts', auto: { connectionId: 'c1' } });
+  s.applyAuto(w.worldId, [
+    { type: 'person', name: 'Daphne', fields: { appearance: 'Sleek blonde braids, tall and thin', personality: 'Proud and quick to threaten points' } },
+    { type: 'person', name: 'Pansy', fields: { appearance: 'Wearing her pyjamas and a dressing gown' } },
+  ]);
+  service._test.useEngine({ model: async (c) => ({ id: c }), askModel: async () => ({ content: JSON.stringify({ items: [], fields: [
+    { name: 'Daphne', key: 'appearance', why: '장면의 옷차림' }, { name: 'Daphne', key: 'personality', why: '장면의 행동' }, { name: 'Pansy', key: 'appearance', why: '그 장면의 차림' },
+  ] }) }), parseJsonObject: real.parseJsonObject });
+  const r = await service.tidyCandidates(w.worldId);
+  assert.deepEqual(r.fields.map((x) => `${x.name}.${x.key}`), ['Pansy.appearance']);
+});
+
+test('v0.7.5: a scene — the rules of the scene\'s own place before those of the place it is in, even one named lately', () => {
+  const w = { name: 'H', injectMode: 'scene' };
+  const ents = [
+    { entityId: 'hw', type: 'place', name: 'Hogwarts Castle', aliases: [], fields: {}, status: 'confirmed' },
+    { entityId: 'gh', type: 'place', name: 'Great Hall', aliases: [], fields: {}, status: 'confirmed' },
+    { entityId: 'a', type: 'rule', name: 'Castle curfew at nine', aliases: [], fields: {}, appliesTo: 'hw', status: 'confirmed', seen: { n: 9 } },
+    { entityId: 'b', type: 'rule', name: 'Sorting at the high table', aliases: [], fields: {}, appliesTo: 'gh', status: 'confirmed', seen: { n: 1 } },
+  ];
+  const rel = [{ from: 'gh', to: 'hw', type: '위치' }];
+  const text = I.assembleWorld(w, ents, 3000, { scene: new Set(['gh', 'a']), relations: rel }).text;
+  assert.ok(text.indexOf('Sorting at the high table') < text.indexOf('Castle curfew at nine'));
+});

@@ -1304,6 +1304,8 @@ JSON만 출력: {"items":[{"name":"설정 이름 그대로","keep":true,"why":"�
  * used again) and the fields with a scene's events in them come back as candidates — nothing is deleted. The person
  * picks: 휴지통 (an undoable delete) or 칸 비우기 (their edit). Kept as the world's latest candidates.
  */
+/** v0.7.5: words of a passing moment in a 외형 · 성격 value (what one scene showed, not who they are). */
+const PASSING = /\b(?:wearing|wore|holding|held|carrying|in (?:his|her|their) (?:pyjamas|pajamas|nightgown|nightclothes|dressing gown)|today|tonight|right now|currently|at the moment|this morning|this evening|just now)\b|입은|입고|들고|쥐고|오늘|지금|방금|이날|그날|잠옷 차림/i;
 /** v0.6.6: settings 「잡다한 설정 정리」 never offers, whatever the model says. */
 const tidyHeld = (e) => e.pinned || e.provenance?.source === 'manual' || Object.values(e.sources || {}).includes('manual') || (e.seen?.n || 0) >= 2 || (e.type === 'rule' && e.appliesTo && e.appliesTo !== 'world');
 
@@ -1319,6 +1321,10 @@ async function tidyCandidates(worldId) {
   const api = engineApi();
   const m = await api.model(world.auto.connectionId);
   const out = { at: new Date().toISOString(), items: [], fields: [], calls: 0, tokens: {} };
+  // v0.7.5: the evidence each field was last written with (a status line: 「한때의」 state)
+  const lastEv = new Map();
+  for (const c of s.readHistory(worldId).changes) if (c.action === 'field' && !c.undoneAt && c.key) lastEv.set(`${c.entityId}.${c.key}`, String(c.evidence || ''));
+  const statusEvidence = (id, key) => X.STATUS_LINE.test(String(lastEv.get(`${id}.${key}`) || '').trim());
   const rounds = Math.max(Math.ceil(things.length / FILL_BATCH), Math.ceil(people.length / FILL_BATCH), 1);
   for (let i = 0; i < rounds; i++) {
     const t = things.slice(i * FILL_BATCH, (i + 1) * FILL_BATCH);
@@ -1341,6 +1347,9 @@ async function tidyCandidates(worldId) {
       const e = p.find((y) => X.squash(y.name) === X.squash(x?.name));
       const key = x?.key === 'memo' ? 'description' : x?.key === 'personality' || x?.key === 'appearance' ? x.key : null;
       const value = key === 'description' ? e?.description : e?.fields?.[key];
+      // v0.7.5 (사령탑): 외형 · 성격 only when the value says a passing moment (wearing · today · 입은 · 지금 …) or its
+      // evidence was a status line — lasting looks and temper are never offered, whatever the model says
+      if (e && (key === 'appearance' || key === 'personality') && !PASSING.test(String(value || '')) && !statusEvidence(e.entityId, key)) continue;
       if (e && key && value && (e.sources?.[key] !== 'manual')) out.fields.push({ entityId: e.entityId, name: e.name, key, value: clipText(value), why: String(x.why || '').slice(0, 120) });
     }
   }
