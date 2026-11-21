@@ -139,3 +139,23 @@ test('I) recheck in English: a sheet named in Korean gets its English name, a gl
   s.undoChange(w.worldId, changes.find((c) => c.action === 'cell').id);
   assert.equal(Object.values(s.listEntities(w.worldId).find((e) => e.timetable).timetable.cells)[0].value, '변신술');
 });
+
+test('v0.7.3 B: 「Inside Hogwarts Castle」 makes the group\'s 본거지 Hogwarts Castle, and 「At Hogwarts」 places go in it', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'Hogwarts' });
+  s.applyAuto(w.worldId, [
+    { type: 'group', name: 'Hogwarts' },
+    { type: 'place', name: 'Owlery', fields: { location: 'At Hogwarts' } },
+    { type: 'place', name: 'Entrance Hall', fields: { location: 'Inside Hogwarts Castle' } },
+    { type: 'place', name: 'Black Lake', fields: { location: 'Below Hogwarts Castle, at the foot of a cliff' } },
+  ]);
+  s.linkPlaces(w.worldId);
+  const ents = s.listEntities(w.worldId);
+  const castle = ents.find((e) => e.name === 'Hogwarts Castle');
+  assert.ok(castle && castle.type === 'place');
+  assert.equal(ents.find((e) => e.name === 'Hogwarts').base, castle.entityId);
+  const up = (n) => s.listRelations(w.worldId).filter((r) => r.type === '위치' && r.from === ents.find((e) => e.name === n).entityId).map((r) => r.to);
+  assert.deepEqual(up('Entrance Hall'), [castle.entityId]);
+  assert.deepEqual(up('Owlery'), [castle.entityId]);
+  assert.deepEqual(up('Black Lake'), [], 'below is not inside');
+});
