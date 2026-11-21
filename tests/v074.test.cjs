@@ -101,3 +101,16 @@ test('5) a 위치 칸 that is only a group\'s name: into its 본거지, made as 
     assert.deepEqual(s.listRelations(w.worldId).filter((r) => r.type === '위치' && r.from === id).map((r) => r.to), [base.entityId], n);
   }
 });
+
+test('v0.7.5: recheck keeps a 위치 the 「장소 위치 채우기」 button made (its evidence is the button\'s)', (t) => {
+  const s = temp(t);
+  const w = s.createWorld({ name: 'Hogwarts' });
+  s.applyAuto(w.worldId, [{ type: 'place', name: 'Hogwarts Castle' }, { type: 'place', name: 'Owlery' }, { type: 'place', name: 'Kitchen' }, { type: 'place', name: 'Cellar' }]);
+  const id = (n) => s.listEntities(w.worldId).find((e) => e.name === n).entityId;
+  s.applyRelations(w.worldId, [{ from: id('Owlery'), to: id('Hogwarts Castle'), type: '위치', note: '', evidence: '장소 위치 채우기: 이름 · 위치 · 용도 · 설명 · 근거에서' }], { by: 'location-fill' });
+  s.applyRelations(w.worldId, [{ from: id('Kitchen'), to: id('Cellar'), type: '위치', note: '', evidence: 'They went to the garden.' }]);
+  s.recheckRelations(w.worldId);
+  const has = (a) => s.listRelations(w.worldId).some((r) => r.type === '위치' && r.from === id(a));
+  assert.ok(has('Owlery'), 'the button\'s stays');
+  assert.ok(!has('Kitchen'), 'the reader\'s with evidence naming neither still goes');
+});
