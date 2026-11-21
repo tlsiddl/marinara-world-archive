@@ -348,6 +348,8 @@ case "$ACTION" in
     say "== World Archive 제거 (데이터는 남김) =="
     pick_container
     if [ -n "$C" ]; then uninstall_docker "$C"
-    else say "start-world-archive.sh 대신 원래 start.sh(기억 서재를 쓰면 start-memory.sh)로 켜면 꺼져. 데이터는 그대로야."; fi ;;
+    else say "start-world-archive.sh 대신 원래 start.sh(기억 서재를 쓰면 start-memory.sh)로 켜면 꺼져. 데이터는 그대로야."; fi
+    # v0.8.0: switched off, Marinara sends 「{{세계}}」 to the model as it is (no one replaces it any more)
+    say "      잊지 말 것: 프리셋에 넣은 {{세계}} · {{세계외형}}은 지워 줘. 끈 뒤에는 그 글자가 그대로 모델에 가." ;;
   *) fail "모르는 명령이야: $ACTION (rollback, uninstall 만 돼)" ;;
 esac
