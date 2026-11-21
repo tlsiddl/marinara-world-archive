@@ -289,10 +289,14 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     fill(of(0), budget);
     reserve();
     fill(of(1), budget);
+    // v0.7.4 4: the whole world's laws · money are not always first — those named in the latest messages right after
+    // the scene, the rest only after the rules of this place, and all of them within a third
     const worldCap = used + Math.floor((budget - used) / 3);
-    fill(of(2), worldCap);
+    const worldNamed = of(2).filter((e) => scene.has(e.entityId));
+    const worldRest = of(2).filter((e) => !scene.has(e.entityId));
+    fill(worldNamed, worldCap);
     fill(of(3), budget);
-    fill(of(2), budget);
+    fill(worldRest, Math.max(worldCap, used));
     fill([...of(4), ...of(5)], budget);
   } else {
     fill(ordered.filter((e) => e.pinned), budget);

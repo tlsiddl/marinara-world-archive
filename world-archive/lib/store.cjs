@@ -25,6 +25,8 @@ const TOPICS = ['금지·예절', '돈·거래', '시간·영업', '방법·기�
 /** v0.7.0 3: 정리 언어 — auto (the room's 기억 서재 기억 언어, else ko) · ko · en. */
 const SUMMARY_LANGS = ['auto', 'ko', 'en'];
 const TRANSLATION_MAX = 6000;
+/** v0.7.4 1: money (화폐 · currency …) is never 「한 번만 나왔어요」 either. */
+const ONCE_MONEY = /(화폐|통화|환율|갈레온)|\b(?:currency|currencies|money|coinage|exchange rates?|galleons?|sickles?|knuts?)\b/i;
 /** v0.7.2 E: a name that says a law (the same words as inject.cjs LAW_NAME). */
 const ONCE_LAW = /([^\s마]법(\s|$)|령(\s|$)|규칙|제도)|\b(?:laws?|decrees?|statutes?|acts?|codes?|charters?|treaty|treaties|regulations?|edicts?)\b/i;
 /** v0.7.2 I: a 종 in Korean that code can put in English. */
@@ -1545,11 +1547,23 @@ class Archive {
       const next = after.trim().split(/\s+/)[0];
       if (next && doc.entities.some((x) => x !== p && x !== best.o && squashName(x.name).startsWith(squashName(best.name + next)))) continue;
       // the group's name with a building word after it (「Hogwarts Castle」 · 「호그와트 성」): the 본거지 it can be made as
-      const building = best.o.type === 'group' && next && GROUP_BUILDING.includes(next.toLowerCase().replace(/[^\p{L}]/gu, '')) ? `${best.name} ${next.replace(/[^\p{L}]/gu, '')}` : null;
-      found.push({ p, o: best.o, building });
+      let madeName = false;
+      let building = best.o.type === 'group' && next && GROUP_BUILDING.includes(next.toLowerCase().replace(/[^\p{L}]/gu, '')) ? `${best.name} ${next.replace(/[^\p{L}]/gu, '')}` : null;
+      // v0.7.4 5: the 칸 is the group's name and nothing else (「Inside Gringotts」 · 「Hogwarts School of …」): its 본거지,
+      // made when it has none as 「<its shortest name> grounds」 (「… 건물」 in Korean)
+      if (!building && best.o.type === 'group' && squashName(seg) === squashName(best.name)) {
+        const forms = [best.o.name, ...(best.o.aliases || [])].filter((n) => String(n).trim().length >= 2);
+        const latin = /[A-Za-z]/.test(best.o.name) && !/[가-힣]/.test(best.o.name);
+        const short = forms.filter((n) => (latin ? /[A-Za-z]/.test(n) && !/[가-힣]/.test(n) : /[가-힣]/.test(n))).sort((a, b) => a.length - b.length)[0] || best.o.name;
+        building = latin ? `${short} grounds` : `${short} 건물`;
+        madeName = true;
+      }
+      found.push({ p, o: best.o, building, madeName });
     }
     // groups named with a building word first, so the 「At Hogwarts」 places find the 본거지 made from 「Hogwarts Castle」
-    found.sort((a, b) => Number(!a.building) - Number(!b.building));
+    // (a building the 칸 names comes before one made from the group's name alone)
+    const rankOf = (x) => (x.building ? (x.madeName ? 1 : 0) : 2);
+    found.sort((a, b) => rankOf(a) - rankOf(b));
     const rels = [];
     for (const { p, o, building } of found) {
       const to = o.type === 'place' ? o.entityId : this.basePlace(worldId, o.entityId, { by, name: building });
@@ -2687,7 +2701,9 @@ class Archive {
     const inItems = new Set(doc.items.map((x) => x.entityId));
     doc.once = [...ents.values()].filter((e) => ['rule', 'system', 'custom', 'schedule'].includes(e.type) && !e.timetable && !e.calendar && !e.pinned
       && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && Number.isFinite(e.seen?.n) && e.seen.n < 2
-      && !ONCE_LAW.test(e.name) && e.topic !== '유래·역사' && !inItems.has(e.entityId) && !kept.has(e.entityId))
+      && !ONCE_LAW.test(e.name) && !ONCE_MONEY.test(e.name) && e.topic !== '유래·역사' && !inItems.has(e.entityId) && !kept.has(e.entityId)
+      // v0.7.4 1: a rule of a place or group is that place's (not 「한 번만 나왔어요」)
+      && !(e.appliesTo && e.appliesTo !== WORLD))
       .map((e) => ({ entityId: e.entityId, name: e.name, type: e.type, topic: e.topic || null }));
     return doc;
   }
@@ -3159,9 +3175,10 @@ class Archive {
           // v0.7.2 F: a value in English (a world organized in English) is the story's own words: a story sentence
           // naming the setting that holds more than half of the value's words of four letters or more has said it
           if (hide !== false && /[A-Za-z]/.test(String(value)) && !/[가-힣]/.test(String(value))) {
-            const wordsOf = (x) => [...new Set(String(x).toLowerCase().match(/[a-z][a-z'-]{3,}/g) || [])];
+            // v0.7.4 3: key words (five letters or more) — more than a third of them, and more than two, in one sentence
+            const wordsOf = (x) => [...new Set(String(x).toLowerCase().match(/[a-z][a-z'-]{4,}/g) || [])];
             const want = wordsOf(value);
-            const hit = want.length ? about.find((x) => { const got = new Set(wordsOf(x.s)); return want.filter((w) => got.has(w)).length * 2 > want.length; }) : null;
+            const hit = want.length ? about.find((x) => { const got = new Set(wordsOf(x.s)); const n = want.filter((w) => got.has(w)).length; return n > 2 && n * 3 > want.length; }) : null;
             if (hit) { hide = false; ev = hit.s; }
           }
           // v0.6.6 2: 성별 — a story sentence naming the person, or the one after it, with he · him · his / she · her

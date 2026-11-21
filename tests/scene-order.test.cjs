@@ -41,13 +41,14 @@ function world() {
 const run = (E, R, scene, budget = 5000) => I.assembleWorld({ name: '별시계 학원', description: '', injectMode: 'scene' }, E, budget, { scene: new Set(scene), relations: R });
 const names = (E, ids) => ids.map((x) => E.find((e) => e.entityId === x).name);
 
-test('a school scene: world rules (latest first), then the rules of the tower, the campus it is in, the house and year of the person — not the manor\'s', () => {
+// v0.7.4 4 (사령탑): the whole world's rules not named in the latest messages come after the rules here (within a third)
+test('a school scene: the rules of the tower, the campus it is in, the house and year of the person, then the world\'s — not the manor\'s', () => {
   const { E, R, by } = world();
   const r = run(E, R, [by('하윤'), by('별시계탑')]);
   assert.deepEqual(names(E, r.included), [
     '하윤', '별시계탑', // the scene
-    '금화와 은화 화폐', '마법은 지팡이로', // the whole world, latest first
     '탑 계단은 오른쪽으로만', '캠퍼스 안 비행 금지', '은사슴 1학년 시간표', '기숙사 암호는 2주마다', // here: the tower (0), the campus it is in (1), 하윤's year (1), the house of that year (2)
+    '금화와 은화 화폐', '마법은 지팡이로', // the whole world, after the rules here
     '어디 것인지 모르는 규칙', // nobody said where
   ].filter((x) => r.included.some((i) => E.find((e) => e.entityId === i).name === x)));
   assert.ok(!names(E, r.included).includes('저택에서는 하인이 문을 연다'), 'a rule of a place not here stays out');
@@ -55,22 +56,24 @@ test('a school scene: world rules (latest first), then the rules of the tower, t
   assert.match(r.text, /은사슴 1학년 시간표\n {2}시간표: 월 1교시 별자리학/);
 });
 
-test('a manor scene: no school rules, no 시간표; the manor\'s rule after the world\'s; the unknown last', () => {
+test('a manor scene: no school rules, no 시간표; the manor\'s rule before the world\'s; the unknown last', () => {
   const { E, R, by } = world();
   const r = run(E, R, [by('하르트 공작'), by('하르트 저택')]);
   assert.deepEqual(names(E, r.included), ['하르트 저택', '하르트 공작', '금화와 은화 화폐', '마법은 지팡이로', '저택에서는 하인이 문을 연다', '어디 것인지 모르는 규칙'].sort((a, b) => names(E, r.included).indexOf(a) - names(E, r.included).indexOf(b)));
   for (const x of ['탑 계단은 오른쪽으로만', '캠퍼스 안 비행 금지', '기숙사 암호는 2주마다', '은사슴 1학년 시간표']) assert.ok(!names(E, r.included).includes(x), x);
   const order = names(E, r.included);
-  assert.ok(order.indexOf('마법은 지팡이로') < order.indexOf('저택에서는 하인이 문을 연다'));
+  assert.ok(order.indexOf('저택에서는 하인이 문을 연다') < order.indexOf('마법은 지팡이로'));
   assert.ok(order.indexOf('저택에서는 하인이 문을 연다') < order.indexOf('어디 것인지 모르는 규칙'));
   assert.equal(r.skipped, 10, 'out of the scene: the groups, places, people, rules and 시간표 of the school');
 });
 
-test('a small budget fills in that order: the unknown rule is the first to be left out; pinned always first', () => {
+test('a small budget fills in that order: the rule here stays, what is left out is the world\'s or the unknown; pinned always first', () => {
   const { E, R, by } = world();
   const full = run(E, R, [by('하르트 공작'), by('하르트 저택')]);
   const small = run(E, R, [by('하르트 공작'), by('하르트 저택')], full.chars - 5);
-  assert.ok(small.omitted.map((x) => E.find((e) => e.entityId === x).name).includes('어디 것인지 모르는 규칙'));
+  const out = small.omitted.map((x) => E.find((e) => e.entityId === x).name);
+  assert.ok(out.length >= 1 && out.every((n) => ['어디 것인지 모르는 규칙', '금화와 은화 화폐', '마법은 지팡이로'].includes(n)), out.join(', '));
+  assert.ok(names(E, small.included).includes('저택에서는 하인이 문을 연다'));
   E.find((e) => e.name === '캠퍼스 안 비행 금지').pinned = true;
   const pinned = run(E, R, [by('하르트 저택')]);
   assert.equal(names(E, pinned.included)[0], '캠퍼스 안 비행 금지', 'pinned: in, and first, even out of the scene');

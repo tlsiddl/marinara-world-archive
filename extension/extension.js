@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.7.3';
+  const VERSION = '0.7.4';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -1194,7 +1194,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
         <h2>인물 종 채우기 <small>추가 기능</small></h2>
         <p class="sub" style="margin:0 0 12px">「종」 칸이 생기기 전에 읽은 인물은 종이 비어 있습니다. 누를 때만, 종이 빈 인물의 이름 · 다른 이름 · 외형 · 메모를 모아 100명씩 작은 호출로 묻고, 사람이 아닌 존재(반려동물 · 마법 생물 같은)에만 종을 적습니다. 직접 고친 칸은 건드리지 않고, 기록에서 하나씩 되돌릴 수 있습니다. 자동 반영 연결을 씁니다.</p>
         ${tidyHtml()}
-        <div class="row"><button type="button" data-act="tidy" title="한 번 스친 물건·주문 같은 규칙·시스템·일정과, 성격·메모에 섞인 사건을 후보로만 고릅니다(작은 호출). 지우지는 않습니다.">잡다한 설정 정리</button><button type="button" data-act="species-fill">인물 종 채우기</button><button type="button" data-act="applies-fill" title="적용되는 곳이 빈 규칙·시스템을 이름·분류·내용만으로 한 번에 묻습니다(작은 호출). 근거가 없으면 모름으로 둡니다.">규칙 적용되는 곳 채우기</button><button type="button" data-act="topic-fill" title="주제가 빈 규칙·시스템을 이름·분류·내용만으로 한 번에 묻습니다(작은 호출).">규칙 주제 채우기</button><button type="button" data-act="location-fill" title="아직 어느 장소 안에도 없는 장소를 위치 칸으로 먼저 잇고, 남은 것만 작은 호출로 묻습니다.">장소 위치 채우기</button></div>
+        <div class="row"><button type="button" data-act="tidy" title="한 번 스친 물건·주문 같은 규칙·시스템·일정과, 성격·메모에 섞인 사건을 후보로만 고릅니다(작은 호출). 지우지는 않습니다.">잡다한 설정 정리</button><button type="button" data-act="species-fill">인물 종 채우기</button><button type="button" data-act="applies-fill" title="적용되는 곳이 빈 규칙·시스템을 이름·분류·내용만으로 한 번에 묻습니다(작은 호출). 근거가 없으면 모름으로 둡니다.">규칙 적용되는 곳 채우기</button><button type="button" data-act="topic-fill" title="주제가 빈 규칙·시스템을 이름·분류·내용만으로 한 번에 묻습니다(작은 호출).">규칙 주제 채우기</button><button type="button" data-act="topic-redo" title="자동으로 붙은 주제도 다시 매깁니다(사람이 고친 것은 그대로, 기록에서 되돌릴 수 있음).">주제 다시 매기기</button><button type="button" data-act="location-fill" title="아직 어느 장소 안에도 없는 장소를 위치 칸으로 먼저 잇고, 남은 것만 작은 호출로 묻습니다.">장소 위치 채우기</button></div>
       </div>
       <div class="paper">
         <h2>백업 · 복원</h2>
@@ -2169,6 +2169,12 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     'topic-filter': (b) => { st.topicFilter = b.dataset.topic || ''; render(); },
     'hide-once': () => { st.hideOnce = !st.hideOnce; render(); },
     'rule-kind': () => { st.ruleKind = !st.ruleKind; render(); },
+    'topic-redo': () => run(async () => {
+      const r = await api('POST', `/worlds/${st.worldId}/topic-fill`, { redo: true });
+      await loadEntities();
+      st.bad = false;
+      st.msg = `규칙·시스템 ${r.asked}개의 주제를 다시 물어 ${r.filled.length}개를 바꿨습니다(호출 ${r.calls}번). 기록에서 되돌릴 수 있습니다.`;
+    }),
     'topic-fill': () => run(async () => {
       const r = await api('POST', `/worlds/${st.worldId}/topic-fill`, {});
       await loadEntities();
