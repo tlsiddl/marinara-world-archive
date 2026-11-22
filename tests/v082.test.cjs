@@ -38,7 +38,7 @@ test('preview: rules · systems that did not fit, and the smallest step that fit
 });
 
 test('preview: not even 12,000 → 「pin」; the recommended step follows the organizing language', (t) => {
-  const { s, w } = world(t, { rules: 120, ruleLen: 160 });
+  const { s, w } = world(t, { rules: 400, ruleLen: 160 }); // v0.8.3: steps up to 30,000 and short forms — many more to not fit
   const p = service.preview('roomBudget00000000001');
   assert.equal(p.suggest, 'pin');
   assert.equal(p.lang, 'ko');

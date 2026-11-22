@@ -242,7 +242,7 @@ const FIELDS = {
   custom: [],
 };
 const BUDGET_MIN = 300;
-const BUDGET_MAX = 20000;
+const BUDGET_MAX = 40000; // v0.8.3: big worlds want 20,000~30,000 (사령탑 3-2)
 const BUDGET_DEFAULT = 3000;
 const AUTO_EVERY = { min: 2, max: 50, default: 6 };
 const HISTORY_MAX = 1000;
