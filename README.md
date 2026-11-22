@@ -14,8 +14,8 @@
 
 ## 준비물
 
-1. **Marinara Engine 2.5.1 또는 2.5.2** — 도커 서버, 그냥 실행(Linux · macOS), 핸드폰(Termux) 모두 돼요. 다른 판에서는 맞지 않는 부분만 꺼지고 마리나라는 원래대로 켜져요.
-2. **Node.js 22.15 이상** — 도커 서버는 마리나라 이미지에 들어 있어서 따로 할 일이 없어요. 그냥 실행 · Termux는 `node -v`로 확인해 주세요. 낮으면 설정집만 꺼지고 마리나라는 그대로 켜져요.
+1. **Marinara Engine 2.5.1 또는 2.5.2** — 도커 서버, 그냥 실행(Linux · macOS), 핸드폰(Termux), Windows(베타) 모두 돼요. 다른 판에서는 맞지 않는 부분만 꺼지고 마리나라는 원래대로 켜져요.
+2. **Node.js 22.15 이상** — 도커 서버는 마리나라 이미지에 들어 있어서 따로 할 일이 없어요. 그냥 실행 · Termux · Windows는 `node -v`로 확인해 주세요(마리나라 자체가 Node 24 이상을 요구해서 보통은 이미 맞아요). 낮으면 설정집만 꺼지고 마리나라는 그대로 켜져요.
 3. **정리에 쓸 모델 연결** — 마리나라에 저장된 연결 하나를 빌려 써요. 메시지 6개마다 부르니 **저렴하고 긴 글을 잘 읽는 모델**을 추천해요(예: DeepSeek 계열).
 4. (선택) **[기억 서재](https://github.com/tlsiddl/marinara-memory-module)** — 있으면 기억 서재 안에 「세계관」 칸이 생기고 같이 켜져요. 없어도 혼자 다 돼요.
 
@@ -65,7 +65,18 @@ bash start-world-archive.sh
 
 **핸드폰 (Termux)** — 마리나라 폴더에서 같은 명령을 실행한 뒤 `bash start-world-archive.sh`로 켜 주세요. 안에서 `start-termux.sh`를 불러요.
 
-**Windows** — 아직 설치기가 없어요. 도커나 WSL에서 위 방법으로 써 주세요.
+**Windows (베타 — 아직 실제 Windows에서 확인 중이에요)** — PowerShell을 열고 아래 명령을 실행해 주세요. 어느 폴더에서 열어도 돼요.
+
+```powershell
+irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.ps1 | iex
+```
+
+- **마리나라 폴더는 설치기가 찾아요.** 지금 폴더(마리나라 폴더나 그 안에서 열었으면 그 설치본을 먼저), 기본 설치 위치, 바탕화면 · 시작 메뉴의 Marinara 바로가기를 봐요.
+- **못 찾으면** 폴더 선택 창이 열려요. `start.bat`과 `packages` 폴더가 들어 있는 마리나라 폴더를 골라 주세요. 선택 창을 쓸 수 없으면 터미널에 경로를 붙여 넣어도 돼요(따옴표 포함 가능, Enter만 누르면 아무것도 안 바꾸고 취소).
+- **마리나라가 여러 개 설치돼 있으면** 번호로 골라요.
+- 경로를 직접 정하려면 설치 명령 앞에 이렇게 붙여 주세요: `$env:MARINARA_DIR = 'D:\Marinara-Engine'; irm … | iex`
+
+설치가 끝나면 바탕화면에 생긴 **Marinara + 세계관 설정집** 바로가기(또는 `start-world-archive.bat`)로 켜 주세요. 같은 폴더에 기억 서재가 깔려 있으면 이 파일 하나로 **둘 다** 켜져요(`start-memory.bat`으로 켜면 설정집 없이 기억 서재만 켜져요). `start.bat`이나 MarinaraLauncher로 켜면 설정집 없이 켜져요.
 
 **설치 확인** — 마리나라 로그(도커는 `docker logs 컨테이너이름`)에 아래 줄들이 보이면 성공이에요. `v` 뒤는 판 번호예요.
 
@@ -189,6 +200,14 @@ curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main
 
 도커는 마리나라를 다시 켜 줘요. 그냥 실행 · Termux는 마리나라를 껐다가 `bash start-world-archive.sh`로 다시 켜 주세요.
 
+Windows(PowerShell):
+
+```powershell
+$env:WORLD_ARCHIVE_ACTION='rollback'; irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.ps1 | iex
+```
+
+마리나라를 껐다가 `start-world-archive.bat`으로 다시 켜 주세요.
+
 ## 끄기 · 지우기
 
 - **방 하나만 끄기**: 그 채팅방에서 세계관 연결을 끊거나, 세계관 정보에서 자동 반영을 꺼요.
@@ -198,7 +217,11 @@ curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main
   curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.sh | sh -s -- uninstall
   ```
 
-  도커는 compose 파일에서 설정집 두 줄만 빼고(다른 패치는 그대로인지 확인) 다시 켜요. 바꾸기 전 파일은 `.before-world-archive-removal-날짜`로 남겨요. 그냥 실행 · Termux는 `start-world-archive.sh` 대신 원래 `start.sh`(기억 서재를 쓰면 `start-memory.sh`)로 켜면 꺼져요.
+  도커는 compose 파일에서 설정집 두 줄만 빼고(다른 패치는 그대로인지 확인) 다시 켜요. 바꾸기 전 파일은 `.before-world-archive-removal-날짜`로 남겨요. 그냥 실행 · Termux는 `start-world-archive.sh` 대신 원래 `start.sh`(기억 서재를 쓰면 `start-memory.sh`)로 켜면 꺼져요. Windows는 아래 명령으로 `start-world-archive.bat`과 바탕화면 바로가기를 지우고, 앞으로 `start.bat`(기억 서재를 쓰면 `start-memory.bat`)으로 켜면 돼요.
+
+  ```powershell
+  $env:WORLD_ARCHIVE_ACTION='uninstall'; irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.ps1 | iex
+  ```
 - **끈 뒤에는 프리셋의 `{{세계}}` · `{{세계외형}}`을 지워 주세요.** 끈 뒤에는 그 글자가 그대로 모델에 가요.
 - **완전히 지우기**: 위처럼 끈 뒤 마리나라 폴더의 `world-archive` 폴더와 데이터 폴더의 `world-archive` 폴더를 지워요. 데이터 폴더 쪽을 지우면 세계관이 모두 사라지니, 먼저 세계관 정보에서 백업을 내려받아 두세요.
 

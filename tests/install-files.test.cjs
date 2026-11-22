@@ -18,3 +18,14 @@ test('install.sh copies every file of world-archive/lib (and vendor) and the run
   assert.deepEqual(need.filter((f) => !listed.has(f)), []);
   for (const f of listed) assert.ok(fs.existsSync(path.join(root, f)), f);
 });
+
+// install.ps1 (Windows) copies the same files as install.sh.
+test('install.ps1 copies the same files as install.sh', () => {
+  const root = path.join(__dirname, '..');
+  const sh = fs.readFileSync(path.join(root, 'install.sh'), 'utf8').match(/^FILES="([^"]+)"/m)[1].split(/\s+/).filter(Boolean);
+  const ps = fs.readFileSync(path.join(root, 'install.ps1'), 'utf8');
+  const block = ps.match(/^\$files = @\(([\s\S]*?)^\)/m);
+  assert.ok(block, '$files block');
+  const listed = [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...listed].sort(), [...sh].sort());
+});
