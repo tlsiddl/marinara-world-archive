@@ -1,6 +1,6 @@
 # 세계관 설정집 (Marinara World Archive)
 
-> **베타 (v0.8.0-beta)**: 매일 쓰면서 다듬는 중이에요. 쓰기 전에 마리나라 데이터를 백업해 두세요. 문제가 있으면 이슈로 알려 주세요.
+> **베타 (v0.8.3-beta)**: 매일 쓰면서 다듬는 중이에요. 쓰기 전에 마리나라 데이터를 백업해 두세요. 문제가 있으면 이슈로 알려 주세요.
 
 [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine)용 확장이에요.
 
@@ -12,44 +12,100 @@
 
 ![한 사람 카드 — 칸 · 관계 · 「아직 드러나지 않음」 (지어낸 예시 세계)](docs/screenshots/v070-한사람-컴퓨터-light.webp)
 
+## 준비물
+
+1. **Marinara Engine 2.5.1 또는 2.5.2** — 도커 서버, 그냥 실행(Linux · macOS), 핸드폰(Termux) 모두 돼요. 다른 판에서는 맞지 않는 부분만 꺼지고 마리나라는 원래대로 켜져요.
+2. **Node.js 22.15 이상** — 도커 서버는 마리나라 이미지에 들어 있어서 따로 할 일이 없어요. 그냥 실행 · Termux는 `node -v`로 확인해 주세요. 낮으면 설정집만 꺼지고 마리나라는 그대로 켜져요.
+3. **정리에 쓸 모델 연결** — 마리나라에 저장된 연결 하나를 빌려 써요. 메시지 6개마다 부르니 **저렴하고 긴 글을 잘 읽는 모델**을 추천해요(예: DeepSeek 계열).
+4. (선택) **[기억 서재](https://github.com/tlsiddl/marinara-memory-module)** — 있으면 기억 서재 안에 「세계관」 칸이 생기고 같이 켜져요. 없어도 혼자 다 돼요.
+
+쓰기 전에 마리나라 데이터를 백업해 두세요.
+
 ## 설치
 
-필요한 것은 Marinara Engine **2.5.1 · 2.5.2**예요. 다른 판에서는 맞지 않는 부분만 꺼지고 마리나라는 원래대로 켜져요.
+설치는 두 부분이에요. **① 서버에 설정집 모듈**, **② 마리나라에 화면(확장)**. 같은 명령을 다시 실행하면 업데이트가 돼요.
 
 ### 1. 서버 모듈
 
-**도커로 쓰는 경우**에는 서버 터미널에서 아래 명령을 실행하세요.
+**도커 서버 (벌처 · AWS 등)** — 서버 터미널에서:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.sh | sh
 ```
 
-- 마리나라 컨테이너를 찾아서 `docker-compose.override.yml`에 두 줄(폴더 연결, `NODE_OPTIONS`)을 넣고 다시 켜요. 마리나라 원래 파일은 건드리지 않아요.
-- 한 서버에 마리나라 컨테이너가 둘 이상이면 아무것도 바꾸지 않고 멈춰요. 이때는 이름을 정해서 다시 실행하세요.
+- 켜져 있는 마리나라 컨테이너를 찾아요. 이름에 marinara가 들어간 프록시 · 봇 같은 다른 컨테이너가 있어도, 안에서 마리나라 서버(`packages/server/dist/index.js`)가 도는 컨테이너만 골라요.
+- 찾으면 compose 파일에 두 줄(설정집 폴더 연결, `NODE_OPTIONS`)을 넣고 `docker compose up -d`로 다시 켜요. 마리나라 원래 파일은 건드리지 않아요.
+  - 보통은 `docker-compose.override.yml`에 넣어요(없으면 만들어요).
+  - 이미 `NODE_OPTIONS`를 쓰는 compose 파일이 있으면 그 파일의 줄 끝에 더해요. 다른 패치(기억 서재 등)는 그대로 남는지 넣기 전후로 확인하고, 하나라도 빠질 것 같으면 원래대로 돌리고 멈춰요.
+  - 바꾸기 전 파일은 `.before-world-archive-날짜`로 남겨요. 파일 모양이 예상과 다르면 건드리지 않고, 직접 넣을 두 줄과 다시 켜는 명령을 알려 줘요.
+  - 그 파일을 다른 도구가 통째로 바꾸면 설정집 줄이 빠질 수 있어요. 그러면 설치 명령을 다시 실행하면 돼요.
+- 마리나라 서버가 여러 개거나 어느 것인지 확실하지 않으면 **아무것도 바꾸지 않고 멈춰요.** 그때는 컨테이너 이름을 정해 주세요(`docker ps`로 이름 확인):
 
   ```sh
   curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.sh | MARINARA_CONTAINER=컨테이너이름 sh
   ```
 
-- 기억 서재가 이미 깔려 있으면, 기억 서재가 만든 override 파일에 두 줄만 더해요. 둘 다 같이 켜져요.
+- compose를 `-f` 여러 개로 켜고 계셨다면, 설치기가 그 파일들을 같은 순서로 써서 다시 켜요. `docker-compose.override.yml`을 새로 더했다면 앞으로 직접 켤 때도 마지막에 `-f docker-compose.override.yml`을 붙여 주세요.
+- 기억 서재가 이미 깔려 있으면 기억 서재가 만든 파일에 두 줄만 더해요. 기억 서재를 나중에 업데이트해도 그 줄은 남아서 둘 다 계속 켜져요.
 
-**그냥 실행 · Termux**에서는 마리나라 폴더에서 같은 명령을 실행하세요. 앞으로는 `bash start-world-archive.sh`로 켜면 돼요. 같은 폴더에 기억 서재가 있으면 같이 켜져요.
+**그냥 실행 (Linux · macOS)** — 마리나라 폴더에 들어가서 같은 명령을 실행해요.
 
-### 2. 화면
-
-마리나라의 **확장 관리자 → GitHub**에서 저장소 주소를 넣으세요.
-
-```
-https://github.com/tlsiddl/marinara-world-archive
+```sh
+cd ~/Marinara-Engine
+curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.sh | sh
 ```
 
-찾은 파일 중 `extension/manifest.json`을 골라 설치하고 켜세요. 화면 오른쪽 아래의 **WORLD ARCHIVE** 티켓 버튼으로 열어요. 업데이트도 확장 관리자에서 해요. 화면과 서버의 판이 다르면 화면 맨 위에 알려 줘요. 그때는 서버에서 설치 명령을 다시 실행하세요.
+마리나라 폴더(`packages/server`가 들어 있는 폴더)는 지금 폴더, `~/Marinara-Engine`, `~/marinara-engine`, `~/Marinara` 순서로 찾아요. 다른 곳에 있으면 앞에 `MARINARA_DIR=/마리나라/폴더`를 붙여 주세요. 설치가 끝나면 앞으로는 `start.sh` 대신 이렇게 켜 주세요:
+
+```sh
+bash start-world-archive.sh
+```
+
+같은 폴더에 기억 서재가 깔려 있으면 이 파일 하나로 둘 다 켜져요(`start-memory.sh` 대신 써도 돼요).
+
+**핸드폰 (Termux)** — 마리나라 폴더에서 같은 명령을 실행한 뒤 `bash start-world-archive.sh`로 켜 주세요. 안에서 `start-termux.sh`를 불러요.
+
+**Windows** — 아직 설치기가 없어요. 도커나 WSL에서 위 방법으로 써 주세요.
+
+**설치 확인** — 마리나라 로그(도커는 `docker logs 컨테이너이름`)에 아래 줄들이 보이면 성공이에요. `v` 뒤는 판 번호예요.
+
+```
+[world-archive] v0.8.3-beta applied: {{세계}} · {{세계외형}} macro
+[world-archive] v0.8.3-beta applied: API at /api/world-archive
+[world-archive] v0.8.3-beta hook registered (no Marinara files changed)
+```
+
+`fail closed (…): this Marinara version does not match`가 보이면 그 판의 마리나라와 맞지 않아서 그 부분만 꺼진 거예요. 마리나라는 그대로 쓰실 수 있어요.
+
+### 2. 화면 (확장)
+
+마리나라의 **개인 확장 관리 → GitHub로 가져오기**에서:
+
+- 저장소 주소: `https://github.com/tlsiddl/marinara-world-archive`
+- 파일: `extension/manifest.json`
+
+설치하고 켜면 화면 오른쪽 아래에 **WORLD ARCHIVE** 티켓 버튼이 생겨요. 버튼은 끌어서 옮길 수 있고, [확장 서랍](https://github.com/boricha417/marinara-extension-drawer)을 쓰시면 서랍 안에 담겨요. 기억 서재 0.37 이상이 있으면 기억 서재 안 「세계관」 칸에서도 같은 화면이 열려요.
+
+화면과 서버의 판이 다르면 화면 맨 위에 알려 줘요. 그때는 서버에서 설치 명령을 다시 실행하세요.
 
 ### 3. 프리셋에 `{{세계}}` 넣기
 
-프리셋의 시스템 쪽 섹션에 `{{세계}}`(또는 `{{world}}`)를 한 줄 넣으세요. 기억 서재를 쓰면 **`{{기억}}` 섹션 위에** 따로 두는 걸 권해요(고정 설정 → 겪은 일 순서).
+쓰는 프롬프트 프리셋에 새 섹션(역할: 시스템)을 하나 만들고 내용에 `{{세계}}`(또는 `{{world}}`)를 적어요. **이걸 빠뜨리면 설정이 정리돼도 답변에 들어가지 않아요.**
 
-삽화 에이전트를 쓰면 `{{세계외형}}`(`{{world_looks}}`)을 넣을 수 있어요. 장면에 나온 인물의 외형만 들어가요.
+기억 서재를 쓰면 `{{기억}}` 섹션 **바로 위**에 두는 걸 권해요(고정 설정 → 겪은 일 순서).
+
+| 순서 | 섹션 | 내용 |
+| --- | --- | --- |
+| … | 페르소나 (마커) | |
+| | **세계관** (새로 만든 섹션, 시스템) | `{{세계}}` |
+| | 기억 (기억 서재를 쓰면) | `{{기억}}` |
+| | 채팅 기록 (마커) | |
+
+섹션을 따로 두면 마리나라의 **프롬프트 구성** 보기에서 설정이 실제로 들어갔는지, 몇 토큰인지 바로 볼 수 있어요.
+
+삽화 에이전트를 쓰면 그 프롬프트에 `{{세계외형}}`(`{{world_looks}}`)을 넣을 수 있어요. 장면에 나온 인물의 외형만 들어가요.
+
+**NPC 생성 지침이 있는 프리셋이라면** — 답변 끝에 새 NPC의 `<npc_profile>` 블록을 쓰게 하는 섹션은 켜 두세요. 설정집이 그 블록을 읽어서 나이 · 외형을 본문보다 훨씬 잘 채워요. 외형 줄을 `- Appearance and clothing (hair colour and eye colour first):`로 바꾸면 머리색 · 눈색 칸도 채워져요. 이미 있는 NPC를 고쳐 쓰게 하는 업데이트 블록(`<npc_update>` 같은 것)은 빼도 돼요 — 설정집은 바뀐 내용을 본문에서 읽어요.
 
 ## 처음 쓰는 법
 
@@ -119,12 +175,38 @@ https://github.com/tlsiddl/marinara-world-archive
 - **장면 글자 수:** 장면에 인물 · 장소가 많으면 3,000자 안에서 규칙이 밀려날 수 있어요. 꼭 들어가야 할 규칙은 카드에서 「늘 먼저 넣기」를 켜거나, 글자 수를 늘려 주세요.
 - **「적용되는 곳」:** 읽기만으로는 적게 채워져요. 「규칙 적용되는 곳 채우기」를 눌러 주세요.
 
-## 되돌리기 · 끄기 · 데이터
+## 업데이트
 
-- 이전 판으로 되돌리려면 설치 명령 끝의 `sh`를 `sh -s -- rollback`으로 바꿔 실행하세요.
-- 끄려면 `sh -s -- uninstall`로 바꿔 실행하세요. **끈 뒤에는 프리셋의 `{{세계}}` · `{{세계외형}}`을 지워 주세요.** 끈 뒤에는 그 글자가 그대로 모델에 가요.
-- 세계관 데이터는 마리나라 데이터 폴더의 `world-archive`에 있어요. 설치 · 업데이트 · 끄기로 지워지지 않아요. 지운 세계관은 `world-archive/trash/`에 사본이 남아요.
-- 서버가 켜질 때 메모리에서만 두 곳(매크로 엔진, 서버 앱)에 끼어들어요. API는 마리나라 로그인 · 접속 제한을 그대로 따르고, 따로 토큰을 쓰지 않아요.
+설치할 때와 **같은 명령**을 다시 실행하고, 확장 관리에서 화면도 업데이트해 주세요. 세계관 데이터는 지워지지 않아요.
+
+업데이트는 새 파일을 모두 `world-archive/.incoming`에 받아 확인한 뒤에 한꺼번에 바꿔요. 중간에 받기가 실패하면 기존 판이 그대로 남고, 바꾸기 전 판은 `world-archive/.prev`에 보관돼요. 모든 파일을 같은 커밋에서 받아서 두 판이 섞이지 않아요.
+
+**이전 판으로 되돌리기** — 업데이트 뒤 문제가 생기면:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.sh | sh -s -- rollback
+```
+
+도커는 마리나라를 다시 켜 줘요. 그냥 실행 · Termux는 마리나라를 껐다가 `bash start-world-archive.sh`로 다시 켜 주세요.
+
+## 끄기 · 지우기
+
+- **방 하나만 끄기**: 그 채팅방에서 세계관 연결을 끊거나, 세계관 정보에서 자동 반영을 꺼요.
+- **모듈 끄기**:
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/install.sh | sh -s -- uninstall
+  ```
+
+  도커는 compose 파일에서 설정집 두 줄만 빼고(다른 패치는 그대로인지 확인) 다시 켜요. 바꾸기 전 파일은 `.before-world-archive-removal-날짜`로 남겨요. 그냥 실행 · Termux는 `start-world-archive.sh` 대신 원래 `start.sh`(기억 서재를 쓰면 `start-memory.sh`)로 켜면 꺼져요.
+- **끈 뒤에는 프리셋의 `{{세계}}` · `{{세계외형}}`을 지워 주세요.** 끈 뒤에는 그 글자가 그대로 모델에 가요.
+- **완전히 지우기**: 위처럼 끈 뒤 마리나라 폴더의 `world-archive` 폴더와 데이터 폴더의 `world-archive` 폴더를 지워요. 데이터 폴더 쪽을 지우면 세계관이 모두 사라지니, 먼저 세계관 정보에서 백업을 내려받아 두세요.
+
+## 데이터와 보안
+
+- 세계관 데이터는 마리나라 데이터 폴더의 `world-archive`에 있어요. 설치 · 업데이트 · 끄기로 지워지지 않아요. 지운 세계관은 `world-archive/trash/`에 사본이 남아요. 세계관 정보에서 백업을 내려받고 복원할 수 있어요.
+- 대화는 세계관 정보에서 고른 연결로만 보내요. 다른 곳으로는 보내지 않아요.
+- 서버가 켜질 때 메모리에서만 두 곳(매크로 엔진, 서버 앱)에 끼어들어요. API(`/api/world-archive`)는 마리나라 로그인 · 접속 제한을 그대로 따르고, 따로 토큰을 쓰지 않아요.
 
 ## 만드는 사람을 위해
 
