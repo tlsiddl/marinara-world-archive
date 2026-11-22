@@ -122,6 +122,77 @@ s.applyCalendar(W, [ev('1891-10-31', '가을밤 연회', '대식당', '전교생
 s.linkRoom(ROOM, W);
 s.setRoomStory(ROOM, { date: '1891-10-26', weekday: '월' });
 
+// ------------------------------------------------------------------ 공지 그림용 더하기 (notice/pages 브랜치, 지어낸 것만)
+{
+  const ent = (n, w = W) => s.listEntities(w).find((e) => e.name === n);
+  s.updateWorld(W, { revision: s.getWorld(W).revision, personFields: ['house', 'year'] });
+  // v0.7.6 · v0.8.1: 머리색 · 눈색 · 기숙사 · 학년 (읽기가 채운 것처럼)
+  s.applyAuto(W, [
+    person('하람 윤', { hair: '은발', eyes: '회색', house: '은사슴', year: '1', age: '11' }, { match: '하람 윤' }),
+    person('테오 마렌', { hair: '갈색 곱슬', eyes: '초록', house: '은사슴', year: '1', age: '11', appearance: '갈색 곱슬머리에 초록 눈, 늘 소매를 걷어 올림' }, { match: '테오 마렌' }),
+    person('리아 소넷', { hair: '붉은', eyes: '갈색', house: '은사슴', year: '1' }, { match: '리아 소넷' }),
+    person('에밀 그랑', { hair: '검은', eyes: '푸른', house: '은사슴', year: '5' }, { match: '에밀 그랑' }),
+    person('벨로나 하르트', { hair: '잿빛', eyes: '회색', appearance: '잿빛 머리를 단단히 틀어 올리고 은테 안경을 씀', personality: '엄하지만 공정함' }, { match: '벨로나 하르트' }),
+    person('솜뭉치', { hair: '흰' }, { match: '솜뭉치' }),
+  ]);
+  // 덧칸(직접 이름 붙인 칸) · 사람이 고친 칸 — 기록에 「직접 고침」으로 남음
+  let e = ent('하람 윤');
+  s.updateEntity(W, e.entityId, { revision: e.revision, extra: [{ label: '지팡이', value: '벚나무 · 11인치 · 유니콘 털', source: 'manual' }, { label: '좋아하는 과목', value: '별자리학', source: 'manual' }] });
+  const doc = s.readEntities(W);
+  const at = new Date().toISOString();
+  const d = (n) => doc.entities.find((x) => x.name === n);
+  // 「아직 드러나지 않음」: 프로필 블록에만 있고 이야기에는 아직 안 나온 칸
+  d('하람 윤').hidden = { personality: true };
+  d('벨로나 하르트').hidden = { personality: true };
+  // 「서로 다른 말을 해요」: 칸 — 테오 나이 11 ↔ 12
+  d('테오 마렌').differs = { age: { value: '12', evidence: '「테오는 지난주에 열두 살이 됐어.」 미라가 말했다.', at } };
+  // 「서로 다른 말을 해요」: 위치 관계 — 찻집이 시장 안 ↔ 시장이 찻집 안
+  const cafe = d('찻집 「은방울」').entityId, market = d('별빛 시장').entityId;
+  const rel = doc.relations.find((r) => r.type === '위치' && r.from === cafe && r.to === market);
+  if (rel) rel.differs = { from: market, to: cafe, evidence: '찻집 「은방울」 안쪽 계단으로 내려가면 별빛 시장 지하 장터가 나온다.', by: 'reader', at };
+  s.writeJson(s.entityFile(W), doc);
+  // 「같은 것일 수 있음」: 「소넷」이 「리아 소넷」일 수도
+  s.applyAuto(W, [person('소넷', { gender: '여', affiliation: '은사슴 1학년' })]);
+  s.markMaybe(W, ent('소넷').entityId, ent('리아 소넷').entityId, '「소넷이 손을 들었다」 — 성만 나옴');
+  // 정리 후보 두 줄: ① 한때의 설정 · 칸 ② 한 번만 나왔어요(오래 읽은 세계에서만 — 방 하나를 150메시지 읽은 것으로)
+  s.applyAuto(W, [rule('3층 복도 물바다', '어제 3층 복도가 물에 잠겨 하루 동안 막혔다', '은사슴 학교'), rule('부엉이 집 청소 당번표', '이번 주 부엉이 집 청소는 노엘', '은사슴 학교')], { messageIds: ['m1'] });
+  s.setRoomRead(ROOM, { lastId: 'm150', count: 150 });
+  { const d2 = s.readEntities(W); for (const n of ['부엉이 집 청소 당번표', '손목 리본']) { const x = d2.entities.find((y) => y.name === n); if (x) x.seen = { n: 1, last: 'b1' }; } s.writeJson(s.entityFile(W), d2); }
+  s.saveTidy(W, { at, items: [{ entityId: ent('3층 복도 물바다').entityId, name: '3층 복도 물바다', type: 'rule', why: '하루 동안의 일이에요' }], fields: [{ entityId: ent('테오 마렌').entityId, name: '테오 마렌', key: 'appearance', value: '갈색 곱슬머리에 초록 눈, 늘 소매를 걷어 올림', why: '「오늘은」 소매를 걷어 올린 것 같아요' }] });
+  // 기록: 자동으로 바뀐 것 하나를 사람이 되돌림
+  const ch = s.listHistory(W).find((c) => c.action === 'field' && c.name === '리아 소넷' && c.key === 'hair');
+  if (ch) s.undoChange(W, ch.id);
+}
+
+// ------------------------------------------------------------------ 학교가 아닌 지어낸 세계: 헌터물(한국어), 방 demo-room-2
+const ROOM2 = 'demo-room-2';
+{
+  const w2 = s.createWorld({ name: '[시험] 백랑 — 헌터 협회', description: '게이트와 던전이 열리는 도시. 지어낸 세계(시험용).', injectChars: 3000, injectMode: 'scene' }).worldId;
+  const id2 = (n) => s.listEntities(w2).find((e) => e.name === n).entityId;
+  s.applyAuto(w2, [
+    P('헌터 협회 본관', { use: '각성자 등록 · 감정 · 정산' }), P('감정실', { use: '아이템 · 등급 감정' }), P('등록 창구'), P('정산 창구'),
+    P('백랑 길드 사무실'), P('서쪽 게이트 입구 광장', { use: '게이트 앞 집결지' }, { memo: '던전으로 들어가는 입구 앞 광장 — 던전 안은 아님' }), P('안개 늪 던전', { use: 'D급 게이트 너머 던전' }),
+    { type: 'group', name: '백랑 길드', fields: { kind: '헌터 길드', size: '23명' } }, { type: 'group', name: '헌터 협회', fields: { kind: '공공 기관' } },
+    person('서진우', { gender: '남', affiliation: '무소속', state: 'S급 헌터 · 원정대를 이끄는 중', hair: '검은', eyes: '짙은 갈색', appearance: '검은 머리를 짧게 자르고 왼쪽 눈썹에 흉터' }),
+    person('백도경', { gender: '여', affiliation: '백랑 길드 마스터', hair: '흰', eyes: '회색', appearance: '흰 머리를 하나로 묶은 장신' }),
+    person('장미라', { gender: '여', affiliation: '헌터 협회 감정사' }), person('권태오', { gender: '남', affiliation: '백랑 길드', state: 'A급 헌터' }),
+    person('박은서', { gender: '여', affiliation: '헌터 협회 등록 창구' }, { aliases: ['협회 창구 직원'] }),
+  ]);
+  s.applyRelations(w2, [['감정실', '헌터 협회 본관'], ['등록 창구', '헌터 협회 본관'], ['정산 창구', '헌터 협회 본관']].map(([a, b]) => ({ from: id2(a), to: id2(b), type: '위치', note: '', evidence: '' })));
+  s.applyRelations(w2, [['백도경', '백랑 길드', '소속', '길드 마스터'], ['권태오', '백랑 길드', '소속', ''], ['장미라', '헌터 협회', '소속', '감정사'], ['박은서', '헌터 협회', '소속', '창구']].map(([a, b, type, note]) => ({ from: id2(a), to: id2(b), type, note, evidence: '' })));
+  s.setBase(w2, id2('백랑 길드'), id2('백랑 길드 사무실'), {}, { force: true });
+  s.setBase(w2, id2('헌터 협회'), id2('헌터 협회 본관'), {}, { force: true });
+  const r2 = (name, memo, where, type = 'rule') => ({ type, name, memo, ...(where ? { appliesTo: where === 'world' ? 'world' : id2(where) } : {}) });
+  s.applyAuto(w2, [
+    r2('각성자 등록 의무', '각성 뒤 7일 안에 협회에 등록해야 한다', 'world'), r2('게이트 브레이크 규정', '열린 게이트를 24시간 안에 닫지 못하면 근처 주민을 대피시킨다', 'world'),
+    r2('게이트 등급', 'E급부터 S급까지, 협회 측정기로 정한다', 'world', 'system'), r2('상태창', '각성자는 이름 · 등급 · 레벨 · 스킬이 적힌 창을 본다', 'world', 'system'),
+    r2('보상 분배와 협회 수수료', '기여도에 따라 나누고 협회가 10%를 뗀다', '헌터 협회', 'system'), r2('정기 정산일', '매달 25일 정산 창구에서 보상을 받는다', '정산 창구'),
+    r2('길드 가입 조건', '등록증과 D급 이상, 또는 마스터 면접', '백랑 길드'), r2('광장 일반인 출입 금지', '게이트가 열린 동안 입구 광장은 헌터만 들어간다', '서쪽 게이트 입구 광장'),
+  ]);
+  for (const [n, t] of [['각성자 등록 의무', '금지·예절'], ['게이트 브레이크 규정', '금지·예절'], ['게이트 등급', '방법·기술'], ['상태창', '방법·기술'], ['보상 분배와 협회 수수료', '돈·거래'], ['정기 정산일', '시간·영업'], ['길드 가입 조건', '그 밖'], ['광장 일반인 출입 금지', '금지·예절']]) s.setTopic(w2, id2(n), t, { by: 'reader' });
+  s.linkRoom(ROOM2, w2);
+}
+
 // ------------------------------------------------------------------ routes (the server's own code, no Fastify)
 const table = [];
 const make = (prefix) => { const add = (method) => (p, fn) => table.push({ method, parts: (prefix + p).split('/'), fn }); return { get: add('GET'), post: add('POST'), patch: add('PATCH'), put: add('PUT'), delete: add('DELETE') }; };
@@ -144,7 +215,7 @@ async function call(method, url, body) {
 // ------------------------------------------------------------------ pages
 const ext = () => fs.readFileSync(path.join(REPO, 'extension/extension.js'), 'utf8');
 const head = (title) => `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>`;
-const setRoom = `<script>try{localStorage.setItem('marinara-active-chat-id','${ROOM}');localStorage.removeItem('world-archive-world')}catch{}</script>`;
+const setRoom = `<script>try{localStorage.setItem('marinara-active-chat-id',new URLSearchParams(location.search).get('room')||'${ROOM}');localStorage.removeItem('world-archive-world')}catch{}</script>`;
 // ?clicks=sel1|sel2: click those, one after another, inside any shadow root (for a screenshot of one screen)
 const clicker = `<script>(async()=>{const list=(new URLSearchParams(location.search).get('clicks')||'').split('|').filter(Boolean);const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));const find=(sel)=>{let hit=null;const walk=(root)=>{if(hit)return;try{hit=root.querySelector(sel);}catch{}if(hit)return;for(const el of root.querySelectorAll('*'))if(el.shadowRoot)walk(el.shadowRoot);};walk(document);return hit;};const byText=(t)=>{let hit=null;const walk=(root)=>{if(hit)return;for(const el of root.querySelectorAll('[data-act]'))if(!hit&&el.textContent.trim().includes(t))hit=el;for(const el of root.querySelectorAll('*'))if(el.shadowRoot)walk(el.shadowRoot);};walk(document);return hit;};await sleep(1200);for(const sel of list){if(sel.startsWith('set:')){const [,q,...v]=sel.split(':');const x=find(q);if(x){x.value=v.join(':');x.dispatchEvent(new Event('input',{bubbles:true}));}continue;}if(sel.startsWith('@')){for(let i=0;i<20&&!find(sel.slice(1));i++)await sleep(150);find(sel.slice(1))?.scrollIntoView({block:'start'});await sleep(300);continue;}const get=()=>sel.startsWith('~')?byText(sel.slice(1)):find(sel);for(let i=0;i<20&&!get();i++)await sleep(150);get()?.click();await sleep(900);}})();</script>`;
 const standalone = `${head('설정집 단독 화면')}<style>body{margin:0;min-height:100vh;background:#1d1b19}</style></head><body>${setRoom}<script>try{localStorage.setItem('world-archive-theme',new URLSearchParams(location.search).get('theme')==='dark'?'dark':'light');localStorage.setItem('world-archive-view',new URLSearchParams(location.search).get('view')==='ko'?'ko':'orig')}catch{}</script><script src="/extension.js"></script><script>setTimeout(()=>document.querySelector('#marinara-world-archive-root')?.shadowRoot?.querySelector('#launch')?.click(),300)</script>${clicker}</body></html>`;
@@ -183,7 +254,7 @@ const w=w0||img.width;const c=document.createElement('canvas');c.width=w;c.heigh
 const d=x.getImageData(0,0,w,img.height).data;const px=(i)=>d[i]+','+d[i+1]+','+d[i+2];const col=Math.floor(w*0.55);const base=px(((img.height-1)*w+col)*4);
 let y=img.height-1;for(;y>0;y--){let same=true;for(let k=Math.floor(w*0.2);k<w*0.95;k+=7){if(px((y*w+k)*4)!==base){same=false;break}}if(!same)break}
 const h=Math.min(img.height,y+40);const o=document.createElement('canvas');o.width=w;o.height=h;o.getContext('2d').drawImage(c,0,0);
-const blob=await new Promise((r)=>o.toBlob(r,'image/webp',0.9));const r=await fetch('/save-webp?name='+encodeURIComponent(name),{method:'POST',body:blob});document.title='saved '+(await r.text())+' '+w+'x'+h;})();
+const blob=await new Promise((r)=>o.toBlob(r,'image/webp',0.9));const r=await fetch('/save-webp?name='+encodeURIComponent(name)+'&dir='+encodeURIComponent(${q('dir')}),{method:'POST',body:blob});document.title='saved '+(await r.text())+' '+w+'x'+h;})();
 </script></body>`);
   }
   if (u.pathname === '/shot') return res.writeHead(200, { 'content-type': 'image/jpeg' }).end(fs.readFileSync(u.searchParams.get('f')));
@@ -192,20 +263,23 @@ const blob=await new Promise((r)=>o.toBlob(r,'image/webp',0.9));const r=await fe
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     return req.on('end', () => {
-      const out = path.join(REPO, 'docs/screenshots', name + '.webp');
+      const out = path.join(REPO, u.searchParams.get('dir') === 'notice' ? 'docs/공지' : 'docs/screenshots', name + '.webp');
       fs.mkdirSync(path.dirname(out), { recursive: true });
       fs.writeFileSync(out, Buffer.concat(chunks));
       res.writeHead(200).end(out);
     });
   }
-  if (u.pathname.startsWith('/api/chats/')) return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: ROOM, name: '[시험] 은사슴 학교' }));
+  if (u.pathname.startsWith('/api/chats/')) { const cid = decodeURIComponent(u.pathname.split('/')[3] || ROOM); return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: cid, name: cid === ROOM2 ? '[시험] 백랑 — 헌터 협회' : '[시험] 은사슴 학교' })); }
   if (u.pathname.startsWith('/api/world-archive')) {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     return req.on('end', async () => {
       let body = {};
       try { body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; } catch {}
-      const r = await call(req.method, u.pathname + u.search, body);
+      // 공지 그림: 「잡다한 설정 정리」는 모델 대신 미리 넣어 둔 후보를 보여 줌(시험대만)
+      const tidyAsk = req.method === 'POST' && /\/worlds\/[^/]+\/tidy$/.test(u.pathname);
+      const r = await call(tidyAsk ? 'GET' : req.method, u.pathname + u.search, body);
+      if (tidyAsk && r.data) r.data.calls = 0;
       // without Marinara's runtime the module has no version: say the repo's (기억 서재 looks for it)
       if (u.pathname === '/api/world-archive/status' && r.data && !r.data.version) r.data.version = require(path.join(REPO, 'package.json')).version;
       res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(r.data ?? null));
