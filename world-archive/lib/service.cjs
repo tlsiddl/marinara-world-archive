@@ -376,6 +376,8 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
       job.done++;
     }
     job.pending = settled.length - todo.at(-1).end;
+    // v0.8.1: 머리색 · 눈색 from the 외형 just read, by code (no model)
+    job.changed += s.fillLooksFromAppearance(worldId, { roomId }).length;
     job.state = 'done';
     job.stage = '';
     const secs = ((Date.now() - Date.parse(job.startedAt)) / 1000).toFixed(1);
@@ -741,9 +743,11 @@ async function routes(r) {
     const placeDiffers = s().flipsToDiffers(req.params.worldId).map((c) => c.name);
     // v0.7.8 C: 머리색 · 눈색 that are not a colour, or were cut at 60 letters
     const looksUndone = s().undoBadLooks(req.params.worldId);
+    // v0.8.1: then 머리색 · 눈색 from the 외형 by code
+    const looksFromText = s().fillLooksFromAppearance(req.params.worldId).length;
     const houseYear = s().fillHouseYear(req.params.worldId, { by: 'roster' }).length;
     const english = lang === 'en' ? s().englishValues(req.params.worldId, { by: 'recheck', pairs: sentences?.glossary || [] }).length : 0;
-    return { lang, english, nameSuggest, houseYear, housesUndone, placeDiffers, looksUndone, retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, personal, once: s().onceReady(req.params.worldId) ? s().listEntities(req.params.worldId).filter(onceOnly).length : 0, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
+    return { lang, english, nameSuggest, houseYear, housesUndone, placeDiffers, looksUndone, looksFromText, retyped: retyped.map((c) => c.name), removed: removed.map((c) => ({ name: c.name, type: c.relation.type, why: c.why })), groups: filled.created, nameCheck: toCheck.map(([e, c]) => ({ name: e.name, said: c.said })), aliasesOff: aliasesOff.map((c) => ({ name: c.name, alias: c.alias })), fields: fieldsBack.map((c) => ({ name: c.name, action: c.action, key: c.key || 'description', why: c.why })), roomsRead: sentences ? sentences.rooms : 0, seenMoved, glossed, personal, once: s().onceReady(req.params.worldId) ? s().listEntities(req.params.worldId).filter(onceOnly).length : 0, profiles: { made: fromProfiles.filter((c) => c.action === 'create').map((c) => c.name), filled: fromProfiles.filter((c) => c.action !== 'create').length } };
   }));
   r.post('/worlds/:worldId/relations', handle(async (req) => s().createRelation(req.params.worldId, body(req))));
   r.patch('/worlds/:worldId/relations/:relationId', handle(async (req) => s().updateRelation(req.params.worldId, req.params.relationId, body(req))));
