@@ -90,7 +90,9 @@ s.applyAuto(W, [
   { type: 'rule', name: 'Archive hours', description: 'The archive opens at dawn and closes when the tower bell rings nine. Candles are not allowed inside.', appliesTo: id('별시계탑') },
 ]);
 s.setTopic(W, id('Archive hours'), '시간·영업', { by: 'reader' });
-s.updateWorld(W, { revision: s.getWorld(W).revision, auto: { connectionId: 'demo' } });
+// v0.8.4: DEMO_AUTO=none (no model yet) · on (model picked, 자동 반영 on) · else model picked, 자동 반영 off
+const DEMO_AUTO = process.env.DEMO_AUTO || '';
+s.updateWorld(W, { revision: s.getWorld(W).revision, auto: DEMO_AUTO === 'none' ? { connectionId: null } : { connectionId: 'demo', enabled: DEMO_AUTO === 'on' } });
 service._test.useEngine({
   model: async (cid) => ({ id: cid }),
   // the made-up translator: each numbered line of [글] from EN_KO (Korean → English for 되돌리기), else marked
@@ -102,6 +104,8 @@ service._test.useEngine({
   },
   parseJsonObject: (t) => { try { return JSON.parse(t); } catch { return null; } },
   chatMessages: async () => ({ messages: [], cast: [] }),
+  // v0.8.4: made-up connections for the model picker (DEMO_CONNS=1 · 2 · 0 shows one · two · none)
+  listConnections: async () => [{ id: 'demo', name: '[시험] 정리용', model: 'demo-cheap' }, { id: 'demo2', name: '[시험] 답변용', model: 'demo-big' }].slice(0, Number(process.env.DEMO_CONNS ?? 2)),
 });
 s.applyTimetable(W, [
   ['월', '1교시', '별자리학', '별시계탑'], ['월', '2교시', '마법 역사', '대강의실'], ['화', '1교시', '약초학', '약초 온실', 2], ['수', '1교시', '변환술', '2층 교실', 2],

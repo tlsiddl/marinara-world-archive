@@ -1,6 +1,6 @@
 # 세계관 설정집 (Marinara World Archive)
 
-> **베타 (v0.8.3-beta)**: 매일 쓰면서 다듬는 중이에요. 쓰기 전에 마리나라 데이터를 백업해 두세요. 문제가 있으면 이슈로 알려 주세요.
+> **베타 (v0.8.4-beta)**: 매일 쓰면서 다듬는 중이에요. 쓰기 전에 마리나라 데이터를 백업해 두세요. 문제가 있으면 이슈로 알려 주세요.
 
 [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine)용 확장이에요.
 
@@ -81,9 +81,9 @@ irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/instal
 **설치 확인** — 마리나라 로그(도커는 `docker logs 컨테이너이름`)에 아래 줄들이 보이면 성공이에요. `v` 뒤는 판 번호예요.
 
 ```
-[world-archive] v0.8.3-beta applied: {{세계}} · {{세계외형}} macro
-[world-archive] v0.8.3-beta applied: API at /api/world-archive
-[world-archive] v0.8.3-beta hook registered (no Marinara files changed)
+[world-archive] v0.8.4-beta applied: {{세계}} · {{세계외형}} macro
+[world-archive] v0.8.4-beta applied: API at /api/world-archive
+[world-archive] v0.8.4-beta hook registered (no Marinara files changed)
 ```
 
 `fail closed (…): this Marinara version does not match`가 보이면 그 판의 마리나라와 맞지 않아서 그 부분만 꺼진 거예요. 마리나라는 그대로 쓰실 수 있어요.
@@ -120,9 +120,10 @@ irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/instal
 
 ## 처음 쓰는 법
 
-1. WORLD ARCHIVE를 열고 **새 세계관 만들기**를 눌러요.
+1. WORLD ARCHIVE를 열고 **새 세계관 만들기**를 눌러요. 만들기 창에서 **정리할 모델(마리나라 연결)**을 고르고 「자동 반영 켜기」를 그대로 두세요(연결이 하나뿐이면 미리 골라져 있어요).
 2. 채팅방에서 그 세계관을 연결해요.
-3. **세계관 정보**에서 자동 반영을 켜고, 읽을 때 쓸 마리나라 연결(모델)을 골라요.
+3. 만들 때 모델을 안 골랐으면 화면 맨 위에 노란 띠 「정리할 모델을 아직 안 골랐어요」가 떠요. **[고르기]**를 누르면 **세계관 정보**의 자동 반영 칸으로 가요. 이 모델은 **기억 서재가 쓰는 모델과 따로**예요. 같은 걸 골라도 돼요.
+   - 기억 서재 안 「세계관」 칸에서는 가로 캡슐 줄 맨 끝 **「세계관 정보」**에 있어요.
 4. 이미 대화가 쌓인 방이면 **「지난 대화도 읽기」**를 눌러요. 그냥 연결만 하면 그때부터 새로 오는 대화만 읽어요.
 5. 다 읽으면 한 번씩 눌러 두세요(작은 호출이에요).
    - 「장소 위치 채우기」
@@ -137,6 +138,10 @@ irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/instal
 - **없을 때:** 혼자 다 돼요. 화면은 WORLD ARCHIVE 버튼으로 열어요.
 - **있을 때:** [기억 서재](https://github.com/tlsiddl/marinara-memory-module) 안에 「세계관」 칸이 생겨서 거기서도 볼 수 있어요. 기억 서재는 겪은 일 · 감정 · 관계 변화를 맡고, 설정집은 오래가는 설정을 맡아요. 서로의 데이터를 고치지 않아요.
   - 기억 서재가 영어로 기억하는 방이면, 설정집도 그 방을 영어로 정리해요. 화면의 「보기: 한국어」로 한국어로 볼 수 있어요.
+
+## 자주 묻는 질문
+
+- **기억 서재랑 같이 쓰면 세계관 정리 모델도 기억 서재 모델과 같나요?** 아니요, 따로예요. 세계관마다 「세계관 정보」 → 「자동 반영」 칸의 「정리할 모델(마리나라 연결)」에서 골라요. 같은 모델을 골라도 돼요. 기억 서재 안 「세계관」 칸에서는 가로 캡슐 줄 맨 끝 「세계관 정보」에 있고, 아직 안 골랐으면 맨 위 노란 띠의 [고르기]로 바로 갈 수 있어요.
 
 ## 비용 (대략, 딥시크 계열 모델로 잰 값)
 

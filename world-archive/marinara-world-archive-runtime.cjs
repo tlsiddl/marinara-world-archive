@@ -11,7 +11,7 @@ const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { registerHooks } = require('node:module');
 
-const VERSION = '0.8.3-beta';
+const VERSION = '0.8.4-beta';
 const TESTED_MARINARA = ['2.5.1', '2.5.2'];
 const TAG = '[world-archive]';
 
