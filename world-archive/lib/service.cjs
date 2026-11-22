@@ -456,11 +456,26 @@ const SCENE_MESSAGES = 12;
  * step where every rule · system that wants in fits): organized in Korean 3,000 (5,000 with many settings), in English
  * 6,000 (8,000) — English says the same in about twice the letters (6,000 ≈ 1,600 tokens, Korean 3,000 ≈ 1,200).
  */
-const BUDGET_STEPS = [3000, 5000, 6000, 8000, 12000];
+const BUDGET_STEPS = [3000, 5000, 6000, 8000, 12000, 20000, 30000];
 const BUDGET_RECOMMENDED = { ko: 3000, en: 6000 };
 const SCENE_TIMEOUT_MS = 1500;
 const SCENE_ROUTES = new Set(['/api/generate', '/api/generate/dryRun', '/api/generate/retry-agents']);
 const scenes = new Map(); // roomId -> { ids: Set, at }
+
+/** v0.8.3: for the settings of the scene — the last message (index) that names them and in how many messages. */
+function sceneMentions(entities, texts, ids) {
+  const out = new Map();
+  const squashed = texts.map((t) => X.squash(t));
+  for (const e of entities) {
+    if (!ids.has(e.entityId)) continue;
+    const keys = [e.name, ...(e.aliases || [])].map((n) => X.squash(n)).filter((k) => k.length >= 2);
+    let last = -1;
+    let n = 0;
+    squashed.forEach((t, i) => { if (keys.some((k) => t.includes(k))) { last = i; n++; } });
+    out.set(e.entityId, { last, n });
+  }
+  return out;
+}
 
 function sceneIds(entities, texts) {
   const text = X.squash(texts.join('\n'));
@@ -526,6 +541,8 @@ async function updateScene(roomId, extraText = '') {
   if (extraText) texts.push(extraText);
   const entities = store().readEntities(worldId).entities;
   const ids = sceneIds(entities, texts);
+  // v0.8.3 3-1: who was named last and how often in those messages — the people of the scene go in that order
+  const mentions = sceneMentions(entities, texts, ids);
   const recent = sceneIds(entities, texts.slice(extraText ? -3 : -2));
   // v0.5.0 K: the story's today (§RP header), for 「며칠 뒤」 and the school year
   // 기억 서재가 있고 이 방에서 켜져 있으면 그 날짜(사람이 바로잡은 것 포함)를 먼저, 없을 때만 직접 읽음
@@ -535,7 +552,7 @@ async function updateScene(roomId, extraText = '') {
   const letters = texts.join(' ').replace(/[^\p{L}]/gu, '');
   const latin = letters.length >= 40 ? (letters.match(/[A-Za-z]/g) || []).length / letters.length > 0.6 : null;
   if (latin !== null) store().setRoomLatin(roomId, latin);
-  scenes.set(roomId, { ids, recent, worldId, at: Date.now(), today, latin });
+  scenes.set(roomId, { ids, recent, mentions, worldId, at: Date.now(), today, latin });
   return ids;
 }
 
@@ -568,7 +585,8 @@ function preview(roomId) {
   // 이름 표기: the world's choice; 「자동」 — the original name first in a room in English
   const latin = known?.latin ?? s.getRoom(roomId).latin ?? false;
   const names = world.nameStyle === 'original' ? 'original' : world.nameStyle === 'ko' ? 'ko' : latin ? 'original' : 'ko';
-  const opts = { scene, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names, onceOn: s.onceReady(worldId) };
+  const mentions = known?.worldId === worldId ? known.mentions || null : null;
+  const opts = { scene, mentions, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names, onceOn: s.onceReady(worldId) };
   const out = assembleWorld(world, doc.entities, world.injectChars, opts);
   // v0.8.2 추천 글자 수: rules · systems that wanted in but did not fit, and the smallest step they all fit in
   // ('pin' — not even 12,000: pin the ones that matter). lang — what the world is organized in, for the 「추천」 step.

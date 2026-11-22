@@ -152,15 +152,16 @@ test('updateScene: names from the last 12 messages (and the message being sent) 
   let p = service.preview('room');
   assert.equal(p.sceneKnown, true);
   assert.equal(p.mode, 'scene');
-  assert.deepEqual(p.included.slice().sort(), [ids.rule, ids.pin, ids.summer].sort());
-  assert.equal(p.skipped, 1);
-  assert.doesNotMatch(service.render({ chatId: 'room' }), /옥상/);
+  assert.deepEqual(p.included.slice(0, 3).sort(), [ids.rule, ids.pin, ids.summer].sort());
+  // v0.8.3 (3-2 ④): a place out of the scene comes only with room to spare, after everything the scene wants
+  assert.deepEqual([p.included[3], p.skipped], [ids.roof, 0]);
+  const text = service.render({ chatId: 'room' });
+  assert.ok(text.indexOf('옥상') > text.indexOf('한여름'));
 
   await service._test.updateScene('room', '옥상으로 가자');
-  assert.equal(service.preview('room').skipped, 1, 'a part of a name is not a match');
+  assert.equal(service._test.scenes.get('room').ids.has(ids.roof), false, 'a part of a name is not a match');
   await service._test.updateScene('room', '「옥상정원」으로 가자');
-  p = service.preview('room');
-  assert.equal(p.skipped, 0, 'the pending message counts, matched without spaces or quotes');
+  assert.equal(service._test.scenes.get('room').ids.has(ids.roof), true, 'the pending message counts, matched without spaces or quotes');
 
   assert.equal(await service._test.updateScene('nowhere'), null, 'unlinked room: nothing');
   s.updateWorld(w.worldId, { injectMode: 'all', revision: 1 });
@@ -171,7 +172,8 @@ test('a scene worked out for another world is ignored after relinking', async (t
   const { s, ids, chat } = sceneSetup(t);
   chat.messages = [say(0, '한여름')];
   await service._test.updateScene('room');
-  assert.equal(service.preview('room').skipped, 1);
+  assert.deepEqual([...service._test.scenes.get('room').ids], [ids.summer]);
+  assert.equal(service.preview('room').sceneKnown, true);
   const other = s.createWorld({ name: '다른 세계', injectMode: 'scene' });
   s.createEntity(other.worldId, { type: 'place', name: '항구' });
   s.linkRoom('room', other.worldId);
@@ -214,10 +216,11 @@ test('sceneBeforeReply: only for the two generate URLs of linked rooms, never th
 });
 
 test('GET preview refreshes the scene and reports what was left out for it', async (t) => {
-  const { call, chat } = sceneSetup(t);
+  const { call, chat, ids } = sceneSetup(t);
   chat.messages = [say(0, '반장')];
   const p = (await call('GET', `${A}/rooms/room/preview`)).data;
-  assert.deepEqual([p.sceneKnown, p.included.length, p.skipped], [true, 3, 1]);
+  // v0.8.3 (3-2 ④): the place out of the scene comes last, with room to spare
+  assert.deepEqual([p.sceneKnown, p.included.length, p.included[3], p.skipped], [true, 4, ids.roof, 0]);
   const none = (await call('GET', `${A}/rooms/empty_room/preview`)).data;
   assert.deepEqual([none.worldId, none.skipped], [null, 0]);
 });

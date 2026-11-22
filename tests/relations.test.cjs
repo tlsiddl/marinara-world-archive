@@ -168,7 +168,8 @@ test('scene mode puts one line per relation whose both ends are in the scene, wi
   const world = { name: '호그와트', description: '', injectMode: 'scene', tail: { cast: false, balance: false } };
   const out = assembleWorld(world, ents, 3000, { scene: new Set(['a', 'b']), relations });
   assert.match(out.text, /\[관계\]\n- 해나 — 어니: 남매$/);
-  assert.doesNotMatch(out.text, /세드릭/);
+  // v0.8.3 (3-2 ④): 세드릭 (out of the scene) may come last with room to spare — but no relation line for him
+  assert.doesNotMatch(out.text.split('[관계]')[1] || '', /세드릭/);
   assert.doesNotMatch(assembleWorld({ ...world, injectMode: 'all' }, ents, 3000, { scene: new Set(['a', 'b']), relations }).text, /\[관계\]/, 'only in scene mode');
 });
 

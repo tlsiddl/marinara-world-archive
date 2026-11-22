@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.8.2-beta';
+  const VERSION = '0.8.3-beta';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -1157,10 +1157,10 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 
   /** v0.7.0 2: {{세계}} 글자 수 — the person picks; what goes in now and what did not fit, from this room's preview. */
   // v0.8.2: 6,000 added; one step marked 「추천」 for the language the world is organized in (measured on six test worlds)
-  const BUDGETS = [3000, 5000, 6000, 8000, 12000];
+  const BUDGETS = [3000, 5000, 6000, 8000, 12000, 20000, 30000];
   const BUDGET_REC = { ko: 3000, en: 6000 };
   /** v0.8.2: 「규칙 · 시스템 N개가 글자 수 때문에 빠졌어요 — 추천 ○○자」 (the server works out the smallest step). */
-  const lawOutHtml = (p) => (p?.lawOmitted ? `<p class="sub law-out"><b>규칙 · 시스템 ${p.lawOmitted}개가 글자 수 때문에 빠졌어요</b> — ${p.suggest === 'pin' ? '12,000자로도 다 안 들어가요. 꼭 필요한 규칙은 카드에서 「늘 먼저 넣기」를 켜 주세요' : `추천 ${Number(p.suggest).toLocaleString()}자`}</p>` : '');
+  const lawOutHtml = (p) => (p?.lawOmitted ? `<p class="sub law-out"><b>규칙 · 시스템 ${p.lawOmitted}개가 글자 수 때문에 빠졌어요</b> — ${p.suggest === 'pin' ? '30,000자로도 다 안 들어가요. 꼭 필요한 규칙은 카드에서 「늘 먼저 넣기」를 켜 주세요' : `추천 ${Number(p.suggest).toLocaleString()}자`}</p>` : '');
   function budgetHtml(w) {
     const cur = w.injectChars;
     const custom = st.budgetCustom || !BUDGETS.includes(cur);
@@ -1171,7 +1171,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     return `<label class="f" for="w-budget">{{세계}}에 넣을 글자 수<em>넘치면 고정하지 않은 설정부터 빠집니다. 늘리면 모델에 보내는 글도 그만큼 길어져요</em></label>
         <div class="caps" role="radiogroup" aria-label="{{세계}}에 넣을 글자 수">${BUDGETS.map((n) => `<button type="button" role="radio" aria-checked="${!custom && cur === n}" class="${!custom && cur === n ? 'on' : ''}" data-act="budget" data-n="${n}">${n.toLocaleString()}자${n === rec ? '<small class="rec">추천</small>' : ''}</button>`).join('')}<button type="button" role="radio" aria-checked="${custom}" class="${custom ? 'on' : ''}" data-act="budget" data-n="custom">직접 입력</button></div>
         <p class="sub budget-rec">추천: ${lang === 'en' ? '영어로 정리하는 세계관은 6,000자(설정이 많으면 8,000자)' : '한국어로 정리하는 세계관은 3,000자(설정이 많으면 5,000자)'}. 영어는 같은 내용이 글자로 약 2배 길어요 — 영어 6,000자 ≈ 1,600토큰, 한국어 3,000자 ≈ 1,200토큰.</p>
-        <input id="w-budget" type="number" min="300" max="20000" step="100" value="${cur}" style="max-width:200px" ${custom ? '' : 'hidden'} aria-label="직접 입력(300~20000자)">${now}`;
+        <input id="w-budget" type="number" min="300" max="40000" step="100" value="${cur}" style="max-width:200px" ${custom ? '' : 'hidden'} aria-label="직접 입력(300~40000자)">${now}`;
   }
 
   function worldHtml() {
@@ -1183,7 +1183,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
         <label class="f" for="w-name">이름</label><input id="w-name" maxlength="120" value="${esc(w.name)}">
         <label class="f" for="w-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="w-desc" maxlength="4000" style="min-height:120px">${esc(w.description)}</textarea>
         ${budgetHtml(w)}
-        <label class="f" for="w-mode">넣는 방식<em>장면 방식은 최근 메시지 12개에 이름이 나온 설정만 넣습니다</em></label><select id="w-mode" style="max-width:360px"><option value="all" ${w.injectMode === 'scene' ? '' : 'selected'}>전부 넣기</option><option value="scene" ${w.injectMode === 'scene' ? 'selected' : ''}>장면에 나온 것만(고정·규칙·시스템은 늘)</option></select>
+        <label class="f" for="w-mode">넣는 방식<em>어느 쪽이든 고정 → 장면 인물(짧게라도) → 규칙 · 시스템(짧게라도) → 자세히 → 남는 자리에 나머지 순서예요. 장면 방식은 최근 메시지 12개에 이름이 나온 것과 그곳의 규칙을 먼저 넣고, 다른 곳의 규칙은 넣지 않아요</em></label><select id="w-mode" style="max-width:360px"><option value="all" ${w.injectMode === 'scene' ? '' : 'selected'}>전부 넣기</option><option value="scene" ${w.injectMode === 'scene' ? 'selected' : ''}>장면에 나온 것 먼저(남는 자리에 나머지)</option></select>
         <label class="f" for="w-year">학년도 시작 달<em>시간표와 학사일정을 학년도로 나눕니다(이야기 속 날짜를 알 때)</em></label><select id="w-year" style="max-width:200px">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${(w.yearStart || 9) === i + 1 ? 'selected' : ''}>${i + 1}월</option>`).join('')}</select>
         <label class="f">{{세계}} 맨 끝 두 줄<em>글자 수 안에서 고정 설정 다음으로 먼저 자리를 잡습니다</em></label>
         <label class="check"><input type="checkbox" id="w-tail-cast" ${w.tail?.cast !== false ? 'checked' : ''}> [이미 있는 인물] — 이름 목록(600자까지, 최근 순 · 넘으면 「외 N명」)</label>

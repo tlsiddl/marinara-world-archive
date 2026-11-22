@@ -126,7 +126,8 @@ test('scene mode: rules and systems always go in; history is like the rest', () 
   assert.equal(out.skipped, 1);
   assert.doesNotMatch(out.text, /북부 전쟁/);
   const named = assembleWorld(w, [rule, sys, past, here], 3000, { scene: new Set([past.entityId]) });
-  assert.deepEqual(named.included, [past.entityId, rule.entityId, sys.entityId], 'history named in the scene goes in');
+  assert.deepEqual(named.included.slice(0, 3), [past.entityId, rule.entityId, sys.entityId], 'history named in the scene goes in');
+  assert.deepEqual(named.included.slice(3), [here.entityId], 'v0.8.3 (3-2 ④): a person out of the scene only with room to spare, last');
   assert.deepEqual([...ALWAYS].sort(), ['rule', 'system']);
 });
 
@@ -139,11 +140,15 @@ test('scene mode: pinned and rules always, the rest only when named in the scene
   const draft = ent('person', '후보', '', { status: 'pending' });
   const all = [rule, pin, here, away, draft];
   const out = assembleWorld(w, all, 3000, { scene: new Set([here.entityId]) });
-  assert.deepEqual(out.included.slice().sort(), [rule.entityId, pin.entityId, here.entityId].sort());
-  assert.equal(out.skipped, 1, 'only confirmed settings are counted');
-  assert.doesNotMatch(out.text, /도서관/);
+  assert.deepEqual(out.included.slice(0, 3).sort(), [rule.entityId, pin.entityId, here.entityId].sort());
+  // v0.8.3 (3-2 ④): a place out of the scene comes last, with room to spare; never one that is not confirmed
+  assert.deepEqual([out.included[3], out.skipped], [away.entityId, 0]);
+  assert.doesNotMatch(out.text, /후보/);
+  const tight = assembleWorld(w, all, out.chars - 5, { scene: new Set([here.entityId]) });
+  assert.deepEqual([tight.included.includes(away.entityId), tight.skipped, tight.omitted.length], [false, 1, 0], 'no room: out of the scene, not 「left out for the budget」');
   const fresh = assembleWorld(w, all, 3000);
   assert.equal(fresh.included.length, 4, 'no scene information yet: everything is a candidate');
   assert.equal(fresh.skipped, 0);
-  assert.equal(assembleWorld(w, all, 3000, { scene: new Set() }).skipped, 2, 'an empty scene keeps only pinned and rules');
+  const empty = assembleWorld(w, all, 3000, { scene: new Set() });
+  assert.deepEqual(empty.included.slice(0, 2).sort(), [pin.entityId, rule.entityId].sort(), 'an empty scene: pinned and rules first');
 });

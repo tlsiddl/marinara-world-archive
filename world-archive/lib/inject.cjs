@@ -83,6 +83,32 @@ function entityLine(e, nameOf = () => '', today = null, names = 'ko', knownOf = 
 }
 
 /**
+ * v0.8.3: the short form of a person or a rule · system, for when the whole one does not fit —
+ *   - 이름 (성별 · 나이 · 머리색 · 눈색 · 소속) — 지금 상태 첫 마디
+ *   - 이름 [곳에서]: 요지 첫 마디
+ * Fields still 「아직 드러나지 않음」 are left out of the short form. Others have no short form ('' → the whole one).
+ */
+const firstClause = (t, max = 90) => { const x = oneLine(t || ''); if (!x) return ''; const cut = x.search(/[.!?。]\s|\s\/\s|;\s/); const y = cut > 0 ? x.slice(0, cut + 1) : x; return y.length > max ? y.slice(0, max).replace(/\s+\S*$/, '') + '…' : y; };
+function shortLine(e, nameOf = () => '', names = 'ko') {
+  const f = e.fields || {};
+  const open = (k) => (e.hidden?.[k] ? '' : String(f[k] || '').trim());
+  if (e.type === 'person') {
+    const bits = ['gender', 'age', 'hair', 'eyes', 'affiliation'].map((k) => (k === 'hair' || k === 'eyes') && open(k) ? `${k === 'hair' ? '머리' : '눈'} ${open(k)}` : open(k)).filter(Boolean).map((x) => oneLine(x).slice(0, 40));
+    const now = firstClause(open('state'), 60);
+    return sanitize(`- ${shownName(e, names)}${bits.length ? ` (${bits.join(' · ')})` : ''}${now ? ` — ${now}` : ''}`);
+  }
+  // a place or group of the scene, short: where it is / what kind, how many
+  if (e.type === 'place') { const at = firstClause(open('location'), 60); return sanitize(`- ${shownName(e, names)}${at ? ` (${at})` : ''}`); }
+  if (e.type === 'group') { const bits = [open('kind'), open('size')].filter(Boolean).map((x) => oneLine(x).slice(0, 30)); return sanitize(`- ${shownName(e, names)}${bits.length ? ` (${bits.join(' · ')})` : ''}`); }
+  if (e.type === 'rule' || e.type === 'system') {
+    const where = e.appliesTo && e.appliesTo !== WORLD && nameOf(e.appliesTo) ? ` [${nameOf(e.appliesTo)}에서]` : '';
+    const gist = firstClause(e.description || f.how || f.limits || '');
+    return sanitize(`- ${shownName(e, names)}${where}${gist ? `: ${gist}` : ''}`);
+  }
+  return '';
+}
+
+/**
  * v0.5.1 T: the two last lines of {{세계}} — no new macro. 「[이미 있는 인물] 이름, 이름, … 외 N명」 (the people there are,
  * the latest first, up to CAST_CHARS, so a reply does not make them again) and 「[균형] 반복 등장 인물 N명: 여 a · 남 b /
  * 혈통 편견: … 」 (the people who come back — pinned, or spoken of in two batches or more — counted by code; what is not
@@ -178,7 +204,7 @@ const ONCE_TYPES = new Set(['rule', 'system', 'custom', 'history']);
 const onceOnly = (e) => ONCE_TYPES.has(e?.type) && !(e.appliesTo && e.appliesTo !== WORLD) && !e.pinned && e.provenance?.source !== 'manual' && !Object.values(e.sources || {}).includes('manual') && !LAW_NAME.test(String(e.name || '')) && Number.isFinite(e.seen?.n) && e.seen.n < 2;
 
 // onceOn (v0.8.0): false while the world has not been read long enough for 「한 번 나옴」 (the store's onceReady)
-function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null, onceOn = true } = {}) {
+function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { scene = null, relations = [], scores = null, today = null, names = 'ko', recurring = null, onceOn = true, mentions = null } = {}) {
   const empty = { text: '', chars: 0, budget, included: [], omitted: [], skipped: 0 };
   if (!world) return empty;
   const head = sanitize(`[세계관] ${world.name}`);
@@ -207,7 +233,7 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   const nameOf = (id) => byIdAll.get(id)?.name || '';
   const knownOf = (id) => R.rosterOf(entities, relations, id)?.counts.known ?? null;
   let ordered;
-  let part = null; // scene mode: which part of the budget a setting fills from (see below)
+  let S = null; // scene mode: what 「here」 is (see below)
   if (world.injectMode === 'scene' && scene) {
     const rel = Array.isArray(relations) ? relations : [];
     // here: id → how far from the scene (0 the scene's own places and groups; +1 for each place it is in or bigger group)
@@ -243,71 +269,100 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
     const everywhereOk = (e) => e.type !== 'system' || e.appliesTo !== WORLD || e.pinned || scene.has(e.entityId) || WORLD_SYSTEM.test(String(e.name || ''));
     const keep = pool.filter((e) => e.pinned || scene.has(e.entityId) || sheetHere(e) || worldCalendar(e) || (ruleLike(e) && (!whereKnown(e) || here.has(e.appliesTo)) && everywhereOk(e)));
     skipped = pool.filter((e) => e.status === 'confirmed').length - keep.filter((e) => e.status === 'confirmed').length;
-    const rank = (e) => (e.pinned ? 0
-      : scene.has(e.entityId) && !ruleLike(e) ? 1
-      : (ruleLike(e) && e.appliesTo === WORLD) || worldCalendar(e) ? 2
-      : sheetHere(e) || whereKnown(e) ? 3
-      : ruleLike(e) ? 4 : 5);
-    // the nearest place or group first (the scene's own, then the place it is in, the bigger group …)
     const sheetOwner = (e) => e.timetable?.ownerId || e.calendar?.ownerId;
     const near = (e) => (sheetOwner(e) ? (scene.has(sheetOwner(e)) ? 0 : here.get(sheetOwner(e)) ?? 99) : whereKnown(e) ? here.get(e.appliesTo) ?? 99 : 0);
-    // in each part, a rule named in the latest messages (it is in the scene) comes first
-    const named = (e) => Number(!scene.has(e.entityId));
-    // v0.7.2 A: within a part — named in the latest messages, the nearer place, spoken of more often, the latest
-    // evidence; the name only breaks a tie (it used to decide what the budget cut)
-    ordered = keep.filter((e) => e.status === 'confirmed').map((e) => [rank(e), e]).sort(([ra, a], [rb, b]) => ra - rb
-      // v0.7.5: here, the rules of the scene's own place first (Great Hall), then the place it is in (Hogwarts) …
-      || (ra === 3 ? near(a) - near(b) : 0)
-      || (ra >= 2 ? named(a) - named(b) : 0)
-      || often(a, b)
-      || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
-      || a.name.localeCompare(b.name, 'ko')).map(([, e]) => e);
-    part = (e) => Math.min(rank(e), 5);
-  } else ordered = orderEntities(pool, scene);
-  const byType = new Map();
-  const included = [];
-  const omitted = [];
-  const tried = new Set();
-  const fill = (list, limit) => {
-    for (const e of list) {
-      if (tried.has(e.entityId) && included.includes(e.entityId)) continue;
-      const line = entityLine(e, nameOf, today, names, knownOf);
-      if (!line) continue;
-      const header = byType.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length;
-      const cost = header + 1 + line.length;
-      tried.add(e.entityId);
-      if (used + cost > limit) continue;
-      used += cost;
-      if (!byType.has(e.type)) byType.set(e.type, []);
-      byType.get(e.type).push(line);
-      included.push(e.entityId);
-    }
+    S = { here, whereKnown, sheetHere, worldCalendar, near, keep: new Set(keep.map((e) => e.entityId)) };
+  }
+  // v0.8.3 (사령탑 「규칙 몫 먼저」 + 덧붙임 3-1 · 3-2): filled in tiers, people and rules with a short form first, so a
+  // big world keeps its rules and the people of the scene keep at least their short profile —
+  //   0 pinned (whole) → 1 the people of the scene, short (the latest and most named first; at most 4/5 of what is left,
+  //   so the rules keep 1/5 or more) → 2 rules · systems, short (scene: here → named lately → the whole world (often) →
+  //   the rest; all: the whole world → named lately → often) → 3 the people of the scene, whole → 4 the places · groups ·
+  //   sheets of the scene, whole → 5 the rules here and named lately, whole → 6 the rest whole: other people · places ·
+  //   groups (named lately → often), then the whole world's rules, then everything left.
+  // In scene mode a rule of a place or group not here stays out; people and places out of the scene come only in tier 6.
+  const conf = pool.filter((e) => e.status === 'confirmed');
+  const lawLike = (e) => ALWAYS.has(e.type);
+  const inScene = (e) => !!scene?.has(e.entityId);
+  const m = (e) => (mentions && mentions.get(e.entityId)) || null;
+  // named lately: the latest message that names it, then how often the latest messages name it, then spoken of more often
+  const byRecent = (a, b) => ((m(b)?.last ?? -1) - (m(a)?.last ?? -1)) || ((m(b)?.n ?? 0) - (m(a)?.n ?? 0)) || often(a, b) || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || a.name.localeCompare(b.name, 'ko');
+  const byOften = (a, b) => often(a, b) || TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || a.name.localeCompare(b.name, 'ko');
+  const candidates = S ? conf.filter((e) => S.keep.has(e.entityId) || ['person', 'place', 'group'].includes(e.type)) : conf;
+  // what 「left out for the budget」 counts: in scene mode only what the scene wants (people · places out of it come
+  // only with room to spare, and are 「장면 밖」 when they do not)
+  ordered = S ? conf.filter((e) => S.keep.has(e.entityId)) : conf;
+  const forms = new Map(); // id → 'short' | 'full'
+  const order = [];
+  const linesOf = new Map();
+  const lineFor = (e, form) => {
+    if (!linesOf.has(e.entityId)) linesOf.set(e.entityId, { full: entityLine(e, nameOf, today, names, knownOf), short: shortLine(e, nameOf, names) });
+    const l = linesOf.get(e.entityId);
+    return form === 'short' ? l.short || l.full : l.full;
   };
+  const typesIn = new Set();
+  const put = (e, form, limit) => {
+    const prev = forms.get(e.entityId);
+    if (prev === 'full' || prev === form) return true;
+    const text = lineFor(e, form);
+    if (!text) return false;
+    const cost = prev ? text.length - lineFor(e, prev).length : (typesIn.has(e.type) ? 0 : `\n\n[${TYPE_LABEL[e.type]}]`.length) + 1 + text.length;
+    if (used + cost > limit) return false;
+    used += cost;
+    if (!prev) { typesIn.add(e.type); order.push(e); }
+    forms.set(e.entityId, form);
+    return true;
+  };
+  const fillAll = (list, form, limit = budget) => { for (const e of list) put(e, form, limit); };
   // v0.5.1 T: the two last lines take their room first, right after the pinned ones (each that fits)
   const tail = tailLines(world, entities || [], { recurring, names });
   const reserve = () => { for (const l of tail.lines) if (used + 2 + l.length <= budget) { used += 2 + l.length; tail.kept.push(l); } };
-  if (part) {
-    // v0.5.0 D: pinned and the scene first; what is left goes at most a third to the rules of the whole world, the
-    // rest to the rules · 시간표 here — a part that does not use its share leaves it to the other — then the unknown.
-    const of = (k) => ordered.filter((e) => part(e) === k);
-    fill(of(0), budget);
-    reserve();
-    fill(of(1), budget);
-    // v0.7.4 4: the whole world's laws · money are not always first — those named in the latest messages right after
-    // the scene, the rest only after the rules of this place, and all of them within a third
-    const worldCap = used + Math.floor((budget - used) / 3);
-    const worldNamed = of(2).filter((e) => scene.has(e.entityId));
-    const worldRest = of(2).filter((e) => !scene.has(e.entityId));
-    fill(worldNamed, worldCap);
-    fill(of(3), budget);
-    fill(worldRest, Math.max(worldCap, used));
-    fill([...of(4), ...of(5)], budget);
-  } else {
-    fill(ordered.filter((e) => e.pinned), budget);
-    reserve();
-    fill(ordered, budget);
-  }
+  const pinned = candidates.filter((e) => e.pinned).sort(byRecent);
+  const scenePeople = candidates.filter((e) => e.type === 'person' && inScene(e) && !e.pinned).sort(byRecent);
+  const laws = candidates.filter((e) => lawLike(e) && !e.pinned);
+  // 「here」: the rules of the scene's places · groups and the ones they are in, with their 시간표 · 학사일정 (nearest first)
+  const sheetsHere = S ? candidates.filter((e) => !e.pinned && !lawLike(e) && !inScene(e) && S.sheetHere(e)) : [];
+  const hereLaw = S ? [...laws.filter((e) => S.whereKnown(e) && S.here.has(e.appliesTo)), ...sheetsHere].sort((a, b) => S.near(a) - S.near(b) || byRecent(a, b)) : [];
+  const namedLaw = laws.filter((e) => inScene(e) && !hereLaw.includes(e)).sort(byRecent);
+  const worldLaw = laws.filter((e) => e.appliesTo === WORLD && !hereLaw.includes(e) && !namedLaw.includes(e)).sort(byOften);
+  const otherLaw = laws.filter((e) => !hereLaw.includes(e) && !namedLaw.includes(e) && !worldLaw.includes(e)).sort(byOften);
+  const lawOrder = S ? [...hereLaw, ...namedLaw, ...worldLaw, ...otherLaw] : [...worldLaw, ...namedLaw, ...otherLaw];
+  const sceneRest = candidates.filter((e) => !e.pinned && !lawLike(e) && e.type !== 'person' && !sheetsHere.includes(e) && (inScene(e) || (S && S.worldCalendar(e)))).sort((a, b) => (S ? S.near(a) - S.near(b) : 0) || byRecent(a, b));
+  const others = candidates.filter((e) => !e.pinned && !lawLike(e) && !scenePeople.includes(e) && !sceneRest.includes(e) && !sheetsHere.includes(e));
+  const otherPPG = others.filter((e) => ['person', 'place', 'group'].includes(e.type)).sort(byRecent);
+  const otherRest = others.filter((e) => !otherPPG.includes(e)).sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || byOften(a, b));
+  fillAll(pinned, 'full');
+  reserve();
+  // the scene (people, then its places · groups) short, at most 4/5 of what is left — the rules keep 1/5 or more
+  const room0 = budget - used;
+  const cap = used + Math.floor((room0 * 4) / 5);
+  fillAll(scenePeople, 'short', cap);
+  fillAll(sceneRest, 'short', cap);
+  // the rules here and named lately short (up to half of what is left, never under a fifth of the start), then the
+  // other rules short only until the rules hold a fifth of the start (3-1: the rules never drop under 1/5) …
+  const hereNamed = S ? [...hereLaw, ...namedLaw] : namedLaw;
+  const lawStart = used;
+  fillAll(hereNamed, 'short', used + Math.max(Math.floor(room0 / 5), Math.floor((budget - used) / 2)));
+  fillAll(lawOrder, 'short', Math.max(used, lawStart + Math.floor(room0 / 5)));
+  // … then (3-2 ① ②) the people of the scene whole and the rules here · named lately whole, then (③) the rest of the
+  // rules at least short
+  fillAll(scenePeople, 'full');
+  fillAll(hereNamed, 'full');
+  fillAll(lawOrder, 'short');
+  fillAll(sceneRest, 'full');
+  fillAll(otherPPG, 'full');
+  fillAll(lawOrder, 'full');
+  fillAll(otherRest, 'full');
+  const byType = new Map();
+  for (const e of order) { if (!byType.has(e.type)) byType.set(e.type, []); byType.get(e.type).push(lineFor(e, forms.get(e.entityId))); }
+  const included = order.map((e) => e.entityId);
+  const omitted = [];
+  const shortened = order.filter((e) => forms.get(e.entityId) === 'short').map((e) => e.entityId);
+  // v0.8.3 3-1: how the people of the scene went in (whole / short / not at all)
+  const sceneAll = candidates.filter((e) => e.type === 'person' && inScene(e));
+  const scenePeopleIn = { full: sceneAll.filter((e) => forms.get(e.entityId) === 'full').length, short: sceneAll.filter((e) => forms.get(e.entityId) === 'short').length, out: sceneAll.filter((e) => !forms.has(e.entityId)).length };
   for (const e of ordered) if (!included.includes(e.entityId)) omitted.push(e.entityId);
+  if (S) skipped = conf.filter((e) => !S.keep.has(e.entityId) && !forms.has(e.entityId)).length;
 
   // Scene mode: relations of people in the scene whose other end is in the scene too, one line each, if they fit.
   const relLines = [];
@@ -342,7 +397,9 @@ function assembleWorld(world, entities, budget = world?.injectChars ?? 3000, { s
   if (relLines.length) parts.push(`[관계]\n${relLines.join('\n')}`);
   if (tail.kept.length) parts.push(tail.kept.join('\n'));
   const text = parts.join('\n\n');
-  return { text, chars: text.length, budget, included, omitted, skipped, once };
+  // v0.8.3: what went in how (for the screen and the measuring) — the rules here · named lately · of the whole world
+  const groups = { here: hereLaw.filter(lawLike).map((e) => e.entityId), named: namedLaw.map((e) => e.entityId), world: worldLaw.map((e) => e.entityId), scenePeople: sceneAll.map((e) => e.entityId) };
+  return { text, chars: text.length, budget, included, omitted, skipped, once, shortened, scenePeople: scenePeopleIn, forms: Object.fromEntries(forms), groups };
 }
 
 /** 할 일 12: what {{세계외형}} may hold at most (whole lines only). */
@@ -384,4 +441,4 @@ function assembleLooks(entities, scene, { recent = null, budget = LOOKS_CHARS } 
   return { text: lines.length ? `${head}\n${lines.join('\n')}` : '', included, omitted };
 }
 
-module.exports = { onceOnly, ONCE_TYPES, WORLD_SYSTEM, LAW_NAME, WORLD, shownName, tailLines, CAST_CHARS, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
+module.exports = { shortLine, onceOnly, ONCE_TYPES, WORLD_SYSTEM, LAW_NAME, WORLD, shownName, tailLines, CAST_CHARS, assembleWorld, assembleLooks, orderEntities, sanitize, TYPE_LABEL, TYPE_ORDER, ALWAYS, LOOKS_CHARS };
