@@ -37,6 +37,36 @@ function looksColour(v) {
   if (!t || t.length > LOOK_MAX) return false;
   return /[가-힣]/.test(t) ? COLOUR_KO.test(t) : COLOUR_EN.test(t);
 }
+/**
+ * v0.8.1: 머리색 · 눈색 read by code from the 외형 text — the colour words right before 「hair · fur · feathers ·
+ * plumage」 / 「eyes」 (「short silver-blond hair」 → silver-blond, 「pale, watery eyes」 → pale), or the word before
+ * 「머리 · 머리카락 · 털 · 깃털」 / 「눈」 in Korean. Only colour words (looksColour); nothing when the text says none.
+ */
+const LOOK_NOUN = { hair: { en: '(?:hair|fur|feathers|plumage|mane)', ko: '(?:머리카락|머리칼|머리|털|깃털)' }, eyes: { en: '(?:eyes|eye)', ko: '(?:눈동자|눈)' } };
+function looksFrom(text, key) {
+  const t = String(text || '');
+  const noun = LOOK_NOUN[key];
+  if (!noun || !t) return null;
+  if (/[가-힣]/.test(t)) {
+    const m = t.match(new RegExp('([가-힣]+(?:\\s+[가-힣]+)?)\\s*' + noun.ko + '(?![가-힣])'));
+    if (!m) return null;
+    const words = m[1].trim().split(/\s+/).filter((w) => COLOUR_KO.test(w));
+    return words.length ? words.join(' ') : null;
+  }
+  for (const m of t.matchAll(new RegExp('((?:[A-Za-z]+(?:-[A-Za-z]+)*[,\\s]+){1,4})' + noun.en + '\\b', 'gi'))) {
+    // only this clause: after the last other body word or joiner (「silver-blond hair, pale, watery eyes」 → pale, watery)
+    let words = m[1].split(/[,\s]+/).filter(Boolean);
+    const stop = words.map((w) => /^(?:hair|fur|feathers|plumage|mane|eyes?|and|with|of|in|her|his|their|its|a|an|the)$/i.test(w)).lastIndexOf(true);
+    words = words.slice(stop + 1).slice(-4);
+    const at = words.map((w) => looksColour(w));
+    const first = at.indexOf(true);
+    if (first < 0) continue;
+    const last = at.lastIndexOf(true);
+    const v = words.slice(first, last + 1).join(' ').toLowerCase();
+    if (looksColour(v)) return v;
+  }
+  return null;
+}
 /** v0.7.6: person fields a world turns on. */
 const PERSON_OPTIONAL = ['house', 'year'];
 /** v0.7.6: a year said in a name (「Slytherin first-years」 · 「1학년」 · 「Year 2」 · 「3rd-year」) → its number. */
@@ -2094,6 +2124,36 @@ class Archive {
   }
 
   /**
+   * v0.8.1: empty 머리색 · 눈색 filled by code from the person's 외형 (looksFrom) — never over the person's, hidden when
+   * the 외형 is (a profile block's), recorded ('field', by 'looks', undoable). Returns the changes.
+   */
+  fillLooksFromAppearance(worldId, meta = {}) {
+    const doc = this.readEntities(worldId);
+    const t = now();
+    const changes = [];
+    // one the person undid stays undone (this runs after every reading)
+    const undone = new Set(this.readHistory(worldId).changes.filter((c) => c.by === 'looks' && c.undoneAt).map((c) => c.entityId + '|' + c.key));
+    for (const p of doc.entities.filter((e) => e.type === 'person' && String(e.fields?.appearance || '').trim())) {
+      for (const key of ['hair', 'eyes']) {
+        if (String(p.fields?.[key] || '').trim() || p.sources?.[key] === 'manual' || undone.has(p.entityId + '|' + key)) continue;
+        const v = looksFrom(p.fields.appearance, key);
+        if (!v) continue;
+        p.fields = { ...p.fields, [key]: v };
+        p.sources = { ...(p.sources || {}), [key]: 'auto' };
+        if (p.hidden?.appearance) p.hidden = { ...p.hidden, [key]: true };
+        p.revision++;
+        p.updatedAt = t;
+        changes.push({ id: randomUUID(), at: t, by: 'looks', roomId: meta.roomId ?? null, messageIds: [], entityId: p.entityId, name: p.name, type: 'person', action: 'field', key, before: '', after: v, evidence: String(p.fields.appearance).slice(0, 300), why: '외형에서' });
+      }
+    }
+    if (changes.length) {
+      this.writeJson(this.entityFile(worldId), doc);
+      this.pushHistory(worldId, changes);
+    }
+    return changes;
+  }
+
+  /**
    * v0.7.8 C: 머리색 · 눈색 code wrote that are not a colour (「hair that needs cutting」) or were cut at 60 letters by
    * v0.7.6 · v0.7.7 go back through the history, one undo each. Only code's, only while the value is still that one.
    */
@@ -3844,6 +3904,7 @@ module.exports = {
   TOPICS,
   PERSON_OPTIONAL,
   looksColour,
+  looksFrom,
   LOOK_MAX,
   SUMMARY_LANGS,
   STATUS_OFF,
