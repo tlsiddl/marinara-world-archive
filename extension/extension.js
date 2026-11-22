@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.8.1-beta';
+  const VERSION = '0.8.2-beta';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -299,6 +299,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
 .view-lang button{border:0;border-radius:999px;padding:3px 11px;background:transparent;color:var(--wa-ink);font:12.5px/1.5 var(--wa-sans);letter-spacing:0;cursor:pointer}.view-lang button.on{background:var(--wa-ink);color:var(--wa-paper)}
 .back-check{margin:14px 0 0;padding:12px 14px;border:1px solid var(--wa-ink);border-radius:10px}.back-check h4{margin:0 0 8px;font:700 14px/1.45 var(--wa-serif)}.back-check dl{margin:0}.back-check dt{font-size:12.5px;color:var(--wa-muted);margin-top:8px}.back-check dd{margin:2px 0 0}.back-check dd.to{font-family:var(--wa-serif)}
 .wt-rgrp{margin:16px 0 2px;font:700 14px/1.45 var(--wa-serif);letter-spacing:0;color:var(--wa-ink)}.wt-rgrp small{font:12.5px var(--wa-sans);color:var(--wa-muted);margin-left:6px}
+.caps button .rec{font-size:10.5px;margin-left:6px;padding:0 6px;border:1px dashed currentColor;border-radius:9px;opacity:.85;font-weight:600}.budget-rec{margin:6px 0 0}.law-out{margin:6px 0 0}
 .topic-bar{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}.topic-bar .cap{font-size:12.5px;padding:3px 12px;border-color:var(--wa-line);color:var(--wa-ink);cursor:pointer}
 .topic-bar .cap.on{background:var(--wa-ink);border-color:var(--wa-ink);color:var(--wa-paper)}.topic-bar .cap small{opacity:.7;margin-left:3px}.topic-bar .cap.opt{border-style:dashed}
 .wt-empty{color:var(--wa-muted);font-size:12.5px;margin:6px 0}
@@ -664,7 +665,7 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       ${roomState().kind === 'this' && p ? `
       <div class="paper">
         <div class="row" style="justify-content:space-between"><h2 style="margin:0">이번 답변에 들어갈 내용</h2><span class="pill">${p.chars.toLocaleString()} / ${p.budget.toLocaleString()}자</span></div>
-        <p class="sub" style="margin:8px 0 0">설정 ${p.included.length}개${p.omitted.length ? ` · 글자 수 한도 때문에 ${p.omitted.length}개 빠짐` : ''}${p.skipped > 0 ? ` · 장면 밖이라 뺀 것 ${p.skipped}개` : ''}. 프리셋의 {{세계}} 자리에 이대로 들어갑니다.</p>
+        <p class="sub" style="margin:8px 0 0">설정 ${p.included.length}개${p.omitted.length ? ` · 글자 수 한도 때문에 ${p.omitted.length}개 빠짐` : ''}${p.skipped > 0 ? ` · 장면 밖이라 뺀 것 ${p.skipped}개` : ''}. 프리셋의 {{세계}} 자리에 이대로 들어갑니다.</p>${lawOutHtml(p)}
         <pre>${esc(p.text) || '(비어 있음)'}</pre>
       </div>
       <div class="paper">
@@ -1155,14 +1156,21 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
   }
 
   /** v0.7.0 2: {{세계}} 글자 수 — the person picks; what goes in now and what did not fit, from this room's preview. */
-  const BUDGETS = [3000, 5000, 8000, 12000];
+  // v0.8.2: 6,000 added; one step marked 「추천」 for the language the world is organized in (measured on six test worlds)
+  const BUDGETS = [3000, 5000, 6000, 8000, 12000];
+  const BUDGET_REC = { ko: 3000, en: 6000 };
+  /** v0.8.2: 「규칙 · 시스템 N개가 글자 수 때문에 빠졌어요 — 추천 ○○자」 (the server works out the smallest step). */
+  const lawOutHtml = (p) => (p?.lawOmitted ? `<p class="sub law-out"><b>규칙 · 시스템 ${p.lawOmitted}개가 글자 수 때문에 빠졌어요</b> — ${p.suggest === 'pin' ? '12,000자로도 다 안 들어가요. 꼭 필요한 규칙은 카드에서 「늘 먼저 넣기」를 켜 주세요' : `추천 ${Number(p.suggest).toLocaleString()}자`}</p>` : '');
   function budgetHtml(w) {
     const cur = w.injectChars;
     const custom = st.budgetCustom || !BUDGETS.includes(cur);
     const p = st.preview && st.preview.worldId === w.worldId ? st.preview : null;
-    const now = p ? `<p class="sub budget-now">지금 들어가는 글: ${Number(p.chars || 0).toLocaleString()}자 / ${Number(p.budget || cur).toLocaleString()}자${p.omitted?.length ? ` · <b>글자가 모자라 설정 ${p.omitted.length}개가 빠졌어요</b>` : ''}</p>` : '';
+    const lang = w.summaryLang === 'en' || w.summaryLang === 'ko' ? w.summaryLang : p?.lang || 'ko';
+    const rec = BUDGET_REC[lang];
+    const now = p ? `<p class="sub budget-now">지금 들어가는 글: ${Number(p.chars || 0).toLocaleString()}자 / ${Number(p.budget || cur).toLocaleString()}자${p.omitted?.length ? ` · <b>글자가 모자라 설정 ${p.omitted.length}개가 빠졌어요</b>` : ''}</p>${lawOutHtml(p)}` : '';
     return `<label class="f" for="w-budget">{{세계}}에 넣을 글자 수<em>넘치면 고정하지 않은 설정부터 빠집니다. 늘리면 모델에 보내는 글도 그만큼 길어져요</em></label>
-        <div class="caps" role="radiogroup" aria-label="{{세계}}에 넣을 글자 수">${BUDGETS.map((n) => `<button type="button" role="radio" aria-checked="${!custom && cur === n}" class="${!custom && cur === n ? 'on' : ''}" data-act="budget" data-n="${n}">${n.toLocaleString()}자</button>`).join('')}<button type="button" role="radio" aria-checked="${custom}" class="${custom ? 'on' : ''}" data-act="budget" data-n="custom">직접 입력</button></div>
+        <div class="caps" role="radiogroup" aria-label="{{세계}}에 넣을 글자 수">${BUDGETS.map((n) => `<button type="button" role="radio" aria-checked="${!custom && cur === n}" class="${!custom && cur === n ? 'on' : ''}" data-act="budget" data-n="${n}">${n.toLocaleString()}자${n === rec ? '<small class="rec">추천</small>' : ''}</button>`).join('')}<button type="button" role="radio" aria-checked="${custom}" class="${custom ? 'on' : ''}" data-act="budget" data-n="custom">직접 입력</button></div>
+        <p class="sub budget-rec">추천: ${lang === 'en' ? '영어로 정리하는 세계관은 6,000자(설정이 많으면 8,000자)' : '한국어로 정리하는 세계관은 3,000자(설정이 많으면 5,000자)'}. 영어는 같은 내용이 글자로 약 2배 길어요 — 영어 6,000자 ≈ 1,600토큰, 한국어 3,000자 ≈ 1,200토큰.</p>
         <input id="w-budget" type="number" min="300" max="20000" step="100" value="${cur}" style="max-width:200px" ${custom ? '' : 'hidden'} aria-label="직접 입력(300~20000자)">${now}`;
   }
 

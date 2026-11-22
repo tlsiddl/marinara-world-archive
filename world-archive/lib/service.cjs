@@ -451,6 +451,13 @@ async function roomAuto(roomId) {
 // Which settings are named in the latest messages of a room. Worked out (async) just before a reply or a prompt
 // preview is built, and read (sync) by {{세계}}. Without it, {{세계}} still works: everything is a candidate.
 const SCENE_MESSAGES = 12;
+/**
+ * v0.8.2 추천 글자 수 — the steps the screen offers. Measured 2026-11-22 on six test worlds (scene · all, the smallest
+ * step where every rule · system that wants in fits): organized in Korean 3,000 (5,000 with many settings), in English
+ * 6,000 (8,000) — English says the same in about twice the letters (6,000 ≈ 1,600 tokens, Korean 3,000 ≈ 1,200).
+ */
+const BUDGET_STEPS = [3000, 5000, 6000, 8000, 12000];
+const BUDGET_RECOMMENDED = { ko: 3000, en: 6000 };
 const SCENE_TIMEOUT_MS = 1500;
 const SCENE_ROUTES = new Set(['/api/generate', '/api/generate/dryRun', '/api/generate/retry-agents']);
 const scenes = new Map(); // roomId -> { ids: Set, at }
@@ -561,7 +568,17 @@ function preview(roomId) {
   // 이름 표기: the world's choice; 「자동」 — the original name first in a room in English
   const latin = known?.latin ?? s.getRoom(roomId).latin ?? false;
   const names = world.nameStyle === 'original' ? 'original' : world.nameStyle === 'ko' ? 'ko' : latin ? 'original' : 'ko';
-  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, ...assembleWorld(world, doc.entities, world.injectChars, { scene, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names, onceOn: s.onceReady(worldId) }) };
+  const opts = { scene, relations: doc.relations, recurring: s.recurringIds(worldId), scores: world.scoreboard?.name ? s.getScores(roomId) : null, today: today?.date || null, names, onceOn: s.onceReady(worldId) };
+  const out = assembleWorld(world, doc.entities, world.injectChars, opts);
+  // v0.8.2 추천 글자 수: rules · systems that wanted in but did not fit, and the smallest step they all fit in
+  // ('pin' — not even 12,000: pin the ones that matter). lang — what the world is organized in, for the 「추천」 step.
+  const byId = new Map(doc.entities.map((e) => [e.entityId, e]));
+  const lawOut = (a) => a.omitted.filter((id) => ['rule', 'system'].includes(byId.get(id)?.type)).length;
+  const lawOmitted = lawOut(out);
+  let suggest = null;
+  if (lawOmitted) suggest = BUDGET_STEPS.find((b) => b > world.injectChars && !lawOut(assembleWorld(world, doc.entities, b, opts))) || 'pin';
+  const lang = world.summaryLang === 'en' || world.summaryLang === 'ko' ? world.summaryLang : latin ? 'en' : 'ko';
+  return { roomId, worldId, worldName: world.name, mode: world.injectMode, sceneKnown: !!scene, today, lang, recommended: BUDGET_RECOMMENDED[lang], lawOmitted, suggest, ...out };
 }
 
 /** 할 일 12: what one room's {{세계외형}} would be right now. */
