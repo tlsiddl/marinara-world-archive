@@ -7,7 +7,7 @@
   // __WORLD_ARCHIVE_EMBEDDED__ = true; then nothing starts here and the tab calls __memoryWorldPanel.start(box).
   const EMBEDDED = typeof __WORLD_ARCHIVE_EMBEDDED__ !== 'undefined' && __WORLD_ARCHIVE_EMBEDDED__ === true;
   if (!EMBEDDED && document.getElementById('marinara-world-archive-root')) return;
-  const VERSION = '0.8.3-beta';
+  const VERSION = '0.8.4-beta';
   /** The contract level this screen is made for (the server's status.contract). Another level: read only. */
   const PANEL_CONTRACT = 2;
   const UPDATE_MSG = '세계관 칸을 쓰려면 기억 서재(또는 설정집)를 업데이트해 주세요. 지금은 보기만 할 수 있습니다.';
@@ -218,6 +218,14 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--wa-mono);m
 
 /* automatic updates */
 .auto-line{display:flex;gap:8px;align-items:flex-start}.auto-line .dot{margin-top:6px}
+/* v0.8.4: 정리할 모델 band — the one coloured strip on the page */
+.model-band{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin:0 0 18px;padding:10px 14px;background:#f5e3b5;color:#3d2a05;border:1.5px solid #a8741a;border-left-width:6px;border-radius:3px;font:600 13.5px/1.5 var(--wa-serif)}
+.model-band button{flex:none;background:#a8741a;color:#fff8e6;border:1.5px solid #a8741a;font-weight:700}
+.model-band button:hover{background:#8a5e12;border-color:#8a5e12}
+.model-band.small{margin:0;padding:8px 10px;font-size:12px}
+:host([data-theme=dark]) .model-band{background:#3b2d12;color:#f6e2b0;border-color:#d9a640}
+:host([data-theme=dark]) .model-band button{background:#d9a640;color:#241a05;border-color:#d9a640}
+.pick-flash{outline:3px solid #d9a640;outline-offset:2px}
 .dot{display:inline-block;flex:none;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--wa-ink)}
 .dot.on{background:var(--wa-ink)}
 .dot.run{background:var(--wa-ink);animation:blink 1s infinite}
@@ -606,14 +614,25 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     return `지금은 「${esc(s.name)}」을(를) 읽고 있습니다.`;
   }
 
+  /**
+   * v0.8.4: the model that organizes this world is its own (world.auto.connectionId), not 기억 서재's — a coloured band
+   * while none is picked or automatic updates are off; [고르기] goes to 세계관 정보 · 자동 반영 with the picker focused.
+   */
+  function modelBandHtml(small) {
+    const w = world();
+    if (!w || st.readOnly || (w.auto?.enabled && w.auto?.connectionId)) return '';
+    const has = !!w.auto?.connectionId;
+    const text = has ? '자동 반영이 꺼져 있어요 — 정리할 모델은 기억 서재와 따로예요' : '정리할 모델을 아직 안 골랐어요 — 기억 서재와 따로 골라요';
+    return `<div class="model-band${small ? ' small' : ''}" role="status"><span>${text}</span><button type="button" data-act="pick-model">${has ? '켜기' : '고르기'}</button></div>`;
+  }
+
   function autoHtml(compact) {
     const s = roomState();
     if (s.kind !== 'this') return '';
     const w = world();
     const a = st.auto;
     const job = a?.job;
-    if (!w.auto?.enabled) return `<div class="auto-line"><span class="dot"></span><span class="sub">자동 반영이 꺼져 있습니다.</span>${compact ? '' : ' <button class="quiet" type="button" data-act="go" data-view="world">켜기</button>'}</div>`;
-    if (!w.auto.connectionId) return `<div class="auto-line"><span class="dot"></span><span class="sub">자동 반영에 쓸 연결을 골라 주세요.</span> <button class="quiet" type="button" data-act="go" data-view="world">고르기</button></div>`;
+    if (!w.auto?.enabled || !w.auto.connectionId) return modelBandHtml(compact);
     const running = job?.state === 'running';
     const status = running
       ? `${esc(job.stage || '읽는 중')}`
@@ -1143,7 +1162,23 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       </form>`;
   }
 
+  /** v0.8.4: one model picker for 새 세계관 · 세계관 정보 (only one connection → it is picked already in 새 세계관). */
+  function connSelectHtml(id, chosen, single) {
+    const list = st.connections || [];
+    const pick = chosen || (single && list.length === 1 ? list[0].id : '');
+    return `<select id="${id}"><option value="">${st.connections == null ? '불러오는 중…' : list.length ? '(골라 주세요)' : '(마리나라에 연결이 없어요)'}</option>${list.map((c) => `<option value="${esc(c.id)}" ${c.id === pick ? 'selected' : ''}>${esc(c.name)}${c.model ? ` · ${esc(c.model)}` : ''}</option>`).join('')}</select>`;
+  }
+
   function newWorldHtml(first) {
+    // the first world has no 「새 세계관 만들기」 press to load the connections: load them here, then swap only the picker
+    if (st.connections == null && !st.connLoading) {
+      st.connLoading = true;
+      loadConnections().finally(() => {
+        st.connLoading = false;
+        const old = root.getElementById('nw-conn');
+        if (old && !old.value) old.outerHTML = connSelectHtml('nw-conn', '', true);
+      });
+    }
     return `
       <div class="eyebrow">WORLD ARCHIVE · NEW</div>
       <h1>${first ? '첫 세계관 만들기' : '새 세계관'}</h1>
@@ -1151,6 +1186,9 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       <form class="paper" onsubmit="return false">
         <label class="f" for="nw-name">세계관 이름</label><input id="nw-name" maxlength="120" placeholder="예: 별빛 학원">
         <label class="f" for="nw-desc">시대·배경<em>설정 맨 앞에 들어갑니다</em></label><textarea id="nw-desc" maxlength="4000" placeholder="예: 1988년, 산 위의 기숙학교."></textarea>
+        <label class="f" for="nw-conn">정리할 모델(마리나라 연결)<em>대화를 읽고 설정을 정리할 모델이에요. 기억 서재가 쓰는 모델과 따로입니다. 같은 걸 골라도 돼요. 나중에 「세계관 정보」에서 골라도 돼요</em></label>
+        <div style="max-width:420px">${connSelectHtml('nw-conn', '', true)}</div>
+        <label class="toggle" style="margin-top:14px"><input type="checkbox" id="nw-auto" checked> 자동 반영 켜기</label>
         <div class="actions"><button class="primary" type="button" data-act="create-world">만들기</button>${first ? '' : '<button class="quiet" type="button" data-act="go" data-view="overview">취소</button>'}</div>
       </form>`;
   }
@@ -1201,10 +1239,11 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       <form class="paper" onsubmit="return false">
         <h2>자동 반영</h2>
         <p class="sub" style="margin:0 0 4px">이 세계관을 읽는 방에서 답변이 오면, 아직 안 읽은 대화를 읽고 새 인물·장소·규칙과 새로 밝혀진 사실을 바로 설정에 넣습니다. 원문에 근거가 있는 것만 넣고, 직접 쓴 칸은 덮어쓰지 않습니다. 바뀐 내용은 「기록」에서 하나씩 되돌릴 수 있습니다. 가장 최근 메시지 두 개는 리롤될 수 있어 다음 차례에 읽습니다.</p>
+        <p class="sub" style="margin:0 0 4px"><b>기억 서재가 쓰는 모델과 따로입니다. 같은 걸 골라도 돼요.</b></p>
         <label class="toggle" style="margin-top:14px"><input type="checkbox" id="a-on" ${w.auto?.enabled ? 'checked' : ''}> 자동 반영 켜기</label>
         <div class="grid2">
-          <div><label class="f" for="a-conn">읽을 때 쓸 연결<em>저렴하고 긴 글을 잘 읽는 모델</em></label>
-            <select id="a-conn"><option value="">${st.connections == null ? '불러오는 중…' : '(골라 주세요)'}</option>${(st.connections || []).map((c) => `<option value="${esc(c.id)}" ${c.id === w.auto?.connectionId ? 'selected' : ''}>${esc(c.name)}${c.model ? ` · ${esc(c.model)}` : ''}</option>`).join('')}</select></div>
+          <div><label class="f" for="a-conn">정리할 모델(마리나라 연결)<em>저렴하고 긴 글을 잘 읽는 모델</em></label>
+            ${connSelectHtml('a-conn', w.auto?.connectionId || '', false)}</div>
           <div><label class="f" for="a-every">몇 메시지마다 읽을까요<em>2~50</em></label><input id="a-every" type="number" min="2" max="50" value="${w.auto?.every ?? 6}" style="max-width:140px"></div>
         </div>
         <div class="actions"><button class="primary" type="button" data-act="save-auto">저장</button></div>
@@ -1703,7 +1742,9 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       : '';
     const nav = EMBEDDED && st.loaded && world() && st.view !== 'tabs' && !st.detail && !st.editing && (['log', 'scores', 'world', 'overview'].includes(st.view) || KIND[st.view]) ? subtabsHtml(worldMap(), null) : '';
     const viewBar = EMBEDDED && st.loaded && st.worldId ? `<div class="emb-view" data-no-tr>${viewLangHtml()}</div>` : '';
-    el.main.innerHTML = viewBar + skew + (st.msg && !(st.readOnly && st.msg === UPDATE_MSG) ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + nav + mainHtml();
+    // v0.8.4: the band on every screen of a world (한눈에 with this room linked has it in its 자동 반영 box instead)
+    const band = st.loaded && st.view !== 'new-world' && !(st.view === 'overview' && roomState().kind === 'this') ? modelBandHtml(false) : '';
+    el.main.innerHTML = band + viewBar + skew + (st.msg && !(st.readOnly && st.msg === UPDATE_MSG) ? `<p class="msg ${st.bad ? 'bad' : ''}" role="status">${esc(st.msg)}</p>` : '') + nav + mainHtml();
     el.main.scrollTop = keep;
     lastScreen = screen;
     if (st.query) filterCards();
@@ -1711,6 +1752,19 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
     if (st.busy) root.querySelectorAll('main button, .rail button').forEach((b) => { b.disabled = true; });
     koFix([el.side, el.top, el.rail, el.main]);
     if (st.viewKo) koView();
+    // v0.8.4: from the band — straight to 자동 반영, the switch on (saved only with 저장), the picker focused
+    if (st.pickModel && st.view === 'world' && !st.busy && st.connections != null) {
+      st.pickModel = false;
+      const on = root.getElementById('a-on');
+      const sel = root.getElementById('a-conn');
+      if (on) on.checked = true;
+      if (sel) {
+        sel.closest('form')?.scrollIntoView({ block: 'start' });
+        sel.focus({ preventScroll: true });
+        sel.classList.add('pick-flash');
+        setTimeout(() => sel.classList.remove('pick-flash'), 1600);
+      }
+    }
   }
   // ------------------------------------------------------------------ v0.7.0 3: 「보기: 한국어」
   // Only a view: text nodes on the screen that are not Korean show their Korean (cache by text, then small calls on
@@ -1848,7 +1902,13 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       go(b.dataset.view);
       if (b.dataset.view === 'log') return run(loadHistory);
       if (b.dataset.view === 'scores') return run(loadScores);
-      if (b.dataset.view === 'world' && st.connections == null) { render(); return run(loadConnections); }
+      if ((b.dataset.view === 'world' || b.dataset.view === 'new-world') && st.connections == null) { render(); return run(loadConnections); }
+      render();
+    },
+    'pick-model': () => {
+      go('world');
+      st.pickModel = true;
+      if (st.connections == null) { render(); return run(loadConnections); }
       render();
     },
     'read-now': () => run(async () => {
@@ -2025,7 +2085,8 @@ button.cap:hover{background:var(--wa-soft)}.cap.ghost{border-style:dashed;color:
       await loadRoom();
     }, '연결을 끊었습니다.'),
     'create-world': () => run(async () => {
-      const w = await api('POST', '/worlds', { name: val('nw-name'), description: val('nw-desc') });
+      // v0.8.4: the model that organizes it and 자동 반영 (on by default) at once; no model is fine (the band asks later)
+      const w = await api('POST', '/worlds', { name: val('nw-name'), description: val('nw-desc'), auto: { enabled: !!root.getElementById('nw-auto')?.checked, connectionId: val('nw-conn') || null } });
       st.worldId = w.worldId;
       store.set('world-archive-world', w.worldId);
       go('overview');
