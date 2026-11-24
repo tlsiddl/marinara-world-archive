@@ -118,6 +118,20 @@ test('J) names of an English world: the Korean other name, then each word of two
   assert.deepEqual(pairs.map((p) => `${p.from}=${p.to}`), ['Morwenna Selwyn=모웨나 셀윈', 'Morwenna=모웨나', 'Selwyn=셀윈', 'Rolanda Hooch=롤란다 후치', 'Rolanda=롤란다', 'Hooch=후치']);
 });
 
+test('J) titles cannot become name fragments in Korean view', () => {
+  const entities = [
+    { type: 'person', name: 'Mrs Pell', aliases: ['펠 부인'] },
+    { type: 'person', name: 'Agnes Pell', aliases: ['펠 부인'] },
+    { type: 'person', name: 'Mrs Penhaligon', aliases: ['펜할리곤 부인'] },
+    { type: 'person', name: 'Minerva McGonagall', aliases: ['미네르바 맥고나걸'] },
+  ];
+  const pairs = N.englishNamePairs(entities);
+  assert.deepEqual(pairs.map((p) => `${p.from}=${p.to}`), [
+    'Mrs Pell=펠 부인', 'Agnes Pell=펠 부인', 'Mrs Penhaligon=펜할리곤 부인',
+    'Minerva McGonagall=미네르바 맥고나걸', 'Minerva=미네르바', 'McGonagall=맥고나걸',
+  ]);
+});
+
 test('L) 대표 이름: an other name said more than twice as often — suggested, never renamed', (t) => {
   const s = temp(t);
   const w = s.createWorld({ name: 'Liverpool' });

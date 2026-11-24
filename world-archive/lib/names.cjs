@@ -154,7 +154,11 @@ function englishNamePairs(entities, cache = {}) {
     out.push({ from: p.original, to: p.translation });
     const a = p.original.trim().split(/\s+/);
     const b = p.translation.trim().split(/\s+/);
-    if (a.length === 2 && b.length === 2) for (let i = 0; i < 2; i++) if (a[i].length >= 3) out.push({ from: a[i], to: b[i] });
+    // Titles do not align word-for-word across languages: Mrs Pell = 펠 부인,
+    // not Mrs = 펠 or Pell = 부인. Keep the whole pair, never its fragments.
+    const titleEn = /^(?:mr|mrs|ms|miss|mister|madam|lady|lord|sir|dr|doctor|prof|professor|captain|capt|rev|reverend)\.?$/i;
+    const titleKo = /(?:부인|여사|아가씨|선생님|교수님|교수|박사님|박사|경|공작|백작|남작)$/;
+    if (a.length === 2 && b.length === 2 && !a.some((word) => titleEn.test(word)) && !b.some((word) => titleKo.test(word))) for (let i = 0; i < 2; i++) if (a[i].length >= 3) out.push({ from: a[i], to: b[i] });
   }
   return out;
 }
