@@ -3163,7 +3163,18 @@ class Archive {
           const TITLE = new Set(['madam', 'madame', 'mr', 'mrs', 'miss', 'ms', 'sir', 'lady', 'lord', 'dr', 'professor', 'master', 'mistress', 'duke', 'duchess', 'the', 'of', '교수', '부인', '선생', '공작', '경', '씨']);
           const words = [...new Set([p.name, kor].filter(Boolean).flatMap((n) => String(n).trim().split(/\s+/)).map(squashName).filter((w) => w.length >= 2 && !TITLE.has(w)))];
           const near = doc.entities.filter((x) => x.type === 'person' && [x.name, ...(x.aliases || [])].some((n) => String(n).trim().split(/\s+/).map(squashName).some((w) => words.includes(w))));
-          if (near.length > 1) continue;
+          if (near.length > 1) {
+            // Several people may share a family name. A full English given name + surname
+            // is distinct when none of those partial matches contains the given name.
+            // Keep ambiguous, one-word and non-English names on the conservative path.
+            const originalWords = String(p.name).trim().split(/\s+/).map(squashName).filter((w) => w.length >= 2 && !TITLE.has(w));
+            const first = originalWords[0], last = originalWords.at(-1);
+            const surnameOnly = originalWords.length === 2 && /^[a-z][a-z'-]*$/.test(first) && /^[a-z][a-z'-]*$/.test(last) && first !== last && near.every((x) => {
+              const matching = [x.name, ...(x.aliases || [])].flatMap((n) => String(n).trim().split(/\s+/).map(squashName)).filter((w) => originalWords.includes(w));
+              return matching.length && matching.every((w) => w === last);
+            });
+            if (!surnameOnly) continue;
+          }
           if (near.length === 1) {
             e = near[0];
             const add = [kor, p.name].filter((n) => n && nameLike(n) && !keysOf(e).includes(squashName(n)) && !find(['person'], [n]));

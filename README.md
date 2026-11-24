@@ -1,6 +1,6 @@
 # 세계관 설정집 (Marinara World Archive)
 
-> **베타 (v0.8.4-beta)**: 매일 쓰면서 다듬는 중이에요. 쓰기 전에 마리나라 데이터를 백업해 두세요. 문제가 있으면 이슈로 알려 주세요.
+> **베타 (v0.8.5-beta)**: 매일 쓰면서 다듬는 중이에요. 쓰기 전에 마리나라 데이터를 백업해 두세요. 문제가 있으면 이슈로 알려 주세요.
 
 [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine)용 확장이에요.
 
@@ -81,9 +81,9 @@ irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/instal
 **설치 확인** — 마리나라 로그(도커는 `docker logs 컨테이너이름`)에 아래 줄들이 보이면 성공이에요. `v` 뒤는 판 번호예요.
 
 ```
-[world-archive] v0.8.4-beta applied: {{세계}} · {{세계외형}} macro
-[world-archive] v0.8.4-beta applied: API at /api/world-archive
-[world-archive] v0.8.4-beta hook registered (no Marinara files changed)
+[world-archive] v0.8.5-beta applied: {{세계}} · {{세계외형}} macro
+[world-archive] v0.8.5-beta applied: API at /api/world-archive
+[world-archive] v0.8.5-beta hook registered (no Marinara files changed)
 ```
 
 `fail closed (…): this Marinara version does not match`가 보이면 그 판의 마리나라와 맞지 않아서 그 부분만 꺼진 거예요. 마리나라는 그대로 쓰실 수 있어요.
@@ -114,7 +114,9 @@ irm https://raw.githubusercontent.com/tlsiddl/marinara-world-archive/main/instal
 
 섹션을 따로 두면 마리나라의 **프롬프트 구성** 보기에서 설정이 실제로 들어갔는지, 몇 토큰인지 바로 볼 수 있어요.
 
-삽화 에이전트를 쓰면 그 프롬프트에 `{{세계외형}}`(`{{world_looks}}`)을 넣을 수 있어요. 장면에 나온 인물의 외형만 들어가요.
+삽화 에이전트를 쓰면 연결된 세계관의 인물 외형을 삽화 요청에 자동으로 넣어요. 시공간 카드가 있으면 그 카드에 나온 인물을 우선하고, 카드가 없으면 현재 답에서 이름이 나온 인물을 찾아요. 이름이 언급됐더라도 실제 장면에 없는 경우가 있으니 결과를 확인해 주세요. 머리색·눈색·피부색은 인물별로 구분하며, 이미지 외형에 이미 지정한 값이 있으면 그것을 우선해요. 추가 모델 호출은 없어요. 셸이 함께 설치되어 외형을 주입하는 경우에는 셸 쪽을 사용해요.
+
+자동 주입은 설정집에 저장된 외형과 NPC 프로필을 쓰며, 셸의 선택형 마법 세계 백과는 설정집에 포함되지 않아요. `{{세계외형}}`(`{{world_looks}}`) 매크로를 직접 프롬프트에 넣는 방식도 계속 쓸 수 있어요.
 
 **NPC 생성 지침이 있는 프리셋이라면** — 답변 끝에 새 NPC의 `<npc_profile>` 블록을 쓰게 하는 섹션은 켜 두세요. 설정집이 그 블록을 읽어서 나이 · 외형을 본문보다 훨씬 잘 채워요. 외형 줄을 `- Appearance and clothing (hair colour and eye colour first):`로 바꾸면 머리색 · 눈색 칸도 채워져요. 이미 있는 NPC를 고쳐 쓰게 하는 업데이트 블록(`<npc_update>` 같은 것)은 빼도 돼요 — 설정집은 바뀐 내용을 본문에서 읽어요.
 

@@ -20,12 +20,12 @@ const NPC_LABELS = [
   [/^(age|나이)$/, 'age'],
   [/^(gender|sex|성별)$/, 'gender'],
   [/^(species|race|종족|종)$/, 'species'],
-  [/^(appearance(andclothing)?|appearanceandoutfit|외형(과옷차림)?|외모(와옷차림)?)$/, 'appearance'],
-  [/^(demeanor(andkeypersonalitytraits)?|personality(traits)?|태도(와주요성격)?|성격)$/, 'personality'],
-  [/^(other(noteworthy)?details|notes|그밖에눈에띄는것|기타)$/, 'background'],
+  [/^(appearance(andclothing)?|appearanceandoutfit|외형(과옷차림)?|외모(와옷차림|및복장)?)$/, 'appearance'],
+  [/^(demeanor(andkeypersonalitytraits)?|personality(traits)?|태도(와주요성격|및주요성격특성)?|성격)$/, 'personality'],
+  [/^(other(noteworthy)?details|notes|그밖에눈에띄는것|기타(특이사항)?)$/, 'background'],
 ];
 const WORLD_LABELS = [[/^(subject|주제|대상)$/, 'subject'], [/^(type|종류)$/, 'type'], [/^(establishedinformation|information|details|내용|확정된정보)$/, 'info']];
-const labelOf = (list, raw) => { const k = squash(raw).replace(/[/:]/g, ''); return list.find(([re]) => re.test(k))?.[1] || null; };
+const labelOf = (list, raw) => { const k = squash(String(raw || '').replace(/\s*[(（][^()（）]*[)）]/g, '')).replace(/[/:]/g, ''); return list.find(([re]) => re.test(k))?.[1] || null; };
 
 /** One line 「- A: x / B: y」 (or 「이름/나이/성별: a / b / c」) → [[label, value]…]. */
 function pairsOfLine(line, list) {

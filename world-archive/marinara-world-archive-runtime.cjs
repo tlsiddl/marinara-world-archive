@@ -11,7 +11,7 @@ const path = require('node:path');
 const { fileURLToPath } = require('node:url');
 const { registerHooks } = require('node:module');
 
-const VERSION = '0.8.4-beta';
+const VERSION = '0.8.5-beta';
 const TESTED_MARINARA = ['2.5.1', '2.5.2'];
 const TAG = '[world-archive]';
 
@@ -33,6 +33,36 @@ const PATCHES = [
       '\n    try { globalThis.__marinaraWorldArchive?.attach?.(app); } catch (error) { process.stderr.write("[world-archive] attach failed: " + (error?.message || error) + "\\n"); }',
     ok: 'API at /api/world-archive',
   },
+  {
+    name: 'illustrator',
+    target: /[\\/]packages[\\/]server[\\/]dist[\\/]services[\\/]agents[\\/]agent-executor\.js$/,
+    anchor: 'finalParts.push(`</assistant_response>`);',
+    insert: '\n        if (options.includeImagePromptInstructions === true || contextAgentTypes.includes("illustrator")) { const waExisting = finalParts.some((part) => /<world_archive_looks>|\\[외형\\]/.test(String(part))); const waLooks = globalThis.__marinaraWorldArchive?.illustratorLooks?.(context, !waExisting); if (waLooks && !waExisting) finalParts.push(waLooks); }',
+    ok: 'illustrator appearance',
+  },
+  {
+    name: 'illustratorManual',
+    target: /[\\/]packages[\\/]server[\\/]dist[\\/]routes[\\/]generate[\\/]retry-agents-route\.js$/,
+    anchor: 'characterPromptInstruction: manualCharacterPromptInstruction,',
+    insert: '\n            characterPromptInstruction: globalThis.__marinaraWorldArchive?.illustratorManual?.(args.agentContext, manualCharacterPromptInstruction) ?? manualCharacterPromptInstruction,',
+    ok: 'illustrator manual retry',
+  },
+  {
+    name: 'illustratorFix',
+    target: /[\\/]packages[\\/]server[\\/]dist[\\/]routes[\\/]generate\.routes\.js$/,
+    anchor: 'const imagePrompt = (illData.prompt ?? "").trim();',
+    before: 'if (typeof illData.prompt === "string") illData.prompt = globalThis.__marinaraWorldArchive?.illustratorFix?.(input.chatId, illData.prompt) ?? illData.prompt;\n                            ',
+    insert: '',
+    ok: 'illustrator appearance safety',
+  },
+  {
+    name: 'illustratorFixRetry',
+    target: /[\\/]packages[\\/]server[\\/]dist[\\/]routes[\\/]generate[\\/]retry-agents-route\.js$/,
+    anchor: 'const imagePrompt = (illData.prompt ?? "").trim();',
+    before: 'if (typeof illData.prompt === "string") illData.prompt = globalThis.__marinaraWorldArchive?.illustratorFix?.(chatId, illData.prompt) ?? illData.prompt;\n                ',
+    insert: '',
+    ok: 'illustrator retry appearance safety',
+  },
 ];
 
 function log(message) {
@@ -45,9 +75,9 @@ function count(haystack, needle) {
 
 /** Patched source; the same source when already patched; null when the anchor is not there exactly once. */
 function patchSource(source, patch = PATCHES[1]) {
-  if (source.includes(patch.insert)) return source;
+  if ((patch.before && source.includes(patch.before)) || (patch.insert && source.includes(patch.insert))) return source;
   if (count(source, patch.anchor) !== 1) return null;
-  return source.replace(patch.anchor, patch.anchor + patch.insert);
+  return source.replace(patch.anchor, (patch.before || '') + patch.anchor + patch.insert);
 }
 
 let service = null;
@@ -81,7 +111,14 @@ function install() {
     return;
   }
   const patches = {};
-  globalThis.__marinaraWorldArchive = { version: VERSION, testedMarinara: TESTED_MARINARA, patches, render, renderLooks, attach };
+  const illustratorLooks = (ctx, enableLabels = true) => loadService()?.illustratorLooks?.(ctx, enableLabels && patches.illustratorFix === 'ok' && patches.illustratorFixRetry === 'ok') ?? '';
+  const illustratorManual = (ctx, instruction) => {
+    const existing = /<world_archive_looks>|\[외형\]/.test(String(instruction || ''));
+    const block = illustratorLooks(ctx, !existing);
+    return existing ? instruction : [instruction, block].filter(Boolean).join('\n\n');
+  };
+  const illustratorFix = (chatId, prompt) => loadService()?.illustratorFix?.(chatId, prompt) ?? prompt;
+  globalThis.__marinaraWorldArchive = { version: VERSION, testedMarinara: TESTED_MARINARA, patches, render, renderLooks, attach, illustratorLooks, illustratorManual, illustratorFix };
   registerHooks({
     load(url, context, nextLoad) {
       if (!url.startsWith('file:')) return nextLoad(url, context);

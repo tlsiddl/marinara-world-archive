@@ -31,7 +31,8 @@ $files = @(
   'world-archive/lib/vendor/glossary.cjs',
   'world-archive/lib/vendor/storydate.cjs',
   'world-archive/lib/calendar.cjs',
-  'world-archive/lib/profile.cjs'
+  'world-archive/lib/profile.cjs',
+  'world-archive/lib/illustration-looks.cjs'
 )
 $linkName = 'Marinara + 세계관 설정집.lnk'
 

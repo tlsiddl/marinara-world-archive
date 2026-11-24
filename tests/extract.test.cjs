@@ -210,6 +210,34 @@ function setup(t, messages, replies) {
   return { s, w, calls };
 }
 
+test('after a delayed archive read the optional shell hook sees newly created profile people', async (t) => {
+  const profile = '<npc_profile>\n- Name: Mira Vale / Age: 30 / Gender: Female\n- Appearance and clothing (hair colour and eye colour first): Black hair, blue eyes.\n</npc_profile>';
+  const messages = [msg(0, '안녕'), msg(1, profile), msg(2, '반가워'), msg(3, '여기야'), msg(4, '고마워'), msg(5, '응')];
+  const { s, w } = setup(t, messages, ['{"items":[]}']);
+  let called = 0;
+  globalThis.__shellProfileSyncAfterArchive = async (room, ids) => {
+    called++;
+    assert.equal(room, 'room');
+    assert.ok(ids.includes('m1'));
+    assert.ok(s.listEntities(w.worldId).some((p) => p.name === 'Mira Vale'));
+  };
+  t.after(() => { delete globalThis.__shellProfileSyncAfterArchive; });
+  const job = await service.runRoom('room');
+  assert.equal(job.state, 'done');
+  assert.equal(called, 1);
+});
+
+test('a failed optional shell follow-up does not undo an archive read', async (t) => {
+  const profile = '<npc_profile>\n- Name: Mira Vale\n- Age: 30\n</npc_profile>';
+  const messages = [msg(0, '안녕'), msg(1, profile), msg(2, '반가워'), msg(3, '여기야'), msg(4, '고마워'), msg(5, '응')];
+  const { s, w } = setup(t, messages, ['{"items":[]}']);
+  globalThis.__shellProfileSyncAfterArchive = async () => { throw Error('시험 실패'); };
+  t.after(() => { delete globalThis.__shellProfileSyncAfterArchive; });
+  const job = await service.runRoom('room');
+  assert.equal(job.state, 'done');
+  assert.ok(s.listEntities(w.worldId).some((p) => p.name === 'Mira Vale'));
+});
+
 test('runRoom: waits for enough settled messages, then reads, writes, and remembers where it stopped', async (t) => {
   const messages = [msg(0, '안녕'), msg(1, '사서 마르타는 열쇠를 목에 건다.'), msg(2, '그래?'), msg(3, '응.')];
   const reply = JSON.stringify({ items: [

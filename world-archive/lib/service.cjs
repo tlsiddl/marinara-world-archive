@@ -12,6 +12,7 @@ const { speciesName, topicGroups } = require('./same.cjs');
 const G = require('./vendor/glossary.cjs');
 const P = require('./profile.cjs');
 const { assembleWorld, assembleLooks, onceOnly } = require('./inject.cjs');
+const IllustratorLooks = require('./illustration-looks.cjs');
 const Search = require('./search.cjs');
 
 const TAG = '[world-archive]';
@@ -305,6 +306,10 @@ async function runRoom(roomId, { all = false, reason = 'reply', restart = false 
           const pc = s.applyProfiles(worldId, profiles, { pairs: glossary || [], story: storyOf(messages), says: X.saysValue, roomId, by: 'profile', lang });
           job.added += pc.filter((c) => c.action === 'create').length;
           job.changed += pc.filter((c) => c.action !== 'create').length;
+          // When the shell is present, let its profile ownership rules run after this batch creates people.
+          // The optional hook never turns a successful archive read into a failed one.
+          try { await globalThis.__shellProfileSyncAfterArchive?.(roomId, part.batch.map((m) => m.id)); }
+          catch (error) { log(`chat ${roomId}: profile follow-up failed (${error?.message || error})`); }
         }
         job.dropped += dropped.length;
         // v0.6.2: why things were left out (「not lasting」 …), for comparing readings
@@ -617,6 +622,39 @@ function renderLooks(ctx) {
     log(`{{세계외형}} for chat ${roomId}: ${error?.message || error}`);
     return '';
   }
+}
+
+// The illustrator uses the active response's cast; this is independent of the shell.
+// The shell's existing hook takes precedence when both are installed.
+const illustratorCasts = new Map();
+function illustratorLooks(context, labels = false) {
+  const chatId = String(context?.chatId || '');
+  try {
+    if (!chatId || globalThis.__shellWorldLooks) return '';
+    illustratorCasts.delete(chatId);
+    const worldId = store().roomWorldId(chatId);
+    if (!worldId) return '';
+    const doc = store().readEntities(worldId);
+    const recent = Array.isArray(context.recentMessages) ? context.recentMessages : [];
+    let text = String(context.mainResponse || '').trim();
+    for (let i = recent.length - 1; !text && i >= 0; i--) if (recent[i]?.role === 'assistant') text = String(recent[i].content || '');
+    const earlier = recent.filter((m) => m?.role === 'assistant' && String(m.content || '') !== text).reverse().map((m) => String(m.content || ''));
+    const overrides = {};
+    const map = context.memory?._illustratorImageAppearanceOverrides;
+    for (const c of context.characters || []) if (map && typeof map[c.id] === 'string') overrides[IllustratorLooks.looksNorm(c.name)] = map[c.id];
+    const people = (doc.entities || []).filter((e) => e.type === 'person' && e.status === 'confirmed');
+    const ids = sceneIds(people, [text]);
+    const castNames = people.filter((e) => ids.has(e.entityId)).map((e) => e.name);
+    const parts = IllustratorLooks.worldLooksParts(text, people, overrides, earlier, doc.relations || [], { label: labels, castNames });
+    if (labels && parts.cast.size) illustratorCasts.set(chatId, parts.cast);
+    while (illustratorCasts.size > 100) illustratorCasts.delete(illustratorCasts.keys().next().value);
+    return parts.text;
+  } catch { illustratorCasts.delete(chatId); return ''; }
+}
+function illustratorFix(chatId, prompt) {
+  if (globalThis.__shellWorldLooks || typeof prompt !== 'string') return prompt;
+  try { const cast = illustratorCasts.get(String(chatId || '')); return cast?.size ? IllustratorLooks.looksFixRun(prompt, cast).prompt : prompt; }
+  catch { return prompt; }
 }
 
 const reported = new Set();
@@ -1598,4 +1636,4 @@ function attach(app) {
   log(`API ready at ${PREFIX} (data: ${dataDir()})`);
 }
 
-module.exports = { memoryToday, organizeLang, worldLang, fillHairEyes, translateView, translateBack, trHash, readFromNow, pastCost, tidyCandidates, fillSpecies, gatherTimetables, gatherCalendar, fillPlaces, fillApplies, fillTopics, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useApp: (a) => { appRef = a; memoryDays.clear(); }, useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
+module.exports = { illustratorLooks, illustratorFix, memoryToday, organizeLang, worldLang, fillHairEyes, translateView, translateBack, trHash, readFromNow, pastCost, tidyCandidates, fillSpecies, gatherTimetables, gatherCalendar, fillPlaces, fillApplies, fillTopics, SPECIES_BATCH, CONTRACT, CONTRACT_FEATURES, KNOW_TYPES, roomRelations, entity, render, renderLooks, looks, attach, preview, routes, dataDir, runRoom, roomEntities, lookup, suggest, names, _test: { useApp: (a) => { appRef = a; memoryDays.clear(); }, useStore, useEngine, branchOnSend, scheduleRoom, jobs, updateScene, sceneBeforeReply, scenes, glossaries } };
